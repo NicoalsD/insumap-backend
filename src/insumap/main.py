@@ -1,35 +1,47 @@
-"""FastAPI application entry point."""
+"""FastAPI application entry point (``uvicorn insumap.main:app``)."""
+
+from typing import Final
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
+from insumap.api.correlation import REQUEST_ID_HEADER
 from insumap.api.middleware import BodySizeLimitMiddleware, RequestIdMiddleware
 from insumap.api.openapi import InsumapApi
-from insumap.api.routers.health import HealthRouter
-from insumap.application.readiness import AlwaysReadyProbe, CheckReadinessUseCase
-from insumap.infrastructure.logging import JsonLoggingConfigurator
-from insumap.shared.config import Settings, get_settings
+from insumap.container import Container
 from insumap.shared.field_limits import FieldLimits
-from insumap.shared.i18n import MessageCatalog
+
+CORS_ALLOWED_METHODS: Final = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+CORS_ALLOWED_HEADERS: Final = ["Authorization", "Content-Type", REQUEST_ID_HEADER]
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    """Build the FastAPI application with all its parts wired."""
-    settings = settings or get_settings()
-    JsonLoggingConfigurator(settings.log_level).configure()
+def create_app(container: Container | None = None) -> FastAPI:
+    """Build the FastAPI application from the parts of the composition root."""
+    container = container or Container()
+    settings = container.settings
+    container.logging_configurator.configure()
+
     app = InsumapApi.create(docs_enabled=settings.api_docs_enabled)
-    responses = ErrorResponseFactory(MessageCatalog.load_spanish())
-    ApiExceptionHandlers(responses).install(app)
-    # The last middleware added is the outermost: the request id wraps the size
-    # limit, so a 413 also carries X-Request-ID.
+    container.exception_handlers.install(app)
+    # The last middleware added is the outermost. The request id wraps the size
+    # limit, so a 413 carries X-Request-ID, and CORS wraps both, so browsers can
+    # read every error.
     app.add_middleware(
         BodySizeLimitMiddleware,
-        responses=responses,
+        responses=container.error_responses,
         max_body_bytes=FieldLimits.MAX_REQUEST_BODY_BYTES,
     )
     app.add_middleware(RequestIdMiddleware)
-    check_readiness = CheckReadinessUseCase(AlwaysReadyProbe())
-    app.include_router(HealthRouter(check_readiness).router)
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=True,
+            allow_methods=CORS_ALLOWED_METHODS,
+            allow_headers=CORS_ALLOWED_HEADERS,
+            expose_headers=[REQUEST_ID_HEADER],
+        )
+    app.include_router(container.health_router.router)
     return app
 
 

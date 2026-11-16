@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from insumap.api.routers.health import HealthRouter
 from insumap.application.readiness import CheckReadinessUseCase, ReadinessProbe
+from insumap.container import Container
 from insumap.main import create_app
 from tests.support.settings import make_settings
 
@@ -19,7 +20,7 @@ def client_with(probe: ReadinessProbe) -> TestClient:
 
 
 def test_health_answers_ok_without_authentication() -> None:
-    client = TestClient(create_app(make_settings()))
+    client = TestClient(create_app(Container(make_settings())))
 
     response = client.get("/health")
 
@@ -28,7 +29,7 @@ def test_health_answers_ok_without_authentication() -> None:
 
 
 def test_ready_answers_ok_with_the_default_probe() -> None:
-    client = TestClient(create_app(make_settings()))
+    client = TestClient(create_app(Container(make_settings())))
 
     response = client.get("/ready")
 

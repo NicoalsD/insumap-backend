@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from insumap.api.openapi import InsumapApi
 from insumap.api.security import bearer_auth
+from insumap.container import Container
 from insumap.main import create_app
 from tests.support.settings import make_settings
 
@@ -16,7 +17,7 @@ BEARER_JWT = {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
 
 @pytest.fixture(scope="module")
 def document() -> dict[str, Any]:
-    client = TestClient(create_app(make_settings(api_docs_enabled=True)))
+    client = TestClient(create_app(Container(make_settings(api_docs_enabled=True))))
     response = client.get("/openapi.json")
     assert response.status_code == 200
     body: dict[str, Any] = response.json()
@@ -57,7 +58,7 @@ def test_health_endpoints_are_tagged_and_public(document: dict[str, Any]) -> Non
 
 
 def test_swagger_ui_is_served_when_docs_are_enabled() -> None:
-    client = TestClient(create_app(make_settings(api_docs_enabled=True)))
+    client = TestClient(create_app(Container(make_settings(api_docs_enabled=True))))
 
     docs = client.get("/docs")
     redoc = client.get("/redoc")
@@ -68,7 +69,7 @@ def test_swagger_ui_is_served_when_docs_are_enabled() -> None:
 
 
 def test_docs_and_document_are_hidden_when_disabled() -> None:
-    client = TestClient(create_app(make_settings(api_docs_enabled=False)))
+    client = TestClient(create_app(Container(make_settings(api_docs_enabled=False))))
 
     docs = client.get("/docs")
     document = client.get("/openapi.json")

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
 from insumap.api.middleware import BodySizeLimitMiddleware, RequestIdMiddleware
+from insumap.container import Container
 from insumap.main import create_app
 from insumap.shared.field_limits import FieldLimits
 from insumap.shared.i18n import MessageCatalog
@@ -178,7 +179,7 @@ def test_chunked_small_body_passes(client: TestClient) -> None:
 
 
 def test_application_limits_bodies_with_field_limits() -> None:
-    client = TestClient(create_app(make_settings()))
+    client = TestClient(create_app(Container(make_settings())))
 
     response = client.post(
         "/anything", content=b"x" * (FieldLimits.MAX_REQUEST_BODY_BYTES + 1)
