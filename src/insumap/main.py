@@ -4,6 +4,8 @@ from fastapi import FastAPI
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
 from insumap.api.middleware import BodySizeLimitMiddleware, RequestIdMiddleware
+from insumap.api.routers.health import HealthRouter
+from insumap.application.readiness import AlwaysReadyProbe, CheckReadinessUseCase
 from insumap.infrastructure.logging import JsonLoggingConfigurator
 from insumap.shared.config import Settings, get_settings
 from insumap.shared.field_limits import FieldLimits
@@ -32,6 +34,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_body_bytes=FieldLimits.MAX_REQUEST_BODY_BYTES,
     )
     app.add_middleware(RequestIdMiddleware)
+    check_readiness = CheckReadinessUseCase(AlwaysReadyProbe())
+    app.include_router(HealthRouter(check_readiness).router)
     return app
 
 
