@@ -1,5 +1,6 @@
 import pytest
 
+from insumap.shared.errors import ErrorCode
 from insumap.shared.i18n import MessageCatalog, MessageRenderError, MissingMessageError
 
 
@@ -69,3 +70,18 @@ def test_rejects_positional_or_traversing_placeholders(text: str) -> None:
 def test_rejects_non_string_texts() -> None:
     with pytest.raises(TypeError):
         MessageCatalog({"greeting": 42})  # type: ignore[dict-item]
+
+
+def test_every_error_code_has_its_default_message(spanish: MessageCatalog) -> None:
+    missing = [
+        code.default_message_key
+        for code in ErrorCode
+        if code.default_message_key not in spanish
+    ]
+
+    assert missing == []
+
+
+def test_default_error_messages_need_no_parameters(spanish: MessageCatalog) -> None:
+    for code in ErrorCode:
+        assert spanish.placeholders(code.default_message_key) == frozenset()
