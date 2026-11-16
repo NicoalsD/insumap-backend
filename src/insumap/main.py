@@ -3,11 +3,15 @@
 from fastapi import FastAPI
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
+from insumap.infrastructure.logging import JsonLoggingConfigurator
+from insumap.shared.config import Settings, get_settings
 from insumap.shared.i18n import MessageCatalog
 
 
-def create_app() -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the FastAPI application with all its parts wired."""
+    settings = settings or get_settings()
+    JsonLoggingConfigurator(settings.log_level).configure()
     app = FastAPI(
         title="Insumap API",
         description=(
