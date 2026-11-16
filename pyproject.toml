@@ -115,3 +115,20 @@ forbidden_modules = [
     "insumap.domain",
     "insumap.infrastructure",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Application does not import infrastructure, api or the composition root"
+type = "forbidden"
+source_modules = ["insumap.application"]
+forbidden_modules = [
+    "insumap.infrastructure",
+    "insumap.api",
+    "insumap.container",
+    "insumap.main",
+]
+
+[[tool.importlinter.contracts]]
+name = "Api reaches infrastructure only through the composition root"
+type = "forbidden"
+source_modules = ["insumap.api"]
+forbidden_modules = ["insumap.infrastructure", "insumap.container", "insumap.main"]
