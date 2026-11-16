@@ -64,7 +64,7 @@ jobs:
 
       - name: Exporta las dependencias de producción bloqueadas
         run: >-
-          uv export --locked --no-dev --no-emit-project --no-hashes
+          uv export --locked --no-dev --no-emit-project
           --format requirements-txt > requirements-audit.txt
 
       - name: Busca vulnerabilidades conocidas
