@@ -24,18 +24,34 @@ Python 3.13, FastAPI, Pydantic v2, SQLAlchemy 2, psycopg 3, uv, ruff, mypy `--st
 
 ## Inicio rápido
 
-> Disponible desde la Fase 1.
-
 ```bash
 uv sync                                         # instala dependencias
-uv run uvicorn insumap.main:app --reload        # API en http://localhost:8000
-uv run pytest                                   # pruebas con cobertura
-uv run ruff check .                             # lint
-uv run mypy .                                   # tipos (strict)
-uv run lint-imports                             # contratos de arquitectura
+cp .env.example .env                            # variables de entorno locales
+docker compose up -d db                         # PostgreSQL 18 en localhost:5432
 ```
 
-La API queda en `http://localhost:8000` y Swagger en `http://localhost:8000/docs`. Requiere la base de datos de `insumap-database`.
+Aplica el esquema desde el repositorio `insumap-database` (este repositorio nunca crea ni migra tablas):
+
+```bash
+cd ../insumap-database && uv run alembic upgrade head
+```
+
+Levanta la API:
+
+```bash
+uv run uvicorn insumap.main:app --reload        # API en http://localhost:8000
+```
+
+- Swagger: `http://localhost:8000/docs`
+- Salud: `GET http://localhost:8000/health`
+
+Para correr también la API en un contenedor: `docker compose up -d --build`.
+
+Verificación completa (la misma que corre el CI):
+
+```bash
+uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run lint-imports && uv run pytest
+```
 
 ## Documentación
 
