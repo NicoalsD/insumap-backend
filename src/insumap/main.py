@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
 from insumap.api.middleware import BodySizeLimitMiddleware, RequestIdMiddleware
+from insumap.api.openapi import InsumapApi
 from insumap.api.routers.health import HealthRouter
 from insumap.application.readiness import AlwaysReadyProbe, CheckReadinessUseCase
 from insumap.infrastructure.logging import JsonLoggingConfigurator
@@ -16,14 +17,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the FastAPI application with all its parts wired."""
     settings = settings or get_settings()
     JsonLoggingConfigurator(settings.log_level).configure()
-    app = FastAPI(
-        title="Insumap API",
-        description=(
-            "API REST de Insumap, plataforma de monitoreo de pacientes con diabetes "
-            "para clínicas. Proyecto académico: no es un dispositivo médico."
-        ),
-        version="0.1.0",
-    )
+    app = InsumapApi.create(docs_enabled=settings.api_docs_enabled)
     responses = ErrorResponseFactory(MessageCatalog.load_spanish())
     ApiExceptionHandlers(responses).install(app)
     # The last middleware added is the outermost: the request id wraps the size
