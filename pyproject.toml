@@ -23,6 +23,7 @@ packages = ["src/insumap"]
 
 [dependency-groups]
 dev = [
+    "import-linter==2.16",
     "mypy==2.4.1",
     "pytest==9.2.0",
     "pytest-cov==7.1.0",
@@ -64,3 +65,53 @@ markers = ["integration: requiere Docker y PostgreSQL (Testcontainers)"]
 [tool.coverage.run]
 source = ["insumap"]
 branch = true
+
+[tool.importlinter]
+root_package = "insumap"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: api > application > domain"
+type = "layers"
+layers = ["insumap.api", "insumap.application", "insumap.domain"]
+
+[[tool.importlinter.contracts]]
+name = "Domain is framework free"
+type = "forbidden"
+source_modules = ["insumap.domain"]
+forbidden_modules = [
+    "fastapi",
+    "starlette",
+    "sqlalchemy",
+    "pydantic",
+    "pydantic_settings",
+    "httpx",
+    "psycopg",
+]
+
+[[tool.importlinter.contracts]]
+name = "Application does not touch web or database frameworks"
+type = "forbidden"
+source_modules = ["insumap.application"]
+forbidden_modules = ["fastapi", "starlette", "sqlalchemy", "psycopg"]
+
+[[tool.importlinter.contracts]]
+name = "Domain does not import outer layers"
+type = "forbidden"
+source_modules = ["insumap.domain"]
+forbidden_modules = [
+    "insumap.infrastructure",
+    "insumap.api",
+    "insumap.application",
+]
+
+[[tool.importlinter.contracts]]
+name = "Shared kernel does not import other layers"
+type = "forbidden"
+source_modules = ["insumap.shared"]
+forbidden_modules = [
+    "insumap.api",
+    "insumap.application",
+    "insumap.domain",
+    "insumap.infrastructure",
+]
