@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from insumap.api.correlation import REQUEST_ID_HEADER, REQUEST_ID_STATE_KEY
 from insumap.shared.errors import ErrorCode, InsumapError
 from insumap.shared.i18n import MessageCatalog, MessageRenderError, MissingMessageError
 
@@ -199,6 +200,16 @@ class ApiExceptionHandlers:
     async def handle_unexpected_error(
         self, request: Request, exc: Exception
     ) -> JSONResponse:
-        """Log the failure and answer ``500 INTERNAL_ERROR`` with no details."""
-        logger.error("Unhandled error while processing the request", exc_info=exc)
-        return self._responses.create(ErrorCode.INTERNAL_ERROR)
+        """Log the failure and answer ``500 INTERNAL_ERROR`` with no details.
+
+        This handler runs outside the user middleware, so it takes the request id
+        from ``request.state`` to log it and echo it in ``X-Request-ID``.
+        """
+        request_id = getattr(request.state, REQUEST_ID_STATE_KEY, None)
+        logger.error(
+            "Unhandled error while processing the request",
+            exc_info=exc,
+            extra={REQUEST_ID_STATE_KEY: request_id},
+        )
+        headers = {REQUEST_ID_HEADER: request_id} if request_id else None
+        return self._responses.create(ErrorCode.INTERNAL_ERROR, headers=headers)

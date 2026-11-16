@@ -3,8 +3,10 @@
 from fastapi import FastAPI
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
+from insumap.api.middleware import BodySizeLimitMiddleware, RequestIdMiddleware
 from insumap.infrastructure.logging import JsonLoggingConfigurator
 from insumap.shared.config import Settings, get_settings
+from insumap.shared.field_limits import FieldLimits
 from insumap.shared.i18n import MessageCatalog
 
 
@@ -22,6 +24,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     responses = ErrorResponseFactory(MessageCatalog.load_spanish())
     ApiExceptionHandlers(responses).install(app)
+    # The last middleware added is the outermost: the request id wraps the size
+    # limit, so a 413 also carries X-Request-ID.
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        responses=responses,
+        max_body_bytes=FieldLimits.MAX_REQUEST_BODY_BYTES,
+    )
+    app.add_middleware(RequestIdMiddleware)
     return app
 
 
