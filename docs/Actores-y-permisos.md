@@ -46,7 +46,7 @@ MFA TOTP es obligatorio para todo rol distinto de `PATIENT` (ver [Seguridad.md](
 
 ### 3.1 Convenciones
 
-- Los códigos son `dominio.accion` o `dominio.accion_alcance` en inglés y minúsculas (`^[a-z][a-z_]*\.[a-z][a-z_]*$`, tabla `iam.permissions`).
+- Los códigos son `dominio.accion` o `dominio.accion_alcance` en inglés y minúsculas (`^[a-z][a-z_]*(\.[a-z][a-z_]*)+$`, tabla `iam.permissions`).
 - Sufijos de alcance:
   - `_own`: solo sobre los propios registros del usuario (paciente).
   - `_assigned`: solo sobre los pacientes asignados al médico en `clinic.care_team_assignments`.
