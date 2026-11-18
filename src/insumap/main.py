@@ -1,12 +1,48 @@
-"""FastAPI application entry point."""
+"""FastAPI application entry point (``uvicorn insumap.main:app``)."""
+
+from typing import Final
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(
-    title="Insumap API",
-    description=(
-        "API REST de Insumap, plataforma de monitoreo de pacientes con diabetes "
-        "para clínicas. Proyecto académico: no es un dispositivo médico."
-    ),
-    version="0.1.0",
-)
+from insumap.api.correlation import REQUEST_ID_HEADER
+from insumap.api.middleware import BodySizeLimitMiddleware, RequestIdMiddleware
+from insumap.api.openapi import InsumapApi
+from insumap.container import Container
+from insumap.shared.field_limits import FieldLimits
+
+CORS_ALLOWED_METHODS: Final = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+CORS_ALLOWED_HEADERS: Final = ["Authorization", "Content-Type", REQUEST_ID_HEADER]
+
+
+def create_app(container: Container | None = None) -> FastAPI:
+    """Build the FastAPI application from the parts of the composition root."""
+    container = container or Container()
+    settings = container.settings
+    container.logging_configurator.configure()
+
+    app = InsumapApi.create(docs_enabled=settings.api_docs_enabled)
+    container.exception_handlers.install(app)
+    # The last middleware added is the outermost. The request id wraps the size
+    # limit, so a 413 carries X-Request-ID, and CORS wraps both, so browsers can
+    # read every error.
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        responses=container.error_responses,
+        max_body_bytes=FieldLimits.MAX_REQUEST_BODY_BYTES,
+    )
+    app.add_middleware(RequestIdMiddleware)
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=True,
+            allow_methods=CORS_ALLOWED_METHODS,
+            allow_headers=CORS_ALLOWED_HEADERS,
+            expose_headers=[REQUEST_ID_HEADER],
+        )
+    app.include_router(container.health_router.router)
+    return app
+
+
+app = create_app()

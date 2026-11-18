@@ -1,0 +1,10 @@
+{
+  "validation.error": "La solicitud tiene campos no válidos. Revisa los datos enviados.",
+  "not.found": "El recurso solicitado no existe.",
+  "unauthenticated": "Necesitas iniciar sesión para continuar.",
+  "forbidden": "No tienes permiso para realizar esta acción.",
+  "conflict": "La solicitud entra en conflicto con el estado actual del recurso.",
+  "rate.limited": "Hiciste demasiadas solicitudes. Inténtalo de nuevo más tarde.",
+  "payload.too_large": "El cuerpo de la solicitud supera el tamaño máximo permitido.",
+  "internal.error": "Ocurrió un error interno. Inténtalo de nuevo más tarde."
+}

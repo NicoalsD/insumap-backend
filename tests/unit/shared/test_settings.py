@@ -1,0 +1,144 @@
+from collections.abc import Iterator
+
+import pytest
+from pydantic import ValidationError
+
+from insumap.shared.config import Settings, SettingsHolder, get_settings
+from tests.support.settings import TEST_DATABASE_URL, make_settings
+
+ENV_VARS = ("APP_ENV", "LOG_LEVEL", "DATABASE_URL", "CORS_ORIGINS", "API_DOCS_ENABLED")
+URL_WITH_CREDENTIALS = (
+    "postgresql://insumap_app:not-a-real-secret@db.example.test/insumap"
+)
+
+
+@pytest.fixture
+def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+    for name in ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+@pytest.fixture
+def fresh_holder() -> Iterator[None]:
+    SettingsHolder.reset()
+    yield
+    SettingsHolder.reset()
+
+
+def test_defaults_apply_when_only_the_secret_is_set(
+    clean_env: pytest.MonkeyPatch,
+) -> None:
+    clean_env.setenv("DATABASE_URL", TEST_DATABASE_URL)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.app_env == "local"
+    assert settings.log_level == "INFO"
+    assert settings.cors_origins == []
+    assert settings.api_docs_enabled is True
+
+
+def test_reads_every_variable_from_the_environment(
+    clean_env: pytest.MonkeyPatch,
+) -> None:
+    clean_env.setenv("APP_ENV", "production")
+    clean_env.setenv("LOG_LEVEL", "warning")
+    clean_env.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    clean_env.setenv("CORS_ORIGINS", "http://localhost:5173, https://app.example.test")
+    clean_env.setenv("API_DOCS_ENABLED", "false")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.app_env == "production"
+    assert settings.log_level == "WARNING"
+    assert settings.cors_origins == [
+        "http://localhost:5173",
+        "https://app.example.test",
+    ]
+    assert settings.api_docs_enabled is False
+
+
+def test_missing_database_url_stops_the_startup(clean_env: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ValidationError, match="database_url"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "postgresql://insumap_app@localhost:5432/insumap",
+        "postgres://insumap_app@localhost:5432/insumap",
+        "postgresql+psycopg://insumap_app@localhost:5432/insumap",
+    ],
+)
+def test_database_url_uses_the_psycopg_driver(url: str) -> None:
+    settings = make_settings(database_url=url)
+
+    assert settings.database_url.get_secret_value() == (
+        "postgresql+psycopg://insumap_app@localhost:5432/insumap"
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "mysql://insumap_app:not-a-real-secret@localhost/insumap",
+        "postgresql+asyncpg://insumap_app:not-a-real-secret@localhost/insumap",
+        "postgresql://",
+        "insumap_app:not-a-real-secret@localhost/insumap",
+    ],
+)
+def test_rejects_non_postgresql_urls_without_echoing_them(url: str) -> None:
+    with pytest.raises(ValidationError) as raised:
+        make_settings(database_url=url)
+
+    assert "not-a-real-secret" not in str(raised.value)
+
+
+def test_database_url_is_hidden_in_repr() -> None:
+    settings = make_settings(database_url=URL_WITH_CREDENTIALS)
+
+    assert "not-a-real-secret" not in repr(settings)
+    assert "not-a-real-secret" not in str(settings.model_dump())
+
+
+def test_rejects_unknown_app_env() -> None:
+    with pytest.raises(ValidationError, match="app_env"):
+        make_settings(app_env="staging")
+
+
+@pytest.mark.parametrize("origins", ["*", "http://localhost:5173,*", "localhost:5173"])
+def test_rejects_wildcard_or_malformed_cors_origins(origins: str) -> None:
+    with pytest.raises(ValidationError, match="cors_origins"):
+        make_settings(cors_origins=origins)
+
+
+def test_cors_origins_drop_blanks_and_trailing_slashes() -> None:
+    settings = make_settings(cors_origins=" ,https://app.example.test/, ")
+
+    assert settings.cors_origins == ["https://app.example.test"]
+
+
+def test_settings_are_immutable() -> None:
+    settings = make_settings()
+
+    with pytest.raises(ValidationError):
+        settings.app_env = "production"  # type: ignore[misc]
+
+
+def test_get_settings_loads_once_until_reset(
+    clean_env: pytest.MonkeyPatch, fresh_holder: None
+) -> None:
+    clean_env.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    clean_env.setenv("APP_ENV", "test")
+
+    first = get_settings()
+    clean_env.setenv("APP_ENV", "production")
+    second = get_settings()
+    SettingsHolder.reset()
+    third = get_settings()
+
+    assert first is second
+    assert first.app_env == "test"
+    assert third.app_env == "production"
