@@ -271,7 +271,7 @@ src/insumap/
 | [ ] | `docs/Actores-y-permisos.md` | Actores, roles y matriz de permisos |
 | [ ] | `docs/Arquitectura.md` | C4, capas y reglas de dependencia |
 | [ ] | `docs/Modelo-de-datos.md` y `docs/Diccionario-de-datos.md` | Esquemas, tablas y columnas |
-| [ ] | `docs/API.md` | Endpoints, permisos y errores |
+| [x] | `docs/API.md` | Endpoints, permisos y errores |
 | [ ] | `docs/Patrones-de-diseno.md` | Catálogo P01 a P23 |
 | [ ] | `docs/Modulo-IA.md` y `docs/Contrato-IA.md` | Casos IA1 a IA7, evaluación y contrato backend-IA |
 | [ ] | `docs/Datos-simulados.md` | Clínica demo, escenarios y modos del simulador |
