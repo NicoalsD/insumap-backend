@@ -1109,3 +1109,249 @@ Estados de la alerta: `OPEN`, `ACKNOWLEDGED`, `RESOLVED`, `ESCALATED` (`OPEN →
 - Solicitud: sin cuerpo.
 - Respuesta: sin cuerpo. No es un registro clínico: se puede borrar.
 - Errores: C1, C2, C3.
+
+### 8.10 IA y soporte a decisiones (M9)
+
+La IA solo apoya al médico: nunca aplica un cambio ni da una dosis al paciente. Toda salida trae `model_version`, `is_fallback` y `fallback_reason` (`AI_TIMEOUT`, `CIRCUIT_OPEN`, `AI_ERROR` o `INSUFFICIENT_DATA`) y se guarda en el esquema `ai` con su explicación. Al servicio de IA solo llega un seudónimo (`subject_ref`), nunca nombres, documento, MRN ni contacto. Una IA caída responde `200` con el respaldo por reglas (la interfaz muestra "Respaldo por reglas"), nunca un error. Los estados de la recomendación son `PROPOSED`, `APPROVED`, `APPROVED_WITH_CHANGES`, `REJECTED`, `APPLIED` y `EXPIRED`.
+
+#### `GET /recommendations`
+- Operación: `list_recommendations` · Permiso: `recommendations.read_assigned` · Ruta: P · Trazabilidad: HU-39, HU-40, RF-69, RF-71 · Patrón: P18, P11, P09 · Éxito: 200
+- Solicitud: `patient_id`, `status`, `limit`, `cursor`. Solo pacientes asignados.
+- Respuesta: por recomendación `id`, `patient_id`, `status`, `proposal` (`action` `INCREASE` o `DECREASE`, dosis actual, dosis propuesta, `delta_units`, `requires_doctor_approval: true`), `explanation` (`summary`, `factors`, `data_refs`), `model_version`, `is_fallback`, `expires_at`, `created_at` y `simulated`. Si el servicio de IA no responde no se genera ninguna sugerencia de ajuste y la respuesta trae `unavailable_reason` (propuesto, G19). Una recomendación nace en `PROPOSED` y no cambia el plan por sí sola.
+- Errores: C1, C2, C4; `404 NOT_FOUND` (un `patient_id` no asignado).
+
+#### `GET /recommendations/{recommendation_id}`
+- Operación: `get_recommendation` · Permiso: `recommendations.read_assigned` · Ruta: P · Trazabilidad: HU-39, RF-69, RF-75 · Patrón: P18, P11, P09 · Éxito: 200
+- Solicitud: `recommendation_id` en la ruta.
+- Respuesta: la recomendación con su historial de decisiones (`actor`, hora, motivo y, si cambió, el valor original y el modificado).
+- Errores: C1, C2, C4, C5.
+
+#### `POST /recommendations/{recommendation_id}/approve`
+- Operación: `approve_recommendation` · Permiso: `recommendations.decide` · Ruta: P · Trazabilidad: HU-39, RF-70, RF-71 · Patrón: P13, P18, P05, P17, P09 · Éxito: 200
+- Solicitud: sin cuerpo. `ApproveRecommendationCommand` pasa la recomendación a `APPROVED`, crea una versión `DRAFT` del plan para que el médico la active, publica `RecommendationApproved` después del commit y audita la decisión.
+- Respuesta: la recomendación con `status`, quién y cuándo, `draft_plan_id` y la versión del modelo.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (ya decidida o `EXPIRED`: una recomendación vencida no se puede decidir).
+
+#### `POST /recommendations/{recommendation_id}/modify`
+- Operación: `modify_recommendation` · Permiso: `recommendations.decide` · Ruta: P · Trazabilidad: HU-39, RF-70, RF-71 · Patrón: P13, P18, P05, P09 · Éxito: 200
+- Solicitud: `modified_proposal` (la propuesta con el cambio del médico) y `reason` (10 a 500 caracteres). Se guardan el texto original, el modificado y el motivo.
+- Respuesta: la recomendación con `status: APPROVED_WITH_CHANGES` y `draft_plan_id`.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION`, `422 REASON_REQUIRED`.
+
+#### `POST /recommendations/{recommendation_id}/reject`
+- Operación: `reject_recommendation` · Permiso: `recommendations.decide` · Ruta: P · Trazabilidad: HU-39, RF-70 · Patrón: P13, P18, P09 · Éxito: 200
+- Solicitud: `reason` (10 a 500 caracteres; y, si existe, un código del catálogo de motivos, G10).
+- Respuesta: la recomendación con `status: REJECTED` y el motivo guardado.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION`, `422 REASON_REQUIRED`.
+
+#### `GET /patients/{patient_id}/risk`
+- Operación: `get_patient_risk` · Permiso: `ai.risk.read_assigned` · Ruta: P · Trazabilidad: HU-37, RF-67, RF-76 · Patrón: P19, P11, P18, P09 · Éxito: 200
+- Solicitud: `window_days` (por defecto 14).
+- Respuesta: `assessment_type: DETERIORATION`, `risk_probability` (0 a 1), `risk_tier` (`LOW`, `MEDIUM`, `HIGH` o `CRITICAL`), `calibrated`, `explanation` con al menos un factor legible, `model_version`, `is_fallback` y `fallback_reason`. Con la IA caída usa reglas tipo TIDE (`RuleBasedRiskStrategy`) y lo indica.
+- Errores: C1, C2, C4, C5.
+
+#### `GET /patients/{patient_id}/pattern-findings`
+- Operación: `list_pattern_findings` · Permiso: `ai.risk.read_assigned` · Ruta: P · Trazabilidad: HU-38, RF-68 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `status` (nuevo o descartado; valores por definir), `limit`, `cursor`.
+- Respuesta: hallazgos con `id`, `pattern_type` (`NOCTURNAL_HYPOGLYCEMIA`, `DAWN_PHENOMENON`, `POSTPRANDIAL_SPIKE`, `MISSED_DOSE`, `DUPLICATE_DOSE`, `ADHERENCE_DROP`, `IMPLAUSIBLE_READING`), ventana de fechas, `confidence`, evidencia, `is_fallback`.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /patients/{patient_id}/pattern-findings/{finding_id}/dismiss`
+- Operación: `dismiss_pattern_finding` · Permiso: `ai.risk.read_assigned` · Ruta: P · Trazabilidad: HU-38, RF-68 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `note` (obligatoria). El hallazgo queda registrado como descartado y no se vuelve a mostrar como nuevo. Ningún permiso del catálogo nombra esta acción (G15).
+- Respuesta: el hallazgo descartado.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (ya descartado).
+
+#### `POST /patients/{patient_id}/clinical-summaries`
+- Operación: `create_clinical_summary` · Permiso: `clinical_summaries.generate` · Ruta: P · Trazabilidad: HU-41, RF-72 (Post-MVP) · Patrón: P11, P09, P04 · Éxito: 201
+- Solicitud: `period_days` (por defecto 14). Los datos viajan seudonimizados; el LLM no calcula métricas. Un LLM no disponible o una clínica no demo con `LLM_REAL_DATA_ALLOWED=false` usan la plantilla determinista.
+- Respuesta: `id`, `summary_text`, `sections` (resumen del periodo, eventos, adherencia y cambios del plan), `references` (cada afirmación apunta a un dato), `model_version`, `is_fallback` y la marca "Generado con IA como apoyo; verifica con los datos".
+- Errores: C1, C2, C4, C5; `429` (30 por hora por médico).
+
+#### `GET /patients/{patient_id}/clinical-summaries/{summary_id}`
+- Operación: `get_clinical_summary` · Permiso: `clinical_summaries.generate` · Ruta: P · Trazabilidad: HU-41, RF-72 (Post-MVP) · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `summary_id` en la ruta.
+- Respuesta: el resumen ya generado. No vuelve a llamar a la IA.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /assistant/messages`
+- Operación: `send_assistant_message` · Permiso: `assistant.use` · Ruta: P · Trazabilidad: HU-42, RF-73 (Post-MVP) · Patrón: P11, P12 · Éxito: 200
+- Solicitud: `message` (longitud de `FieldLimits`).
+- Respuesta: `reply_text` (texto plano), `citations` (material aprobado por la clínica), `escalation` (`NONE`, `CONTACT_DOCTOR` o `EMERGENCY`) e `is_fallback`. El asistente no da dosis ni diagnósticos; ante síntomas de alarma muestra el aviso de urgencia y avisa al equipo. Sin el consentimiento `ai_external_processing` o con el LLM caído responde con respuestas predefinidas del material de la clínica.
+- Errores: C1, C3, C4; `429` (20 por hora y 100 por día por paciente).
+
+#### `GET /dropout-risks`
+- Operación: `list_dropout_risks` · Permiso: `ai.dropout_risk.read` · Ruta: P · Trazabilidad: HU-43, RF-74 · Patrón: P19, P11, P09 · Éxito: 200
+- Solicitud: `risk_tier`, `limit`, `cursor`. El `CLINIC_ADMIN` ve la lista administrativa; el `DOCTOR`, solo sus pacientes asignados.
+- Respuesta: por paciente `patient_id`, nombre administrativo, `account_status`, `days_without_record`, `risk_tier`, `explanation` y `is_fallback` (con la IA caída se usa la regla de días sin registros). **Nunca valores clínicos.**
+- Errores: C1, C2, C4.
+
+#### `GET /ai-evaluations`
+- Operación: `list_ai_evaluations` · Permiso: `ai_evaluations.read` · Ruta: P · Trazabilidad: HU-44, RF-77 (Post-MVP) · Patrón: P19 · Éxito: 200
+- Solicitud: `use_case` (`IA1` a `IA7`), `model_version`, `limit`, `cursor`.
+- Respuesta: por caso y versión, la métrica de la IA frente al respaldo (MAE, RMSE y Clarke Error Grid para el pronóstico; AUROC y calibración para el riesgo), el porcentaje servido con respaldo y la marca de que los datos son simulados. Solo métricas agregadas, nunca series de pacientes.
+- Errores: C1, C2, C4.
+
+### 8.11 Dashboard médico, notas y reportes (M10)
+
+#### `GET /dashboard/triage`
+- Operación: `get_triage_dashboard` · Permiso: `dashboard.read_assigned` · Ruta: P · Trazabilidad: HU-45, HU-37, RF-78, RF-79, RF-67, RF-76, RNF-07 · Patrón: P10, P19, P11, P09 · Éxito: 200
+- Solicitud: `window` (`24h`, `7d`, `14d` o `30d`), `status` (filtro de estado; valores por definir), `reviewed` (booleano), `limit`, `cursor`.
+- Respuesta: los pacientes asignados ordenados por riesgo. Por paciente: `patient_id`, nombre, `risk_tier` y puntaje, `flags` (cada bandera con su motivo legible), `open_alerts_count`, `pending_recommendations_count`, métricas resumidas de la ventana, `reviewed_at`, `is_fallback` e `simulated`. `DoctorDashboardFacade` escribe una fila de auditoría por paciente listado, en una sola inserción por lotes. Objetivo: 200 pacientes en 2 s.
+- Errores: C1, C2, C4.
+
+#### `POST /dashboard/patients/{patient_id}/review`
+- Operación: `mark_patient_reviewed` · Permiso: `dashboard.read_assigned` · Ruta: P · Trazabilidad: HU-45, RF-79 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: sin cuerpo. Ningún permiso del catálogo nombra esta acción (G15).
+- Respuesta: el paciente con `reviewed_at`. Baja de prioridad hasta que cambie su situación.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /patients/{patient_id}/clinical-notes`
+- Operación: `create_clinical_note` · Permiso: `clinical_notes.manage` · Ruta: P · Trazabilidad: HU-46, RF-81 · Patrón: P11, P09 · Éxito: 201
+- Solicitud: `text` (longitud de `FieldLimits`) y `corrects_note_id` (opcional: una nota se corrige con otra). Las notas son append-only y solo las ve el equipo asignado.
+- Respuesta: `id`, `text`, `author_id`, `created_at`, `corrects_note_id`, `simulated`.
+- Errores: C1, C2, C4, C5.
+
+#### `GET /patients/{patient_id}/clinical-notes`
+- Operación: `list_clinical_notes` · Permiso: `clinical_notes.manage` · Ruta: P · Trazabilidad: HU-46, RF-81 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `limit`, `cursor`.
+- Respuesta: las notas del paciente asignado. Escribe una fila `CLINICAL_NOTES` en `audit.data_access_log`. El `CLINIC_ADMIN` recibe `403 FORBIDDEN`. El permiso de lectura no está separado del de escritura (G15).
+- Errores: C1, C2, C4, C5.
+
+#### `POST /reports/patient`
+- Operación: `create_patient_report` · Permiso: `reports.generate_assigned` · Ruta: P · Trazabilidad: HU-47, RF-82 · Patrón: P02, P03, P20, P11, P09 · Éxito: 200
+- Solicitud: `patient_id`, `format` (`pdf` o `html`) y el periodo (`from`, `to`; forma por definir, G16).
+- Respuesta: el documento (`application/pdf` o `text/html`) con AGP, métricas, eventos y plan, con la fecha y el periodo; ambos formatos muestran la misma información. Un paciente de la clínica demo lleva la marca "Datos simulados". Las plantillas usan autoescape y el motor de PDF no descarga recursos remotos. Cuenta para el límite de 20 reportes por hora.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /reports/me`
+- Operación: `create_own_report` · Permiso: `reports.generate_own` · Ruta: P · Trazabilidad: HU-47, RF-82 · Patrón: P02, P03, P20 · Éxito: 200
+- Solicitud: `format` y el periodo.
+- Respuesta: el reporte propio para compartir con el equipo; solo contiene datos del paciente autenticado.
+- Errores: C1, C3, C4.
+
+#### `POST /reports/clinic`
+- Operación: `create_clinic_report` · Permiso: `reports.generate_clinic` · Ruta: P · Trazabilidad: HU-48, RF-83 · Patrón: P02, P03, P20 · Éxito: 200
+- Solicitud: `format` y el periodo.
+- Respuesta: reporte agregado de la clínica (`ClinicReportCreator`), sin datos clínicos individuales.
+- Errores: C1, C2, C4.
+
+#### `GET /clinic-kpis`
+- Operación: `get_clinic_kpis` · Permiso: `clinic_kpis.read` · Ruta: P · Trazabilidad: HU-48, RF-83 · Patrón: P10 · Éxito: 200
+- Solicitud: `from`, `to` (periodo; por definir).
+- Respuesta: pacientes por estado de cuenta, tasa de activación, adherencia y alertas abiertas. Ningún indicador identifica la glucosa o las dosis de un paciente; los conteos pequeños (propuesta: menos de 5) se agrupan.
+- Errores: C1, C2, C4.
+
+### 8.12 Mensajería y seguimiento (M11, Post-MVP)
+
+La mensajería no es un canal de emergencias: toda respuesta del hilo lleva el aviso permanente de que no se usa para emergencias ni dosis urgentes (RF-85). Los mensajes son append-only. Solo los ven el paciente y su equipo asignado: un `CLINIC_ADMIN` recibe `403 FORBIDDEN` porque no tiene el permiso (la regla V8 habla de `404`, G28).
+
+#### `GET /messages`
+- Operación: `list_messages` · Permiso: `messages.use_own` o `messages.use_assigned` · Ruta: P · Trazabilidad: HU-49, RF-84, RF-85 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `patient_id` (obligatorio para el médico; el paciente lee su propio hilo), `limit`, `cursor`.
+- Respuesta: mensajes del hilo con `id`, `sender_role`, `body`, `sent_at` y `simulated`, más `emergency_notice` (el aviso de no emergencia). Escribe una fila `MESSAGES` en `audit.data_access_log` para el médico.
+- Errores: C1, C2, C3, C4, C5 (hilo de un paciente no asignado responde `404`).
+
+#### `POST /messages`
+- Operación: `send_message` · Permiso: `messages.use_own` o `messages.use_assigned` · Ruta: P · Trazabilidad: HU-49, RF-84, RF-85 · Patrón: P07, P17 · Éxito: 201
+- Solicitud: `body` (longitud de `FieldLimits`) y `patient_id` (solo médico).
+- Respuesta: el mensaje y `alarm_keywords_detected` (propuesto): con palabras de alarma la app sugiere llamar a urgencias y el equipo recibe un aviso. El correo y el Web Push del aviso no llevan el texto del mensaje.
+- Errores: C1, C2, C3, C4, C5; `429` (30 por minuto por usuario).
+
+#### `POST /follow-ups`
+- Operación: `create_follow_up` · Permiso: `follow_ups.manage` · Ruta: P · Trazabilidad: HU-50, RF-86 · Patrón: P11, P09 · Éxito: 201
+- Solicitud: `patient_id` (asignado) y `scheduled_at` (fecha futura).
+- Respuesta: el control con `id`, `status: SCHEDULED`, `scheduled_at` y `simulated`. El paciente lo ve y recibe un recordatorio antes de la fecha.
+- Errores: C1, C2, C4 (una fecha pasada responde `422 VALIDATION_ERROR`), C5.
+
+#### `GET /follow-ups`
+- Operación: `list_follow_ups` · Permiso: `follow_ups.manage` o `follow_ups.read_own` · Ruta: P · Trazabilidad: HU-50, RF-86 · Patrón: P11 · Éxito: 200
+- Solicitud: `status` (`SCHEDULED`, `DONE` o `MISSED`), `patient_id` (solo médico), `limit`, `cursor`.
+- Respuesta: controles del médico (pacientes asignados) o del propio paciente.
+- Errores: C1, C2, C3, C4.
+
+#### `POST /follow-ups/{follow_up_id}/close`
+- Operación: `close_follow_up` · Permiso: `follow_ups.manage` · Ruta: P · Trazabilidad: HU-50, RF-86, HU-43 · Patrón: P18 · Éxito: 200
+- Solicitud: `outcome` (`DONE` o `MISSED`). Un control que pasa su fecha sin cerrarse queda `MISSED` por el planificador; el seguimiento alimenta el riesgo de abandono.
+- Respuesta: el control con su estado final.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (ya cerrado).
+
+### 8.13 Auditoría, consentimiento y privacidad (M12)
+
+#### `GET /audit-log`
+- Operación: `list_audit_log` · Permiso: `audit.read` · Ruta: P · Trazabilidad: HU-51, RF-88, RF-91 (Post-MVP) · Patrón: P09 · Éxito: 200
+- Solicitud: `user_id`, `action`, `from`, `to`, `limit`, `cursor`.
+- Respuesta: acciones de la clínica con `id`, `occurred_at`, `actor_user_id`, `actor_role`, `action`, `entity_type`, `entity_id`, `reason` y los **nombres** de los campos cambiados. Nunca valores de glucosa ni textos de notas.
+- Errores: C1, C2, C4.
+
+#### `GET /audit-log/data-access`
+- Operación: `list_data_access_log` · Permiso: `audit.read` · Ruta: P · Trazabilidad: HU-51, RF-89, RF-91 (Post-MVP) · Patrón: P09 · Éxito: 200
+- Solicitud: `user_id`, `patient_id`, `resource_type`, `from`, `to`, `limit`, `cursor`.
+- Respuesta: quién accedió, a qué paciente, qué recurso (`resource_type`), con qué resultado (`GRANTED` o `DENIED`) y propósito. Sin contenido clínico. La propia consulta no se audita como lectura clínica.
+- Errores: C1, C2, C4.
+
+#### `POST /audit-log/verifications`
+- Operación: `verify_audit_chain` · Permiso: `audit.read` · Ruta: P · Trazabilidad: HU-51, RF-92 (Post-MVP) · Patrón: - · Éxito: 200
+- Solicitud: sin cuerpo. Recalcula la cadena de hashes de la clínica (`audit.verify_chain`).
+- Respuesta: `is_valid` y, si falla, `first_inconsistent_row_id`. Una discrepancia registra `AUDIT_CHAIN_BROKEN` (crítico).
+- Errores: C1, C2.
+
+#### `GET /security-events`
+- Operación: `list_security_events` · Permiso: `audit.read` o `audit.read_platform` · Ruta: P · Trazabilidad: HU-51, RF-95 · Patrón: - · Éxito: 200
+- Solicitud: `type`, `severity`, `from`, `to`, `limit`, `cursor`. `audit.read` ve los de su clínica; `audit.read_platform` ve los de la plataforma.
+- Respuesta: `id`, `type`, `severity`, `user_id`, `clinic_id`, `occurred_at` e `ip_truncated` (/24 en IPv4, /48 en IPv6). Nunca secretos ni la IP en claro.
+- Errores: C1, C2, C4.
+
+#### `GET /public/privacy-notices/{privacy_notice_version_id}`
+- Operación: `get_privacy_notice` · Permiso: público · Ruta: P · Trazabilidad: HU-10, HU-52, RF-24, RF-90 · Patrón: - · Éxito: 200
+- Solicitud: `privacy_notice_version_id` en la ruta (el que devuelve `POST /auth/activation/verify` o `GET /auth/me`).
+- Respuesta: `id`, `version`, `published_at`, `text` (aviso de privacidad versionado y sin datos personales) y los alcances del consentimiento (tratamiento de datos sensibles, obligatorio; `ai_external_processing`, opcional).
+- Errores: `404 NOT_FOUND`, `429`, `422`, `500`.
+
+#### `GET /consents/me`
+- Operación: `get_own_consent` · Permiso: `consents.manage_own` · Ruta: P · Trazabilidad: HU-52, RF-90 · Patrón: P11 · Éxito: 200
+- Solicitud: sin parámetros. No exige consentimiento vigente.
+- Respuesta: la versión aceptada, la fecha, los alcances aceptados, `current_version_id` y `consent_required`.
+- Errores: C1, C3 sin `CONSENT_REQUIRED` (esta ruta está exenta).
+
+#### `POST /consents/me/acceptances`
+- Operación: `accept_consent` · Permiso: `consents.manage_own` · Ruta: P · Trazabilidad: HU-52, RF-90 · Patrón: P09 · Éxito: 201
+- Solicitud: `privacy_notice_version_id`, `accepted` (debe ser `true`) y `ai_external_processing`. Se guarda con la versión, la fecha y el alcance.
+- Respuesta: el consentimiento vigente. Una versión nueva obliga al paciente a aceptarla antes de seguir registrando.
+- Errores: C1, C4; `409 CONSENT_VERSION_OUTDATED` (la versión ya no es la vigente).
+
+#### `POST /consents/me/withdrawals`
+- Operación: `withdraw_consent` · Permiso: `consents.manage_own` · Ruta: P · Trazabilidad: HU-52, RF-90 · Patrón: P09, P17 · Éxito: 200
+- Solicitud: `scope` (el consentimiento de datos sensibles o solo `ai_external_processing`; valores por definir). Retirar el de datos sensibles detiene los registros nuevos (`403 CONSENT_REQUIRED` después) y la clínica recibe un aviso para tramitar la baja o la retención.
+- Respuesta: el consentimiento con su estado.
+- Errores: C1, C4.
+
+#### `GET /consents`
+- Operación: `list_consent_statuses` · Permiso: `consents.read_status` · Ruta: P · Trazabilidad: HU-52, RF-90 · Patrón: P09 · Éxito: 200
+- Solicitud: `status` (valores por definir), `limit`, `cursor`.
+- Respuesta: por paciente el estado del consentimiento y la versión aceptada. Sin contenido clínico. Escribe una fila `PATIENT_LIST` en `audit.data_access_log`.
+- Errores: C1, C2, C4.
+
+#### `POST /privacy-requests`
+- Operación: `create_privacy_request` · Permiso: `privacy_requests.create_own` · Ruta: P · Trazabilidad: HU-53, RF-93 (Post-MVP) · Patrón: P18 · Éxito: 201
+- Solicitud: `request_type` (`ACCESS`, `RECTIFICATION` o `ERASURE`) y una descripción opcional.
+- Respuesta: `id`, `status` (valores por definir) y `due_at` (el plazo).
+- Errores: C1, C3, C4.
+
+#### `GET /privacy-requests`
+- Operación: `list_privacy_requests` · Permiso: `privacy_requests.create_own` o `privacy_requests.manage` · Ruta: P · Trazabilidad: HU-53, RF-93 (Post-MVP) · Patrón: - · Éxito: 200
+- Solicitud: `status`, `limit`, `cursor`. El paciente ve las suyas; el `CLINIC_ADMIN`, las de su clínica.
+- Respuesta: solicitudes con estado y plazo, sin contenido clínico.
+- Errores: C1, C2, C3, C4.
+
+#### `POST /privacy-requests/{request_id}/resolve`
+- Operación: `resolve_privacy_request` · Permiso: `privacy_requests.manage` · Ruta: P · Trazabilidad: HU-53, RF-93, RF-94 (Post-MVP) · Patrón: P13, P09 · Éxito: 200
+- Solicitud: `decision` (aprobar o rechazar; valores por definir) y `note`.
+- Respuesta: la solicitud con su estado.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION`.
+
+#### `GET /privacy-requests/{request_id}/export`
+- Operación: `export_privacy_request_data` · Permiso: `privacy_requests.create_own` · Ruta: P · Trazabilidad: HU-53, RF-93 (Post-MVP) · Patrón: P21, P09 · Éxito: 200
+- Solicitud: `format` (`json` o `fhir`). Solo para la solicitud aprobada del propio paciente.
+- Respuesta: los datos del paciente en JSON o FHIR, con el documento completo descifrado solo en esta exportación. Escribe filas `EXPORT` y `DECRYPT` en `audit.data_access_log`.
+- Errores: C1, C3, C4, C5; `409 INVALID_STATE_TRANSITION` (la solicitud no está aprobada).
