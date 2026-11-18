@@ -673,3 +673,439 @@ Cada endpoint tiene un bloque con la misma forma:
 - Solicitud: `reason` y, si es el médico principal, `new_primary_assignment_id`. El médico retirado deja de ver al paciente y recibe `404` sobre él; sus decisiones previas siguen en la auditoría.
 - Respuesta: la asignación con `ended_at`.
 - Errores: C1, C2, C4, C5; `409 CONFLICT` (retirar al único médico principal sin reemplazo), `409 INVALID_STATE_TRANSITION` (ya terminó), `422 REASON_REQUIRED`.
+
+### 8.6 Registros del paciente y expediente (M5)
+
+Las rutas de registro (`/readings`, `/insulin-doses`, `/meals`, `/activities`, `/symptoms`, `/lab-results`, `/timeline`) son del paciente autenticado: el `patient_id` sale del token, nunca de la ruta ni del cuerpo. El médico lee los mismos datos con `/patients/{patient_id}/...` y el permiso `patients.read_assigned`. Los registros son append-only: no hay `PUT`, `PATCH` ni `DELETE`. Todo registro nuevo exige consentimiento vigente (`403 CONSENT_REQUIRED`) y la cuenta del paciente en `ACTIVE`.
+
+#### `POST /readings`
+- Operación: `record_glucose_reading` · Permiso: `glucose.write_own` · Ruta: F · Trazabilidad: HU-15, RF-31, RF-33, RNF-20 · Patrón: P12, P17 · Éxito: 201 (200 si repite)
+- Solicitud: `client_reading_id` (UUID generado por la app), `value` (número), `unit` (`mg/dL` o `mmol/L`), `measured_at` (ISO 8601 con zona), `source` (`MANUAL`, `SMBG` o `CGM`), `context` (ayunas, antes o después de comer, al acostarse, ejercicio u otro; los valores de la enumeración están por definir, G8), `note` (opcional, longitud de `FieldLimits`).
+- Respuesta: `id`, `client_reading_id`, `value_mg_dl` (siempre en mg/dL), `measured_at`, `source`, `context`, `status` (`ACCEPTED` o `FLAGGED`), `issue_codes` (`DUPLICATE_SUSPECTED`, `IMPLAUSIBLE_RATE_OF_CHANGE`, `UNIT_MISMATCH_SUSPECTED`), `simulated`. Una lectura sospechosa se guarda `FLAGGED`, nunca se oculta. Repetir el mismo contenido responde `200` con la original y no duplica nada. Con `201` trae `Location`. La respuesta no espera a las alertas: los suscriptores del evento `GlucoseReadingRecorded` corren después del commit.
+- Errores: C1, C3, C4; `409 CONFLICT` (mismo `client_reading_id` con otro contenido), `422 GLUCOSE_OUT_OF_RANGE` (fuera del rango medible de la clínica; no se guarda), `422 READING_IN_FUTURE`, `422 READING_TOO_OLD`.
+
+#### `POST /readings/batch`
+- Operación: `record_glucose_readings_batch` · Permiso: `glucose.write_own` · Ruta: P · Trazabilidad: HU-16, RF-32, RF-33, RNF-11, RNF-20 · Patrón: P12 · Éxito: 200
+- Solicitud: `items` (hasta 500 lecturas, 512 KiB), cada una con los campos de `POST /readings`. Es el envío de la cola offline.
+- Respuesta: `items` en el mismo orden, cada uno con `client_reading_id`, `result` (`CREATED`, `DUPLICATE` o `REJECTED`), `reading_id` si se guardó y, si fue rechazada, `reason_code` con el código de error de la validación. Las válidas se guardan aunque otra se rechace. Reenviar el lote devuelve `DUPLICATE` sin duplicar. El lote queda en `monitoring.sync_batches`.
+- Errores: C1, C3, C4 (más de 500 elementos responde `422`; más de 512 KiB, `413`).
+
+#### `POST /readings/cgm-import`
+- Operación: `import_cgm_readings` · Permiso: `glucose.write_own` · Ruta: P · Trazabilidad: HU-23, RF-41, RF-33 · Patrón: P06, P12 · Éxito: 200
+- Solicitud: cuerpo crudo `text/csv` con la exportación del sensor (hasta 10 MiB y 100.000 filas). Lo lee `CgmCsvAdapter`.
+- Respuesta: `format` reconocido, `created`, `duplicates` y `rejected` (conteos). Las lecturas pasan por la validación en cadena y se guardan con fuente `CGM`; las repetidas se marcan `DUPLICATE`.
+- Errores: C1, C3, C4, `415`; un formato desconocido responde `422 VALIDATION_ERROR` con la lista de formatos admitidos en `detail`.
+
+#### `GET /readings`
+- Operación: `list_glucose_readings` · Permiso: `glucose.read_own` · Ruta: P · Trazabilidad: HU-22, RF-42 · Patrón: - · Éxito: 200
+- Solicitud: `from`, `to`, `source`, `status`, `limit`, `cursor`.
+- Respuesta: lecturas propias con los campos de `POST /readings` y `corrects_id` si es una corrección. El original corregido sigue visible con `status` `CORRECTED`.
+- Errores: C1, C3, C4.
+
+#### `GET /patients/{patient_id}/readings`
+- Operación: `list_patient_glucose_readings` · Permiso: `patients.read_assigned` · Ruta: P · Trazabilidad: HU-14, HU-46, RF-30, RF-80 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `from`, `to`, `source`, `status`, `limit`, `cursor`.
+- Respuesta: las mismas lecturas del paciente asignado. Cada petición escribe una fila `GLUCOSE_READINGS` en `audit.data_access_log` antes de responder.
+- Errores: C1, C2, C4, C5 (paciente no asignado o de otra clínica responde `404`).
+
+#### `POST /insulin-doses`
+- Operación: `record_insulin_dose` · Permiso: `records.write_own` · Ruta: P · Trazabilidad: HU-17, RF-34 · Patrón: P23 · Éxito: 201
+- Solicitud: `insulin_product_id` (producto de un catálogo, G10), `kind` (`BASAL`, `BOLUS` o `CORRECTION`), `units` (decimal dentro del límite técnico), `administered_at`. La API solo registra lo que el paciente indica: nunca calcula ni sugiere una dosis.
+- Respuesta: `id`, `insulin_product_id`, `kind`, `units`, `administered_at`, `treatment_plan_id` (el plan activo, si existe), `simulated`.
+- Errores: C1, C3, C4 (unidades fuera de límites responde `422 VALIDATION_ERROR`).
+
+#### `GET /insulin-doses`
+- Operación: `list_insulin_doses` · Permiso: `records.read_own` · Ruta: P · Trazabilidad: HU-17, HU-22 · Patrón: - · Éxito: 200
+- Solicitud: `from`, `to`, `limit`, `cursor`.
+- Respuesta: dosis propias.
+- Errores: C1, C3, C4.
+
+#### `POST /meals`
+- Operación: `record_meal` · Permiso: `records.write_own` · Ruta: P · Trazabilidad: HU-18, RF-35 · Patrón: - · Éxito: 201
+- Solicitud: `meal_type` (valores por definir, G8), `eaten_at`, `carbs_g` (carbohidratos estimados, dentro del límite de `FieldLimits`).
+- Respuesta: `id`, `meal_type`, `eaten_at`, `carbs_g`, `simulated`.
+- Errores: C1, C3, C4 (carbohidratos negativos o fuera de límites responde `422` con el campo en `detail.errors`).
+
+#### `GET /meals`
+- Operación: `list_meals` · Permiso: `records.read_own` · Ruta: P · Trazabilidad: HU-18, HU-22 · Patrón: - · Éxito: 200
+- Solicitud: `from`, `to`, `limit`, `cursor`.
+- Respuesta: comidas propias.
+- Errores: C1, C3, C4.
+
+#### `POST /activities`
+- Operación: `record_activity` · Permiso: `records.write_own` · Ruta: P · Trazabilidad: HU-18, RF-36 · Patrón: - · Éxito: 201
+- Solicitud: `activity_type` y `intensity` (valores por definir, G8), `duration_minutes` (dentro de límites), `started_at`.
+- Respuesta: `id`, `activity_type`, `intensity`, `duration_minutes`, `started_at`, `simulated`. Se usa como contexto en los patrones.
+- Errores: C1, C3, C4.
+
+#### `GET /activities`
+- Operación: `list_activities` · Permiso: `records.read_own` · Ruta: P · Trazabilidad: HU-18, HU-22 · Patrón: - · Éxito: 200
+- Solicitud: `from`, `to`, `limit`, `cursor`.
+- Respuesta: actividades propias.
+- Errores: C1, C3, C4.
+
+#### `POST /symptoms`
+- Operación: `record_symptoms` · Permiso: `records.write_own` · Ruta: P · Trazabilidad: HU-19, RF-37 · Patrón: P17 · Éxito: 201
+- Solicitud: `symptoms` (códigos de una lista, por ejemplo sed, mareo, sudoración, visión borrosa; G10), `occurred_at`, `note` (texto libre acotado por `FieldLimits`).
+- Respuesta: `id`, `symptoms`, `occurred_at`, `alarm_detected` (propuesto: `true` si algún síntoma es de alarma; la app muestra "contacta a tu equipo o a urgencias" y se crea una alerta para el equipo), `simulated`.
+- Errores: C1, C3, C4 (nota más larga que el límite responde `422`).
+
+#### `GET /symptoms`
+- Operación: `list_symptoms` · Permiso: `records.read_own` · Ruta: P · Trazabilidad: HU-19, HU-22 · Patrón: - · Éxito: 200
+- Solicitud: `from`, `to`, `limit`, `cursor`.
+- Respuesta: síntomas propios.
+- Errores: C1, C3, C4.
+
+#### `POST /lab-results`
+- Operación: `record_own_lab_result` · Permiso: `labs.write_own` · Ruta: P · Trazabilidad: HU-20, RF-38 · Patrón: - · Éxito: 201
+- Solicitud: `value`, `unit` (`%` o `mmol/mol`; mmol/mol se convierte con la ecuación IFCC-NGSP), `measured_on` (fecha del examen). El origen queda `PATIENT_REPORTED`.
+- Respuesta: `id`, `value_percent`, `measured_on`, `origin: PATIENT_REPORTED`, `simulated`.
+- Errores: C1, C3, C4 (valor de HbA1c fuera de rango responde `422 VALIDATION_ERROR`).
+
+#### `POST /patients/{patient_id}/lab-results`
+- Operación: `record_patient_lab_result` · Permiso: `labs.write_assigned` · Ruta: P · Trazabilidad: HU-20, RF-38 · Patrón: P11, P09 · Éxito: 201
+- Solicitud: `value`, `unit`, `measured_on`. El origen queda `LAB` y reemplaza al autorreporte en las gráficas de tendencia.
+- Respuesta: igual que `POST /lab-results` con `origin: LAB`.
+- Errores: C1, C2, C4, C5.
+
+#### `GET /lab-results`
+- Operación: `list_lab_results` · Permiso: `records.read_own` · Ruta: P · Trazabilidad: HU-20 · Patrón: - · Éxito: 200
+- Solicitud: `from`, `to`, `limit`, `cursor`.
+- Respuesta: resultados propios con su origen.
+- Errores: C1, C3, C4.
+
+#### `GET /patients/{patient_id}/lab-results`
+- Operación: `list_patient_lab_results` · Permiso: `patients.read_assigned` · Ruta: P · Trazabilidad: HU-20, HU-46, RF-38, RF-80 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `from`, `to`, `limit`, `cursor`.
+- Respuesta: resultados del paciente asignado, con origen. Escribe una fila `LAB_RESULTS` en `audit.data_access_log`.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /records/{record_type}/{record_id}/corrections`
+- Operación: `correct_record` · Permiso: `records.correct_own` · Ruta: P · Trazabilidad: HU-21, RF-39, RNF-20 · Patrón: P12 · Éxito: 201
+- Solicitud: `record_type` en la ruta (`readings`, `insulin-doses`, `meals`, `activities` o `symptoms`), `reason` (10 a 500 caracteres) y `correction` (los campos del mismo tipo de registro). Crea un registro nuevo que apunta al original (`supersedes_id`); el original queda visible como corregido.
+- Respuesta: el registro nuevo. Si es una lectura, pasa de nuevo por la validación en cadena.
+- Errores: C1, C3, C4, C5 (registro ajeno responde `404`); `409 INVALID_STATE_TRANSITION` (el registro ya fue corregido o anulado), `422 REASON_REQUIRED`, `422 GLUCOSE_OUT_OF_RANGE` (para lecturas).
+
+#### `POST /records/{record_type}/{record_id}/annulments`
+- Operación: `annul_record` · Permiso: `records.correct_own` · Ruta: P · Trazabilidad: HU-21, RF-39, RNF-20 · Patrón: - · Éxito: 201
+- Solicitud: `record_type` como en la corrección y `reason` (10 a 500 caracteres). Anula sin borrar: agrega una fila de anulación que apunta al original.
+- Respuesta: el registro de anulación con `supersedes_id`.
+- Errores: C1, C3, C4, C5; `409 INVALID_STATE_TRANSITION`, `422 REASON_REQUIRED`.
+
+#### `GET /timeline`
+- Operación: `get_own_timeline` · Permiso: `records.read_own` · Ruta: P · Trazabilidad: HU-22, RF-40 · Patrón: P21 · Éxito: 200
+- Solicitud: `from`, `to`, `event_types` (lista), `limit`, `cursor`.
+- Respuesta: eventos propios de glucosa, dosis, comidas, actividad y síntomas ordenados por hora, cada uno con `event_type`, `occurred_at`, `status` y los datos propios de su tipo. La misma colección alimenta la vista, el CSV y el FHIR (`ClinicalEventVisitor`).
+- Errores: C1, C3, C4.
+
+#### `GET /patients/{patient_id}/timeline`
+- Operación: `get_patient_timeline` · Permiso: `patients.read_assigned` · Ruta: P · Trazabilidad: HU-46, HU-22, RF-40, RF-80 · Patrón: P21, P11, P09 · Éxito: 200
+- Solicitud: `from`, `to`, `event_types`, `limit`, `cursor`.
+- Respuesta: igual que `GET /timeline`, del paciente asignado. Escribe una fila `PATIENT_TIMELINE` en `audit.data_access_log`.
+- Errores: C1, C2, C4, C5.
+
+#### `GET /timeline/export`
+- Operación: `export_own_timeline` · Permiso: `records.read_own` · Ruta: P · Trazabilidad: RF-40, RNF-13 · Patrón: P21 · Éxito: 200
+- Solicitud: `format` (`csv` o `fhir`), `from`, `to`. Cuenta para el límite de reportes y exportaciones (20 por hora).
+- Respuesta: archivo `text/csv` (con prefijo `'` en celdas que empiezan con `=`, `+`, `-`, `@`) o Bundle `application/fhir+json`. El contenido FHIR exacto está por definir (G25).
+- Errores: C1, C3, C4.
+
+#### `GET /patients/{patient_id}/timeline/export`
+- Operación: `export_patient_timeline` · Permiso: `patients.read_assigned` · Ruta: P · Trazabilidad: RF-40, RNF-13 · Patrón: P21, P11, P09 · Éxito: 200
+- Solicitud: `format` (`csv` o `fhir`), `from`, `to`.
+- Respuesta: igual que `GET /timeline/export`. Escribe una fila con `action = EXPORT` en `audit.data_access_log`.
+- Errores: C1, C2, C4, C5.
+
+#### `GET /patients/me`
+- Operación: `get_own_patient_profile` · Permiso: `patients.read_own` · Ruta: P · Trazabilidad: HU-22, RF-42, RF-50 · Patrón: P11 · Éxito: 200
+- Solicitud: sin parámetros. Se declara antes que `GET /patients/{patient_id}` para que `me` no se lea como un id.
+- Respuesta: `id`, `account_status`, `clinic` (`name`, `simulated`), `target_profile` (`id`, `code`, `version`) y `simulated`.
+- Errores: C1, C3.
+
+#### `GET /patients/me/overview`
+- Operación: `get_own_overview` · Permiso: `patients.read_own` · Ruta: P · Trazabilidad: HU-22, HU-29, RF-42 · Patrón: P10, P11 · Éxito: 200
+- Solicitud: `window` (`24h`, `7d`, `14d` o `30d`, por defecto `14d`).
+- Respuesta: el inicio del paciente: lecturas recientes con su rango objetivo, métricas propias de la ventana en lenguaje simple, plan activo y alertas abiertas propias. No llama a la IA.
+- Errores: C1, C3, C4.
+
+#### `GET /patients/{patient_id}/overview`
+- Operación: `get_patient_overview` · Permiso: `patients.read_assigned` · Ruta: F · Trazabilidad: HU-46, HU-14, RF-80, RF-30, RNF-07 · Patrón: P10, P11, P09 · Éxito: 200
+- Solicitud: `window` (`24h`, `7d`, `14d` o `30d`, por defecto `14d`).
+- Respuesta: `PatientOverviewResponse`: últimas lecturas, métricas de la ventana, plan activo, alertas abiertas, recomendaciones pendientes y el último pronóstico guardado. **Leer el expediente no llama a la IA.** Las glucosas salen en mg/dL. Incluye `simulated` y, en una clínica demo, `data_source: "SIMULATED"` (G6). `PatientOverviewFacade` abre una unidad de trabajo, usa el puerto envuelto por el decorador de auditoría y el proxy de asignación; la fila de auditoría se escribe en la misma transacción.
+- Errores: C1, C2, C4, C5 (el `CLINIC_ADMIN` recibe `403 FORBIDDEN`: no tiene el permiso).
+
+### 8.7 Plan de tratamiento, metas y recordatorios (M6)
+
+Estados del plan: `DRAFT`, `ACTIVE` y `SUPERSEDED`. Un paciente tiene un solo plan activo. Cada cambio crea una versión nueva copiada de la anterior. El paciente solo ve el plan activo y no puede editar dosis. Las metas, las duraciones y los umbrales son datos de la base de datos (`care.target_profiles`, `care.protocol_templates`, `care.reminder_schedules`): ninguno vive en el código.
+
+#### `POST /protocol-templates`
+- Operación: `create_protocol_template` · Permiso: `protocol_templates.manage` · Ruta: P · Trazabilidad: HU-24, RF-43 · Patrón: P04 · Éxito: 201
+- Solicitud: `name` (por ejemplo "Basal-bolo adulto DM1") y `content` (estructura de insulinas, horarios y metas por defecto; su forma interna está por definir, G16).
+- Respuesta: `id`, `name`, `version` (1), `status` (`ACTIVE`), `content`, `simulated`. Queda versionada y disponible para los médicos de su clínica.
+- Errores: C1, C2, C4; `409 CONFLICT` (nombre repetido).
+
+#### `GET /protocol-templates`
+- Operación: `list_protocol_templates` · Permiso: `protocol_templates.read` · Ruta: P · Trazabilidad: HU-24, HU-25, RF-43, RF-44 · Patrón: - · Éxito: 200
+- Solicitud: `status` (`ACTIVE` o `RETIRED`), `limit`, `cursor`.
+- Respuesta: plantillas de la clínica con su última versión.
+- Errores: C1, C2, C4.
+
+#### `GET /protocol-templates/{template_id}`
+- Operación: `get_protocol_template` · Permiso: `protocol_templates.read` · Ruta: P · Trazabilidad: HU-24, HU-25 · Patrón: - · Éxito: 200
+- Solicitud: `template_id` en la ruta.
+- Respuesta: la plantilla con su contenido y sus versiones.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /protocol-templates/{template_id}/versions`
+- Operación: `create_protocol_template_version` · Permiso: `protocol_templates.manage` · Ruta: P · Trazabilidad: HU-24, RF-43 · Patrón: P05 · Éxito: 201
+- Solicitud: `content` (la estructura nueva). La versión anterior se conserva.
+- Respuesta: la plantilla con `version` incrementada. Los planes ya creados no cambian.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (plantilla retirada).
+
+#### `POST /protocol-templates/{template_id}/retire`
+- Operación: `retire_protocol_template` · Permiso: `protocol_templates.manage` · Ruta: P · Trazabilidad: HU-24, RF-43 · Patrón: P18 · Éxito: 200
+- Solicitud: sin cuerpo. Una plantilla retirada no se puede clonar, pero los planes que ya la usan no cambian.
+- Respuesta: la plantilla con `status: RETIRED`.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (ya retirada).
+
+#### `POST /treatment-plans`
+- Operación: `create_treatment_plan` · Permiso: `treatment_plans.manage` · Ruta: P · Trazabilidad: HU-25, RF-44, RF-45 · Patrón: P05, P04, P11 · Éxito: 201
+- Solicitud: `patient_id` (paciente asignado), `template_id` (opcional: clona la plantilla con `ProtocolTemplate.clone_for_patient()`) y `content` con las personalizaciones.
+- Respuesta: `id`, `patient_id`, `version`, `status: DRAFT`, `content`, `template_id`. La plantilla original no cambia. `TreatmentPlanBuilder` valida las invariantes al activar, no al crear el borrador.
+- Errores: C1, C2, C4; `404 NOT_FOUND` (paciente no asignado o plantilla inexistente o de otra clínica).
+
+#### `GET /treatment-plans`
+- Operación: `list_treatment_plans` · Permiso: `treatment_plans.manage` · Ruta: P · Trazabilidad: HU-26, RF-46 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `patient_id` (obligatorio), `status`, `limit`, `cursor`.
+- Respuesta: planes del paciente asignado con su versión y estado (`DRAFT`, `ACTIVE`, `SUPERSEDED`). Escribe una fila `TREATMENT_PLAN` en `audit.data_access_log`. El permiso de lectura del médico no está separado de `treatment_plans.manage` (G15).
+- Errores: C1, C2, C4; `404 NOT_FOUND` (paciente no asignado).
+
+#### `GET /treatment-plans/{plan_id}`
+- Operación: `get_treatment_plan` · Permiso: `treatment_plans.manage` · Ruta: P · Trazabilidad: HU-25, HU-26 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `plan_id` en la ruta.
+- Respuesta: el plan con su contenido.
+- Errores: C1, C2, C4, C5.
+
+#### `PATCH /treatment-plans/{plan_id}`
+- Operación: `update_treatment_plan` · Permiso: `treatment_plans.manage` · Ruta: P · Trazabilidad: HU-25, RF-45, RF-47 · Patrón: P16, P04 · Éxito: 200
+- Solicitud: `content` (solo en un plan `DRAFT`). Antes de cada cambio se guarda una foto jsonb del plan (`TreatmentPlanMemento`).
+- Respuesta: el borrador actualizado.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (un plan `ACTIVE` no se edita: se crea una versión nueva).
+
+#### `POST /treatment-plans/{plan_id}/activate`
+- Operación: `activate_treatment_plan` · Permiso: `treatment_plans.manage` · Ruta: P · Trazabilidad: HU-25, HU-26, RF-45, RF-46 · Patrón: P13, P04, P18, P09 · Éxito: 200
+- Solicitud: sin cuerpo. `ActivateTreatmentPlanCommand` valida las invariantes (dosis dentro de límites, horarios sin solapes, metas coherentes), pasa el plan a `ACTIVE` y el anterior a `SUPERSEDED`.
+- Respuesta: el plan activo. El paciente ve el plan nuevo.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (no es un borrador), `422 VALIDATION_ERROR` con la lista de invariantes incumplidas en `detail.errors` (G16).
+
+#### `POST /treatment-plans/{plan_id}/versions`
+- Operación: `create_treatment_plan_version` · Permiso: `treatment_plans.manage` · Ruta: P · Trazabilidad: HU-26, RF-46 · Patrón: P05, P16 · Éxito: 201
+- Solicitud: sin cuerpo. Copia profunda del plan en `DRAFT` (`copy_for_new_version()`); el plan activo no cambia hasta activar la nueva.
+- Respuesta: el borrador nuevo con la versión siguiente.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (solo un plan `ACTIVE` genera una versión nueva).
+
+#### `GET /treatment-plans/{plan_id}/snapshots`
+- Operación: `list_treatment_plan_snapshots` · Permiso: `treatment_plans.manage` · Ruta: P · Trazabilidad: HU-26, RF-47 · Patrón: P16, P11, P09 · Éxito: 200
+- Solicitud: `limit`, `cursor`.
+- Respuesta: fotos del plan (`id`, `version`, `created_at`, `created_by`) para elegir cuál restaurar.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /treatment-plans/{plan_id}/restore`
+- Operación: `restore_treatment_plan` · Permiso: `treatment_plans.manage` · Ruta: P · Trazabilidad: HU-26, RF-47 · Patrón: P16, P05, P09 · Éxito: 201
+- Solicitud: `snapshot_id`. Restaurar crea una versión nueva en `DRAFT` con el contenido de la foto; el historial no se pierde.
+- Respuesta: el borrador nuevo.
+- Errores: C1, C2, C4, C5 (foto de otro plan responde `404`).
+
+#### `GET /patients/me/treatment-plan`
+- Operación: `get_own_treatment_plan` · Permiso: `treatment_plans.read_own` · Ruta: P · Trazabilidad: HU-28, RF-50 · Patrón: P11 · Éxito: 200
+- Solicitud: sin parámetros.
+- Respuesta: el plan `ACTIVE` en lenguaje claro (insulinas, horarios y metas) y sus recordatorios. Sin opciones de edición. No existe plan en `DRAFT` visible para el paciente ni recomendaciones con dosis hasta que se apliquen.
+- Errores: C1, C3; `404 NOT_FOUND` (no hay plan activo).
+
+#### `POST /target-profiles`
+- Operación: `create_target_profile` · Permiso: `target_profiles.manage` · Ruta: P · Trazabilidad: HU-27, RF-48 · Patrón: P19 · Éxito: 201
+- Solicitud: `code`, `label`, `population`, `is_default`, `range_low_mg_dl`, `range_high_mg_dl`, `very_low_mg_dl`, `very_high_mg_dl`, `tir_min_pct`, `tbr_l1_max_pct`, `tbr_l2_max_pct`, `tar_l1_max_pct`, `tar_l2_max_pct`, `cv_max_pct`, `min_data_sufficiency_pct`, `min_days`, `hba1c_goal_pct`, `fasting_low_mg_dl`, `fasting_high_mg_dl`, `postprandial_max_mg_dl`, `night_start`, `night_end` (los nombres de [`Metricas-clinicas.md`](Metricas-clinicas.md), sección 7.5).
+- Respuesta: el perfil con `id` y `version` (1). Los valores de los perfiles semilla (`ADULT_STANDARD`, `OLDER_OR_HIGH_RISK`, `PREGNANCY_T1D`, `PREGNANCY_T2D_GDM`) se cargan por la base de datos, no por esta API.
+- Errores: C1, C2, C4; `409 CONFLICT` (código repetido).
+
+#### `GET /target-profiles`
+- Operación: `list_target_profiles` · Permiso: `target_profiles.manage` o `target_profiles.assign` · Ruta: P · Trazabilidad: HU-27, RF-48 · Patrón: - · Éxito: 200
+- Solicitud: `population`, `limit`, `cursor`.
+- Respuesta: perfiles vigentes de la clínica con su versión.
+- Errores: C1, C2, C4.
+
+#### `GET /target-profiles/{profile_id}`
+- Operación: `get_target_profile` · Permiso: `target_profiles.manage` o `target_profiles.assign` · Ruta: P · Trazabilidad: HU-27, RF-48 · Patrón: - · Éxito: 200
+- Solicitud: `profile_id` en la ruta.
+- Respuesta: el perfil con todos sus campos y su historial de versiones.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /target-profiles/{profile_id}/versions`
+- Operación: `create_target_profile_version` · Permiso: `target_profiles.manage` · Ruta: P · Trazabilidad: HU-27, RF-48 · Patrón: P05 · Éxito: 201
+- Solicitud: los campos del perfil que cambian. Se crea una versión nueva; las métricas pasadas conservan la versión con la que se calcularon.
+- Respuesta: el perfil con la versión siguiente.
+- Errores: C1, C2, C4, C5.
+
+#### `PUT /patients/{patient_id}/target-profile`
+- Operación: `assign_target_profile` · Permiso: `target_profiles.assign` · Ruta: P · Trazabilidad: HU-27, RF-48 · Patrón: P11, P19, P09 · Éxito: 200
+- Solicitud: `target_profile_id` (un perfil vigente). Las métricas del paciente se comparan desde entonces con ese perfil.
+- Respuesta: `patient_id` y el perfil asignado con su versión.
+- Errores: C1, C2, C4, C5 (paciente no asignado o perfil de otra clínica).
+
+#### `POST /patients/{patient_id}/reminders`
+- Operación: `create_reminder` · Permiso: `reminders.manage_assigned` · Ruta: P · Trazabilidad: HU-28, RF-49 · Patrón: P11, P07 · Éxito: 201
+- Solicitud: `reminder_type` (medición, dosis o control; valores por definir, G8), `schedule` (hora local y días; forma por definir) y `is_active`.
+- Respuesta: el recordatorio. Se envía a su hora por los canales elegidos y respeta el horario de silencio del paciente.
+- Errores: C1, C2, C4, C5.
+
+#### `GET /patients/{patient_id}/reminders`
+- Operación: `list_patient_reminders` · Permiso: `reminders.manage_assigned` · Ruta: P · Trazabilidad: HU-28, RF-49 · Patrón: P11 · Éxito: 200
+- Solicitud: `limit`, `cursor`.
+- Respuesta: recordatorios del paciente asignado.
+- Errores: C1, C2, C4, C5.
+
+#### `PATCH /patients/{patient_id}/reminders/{reminder_id}`
+- Operación: `update_patient_reminder` · Permiso: `reminders.manage_assigned` · Ruta: P · Trazabilidad: HU-28, RF-49 · Patrón: P11 · Éxito: 200
+- Solicitud: `schedule`, `is_active`.
+- Respuesta: el recordatorio actualizado.
+- Errores: C1, C2, C4, C5.
+
+#### `GET /reminders`
+- Operación: `list_own_reminders` · Permiso: `reminders.manage_own` · Ruta: P · Trazabilidad: HU-28, RF-49, RF-50 · Patrón: - · Éxito: 200
+- Solicitud: `limit`, `cursor`.
+- Respuesta: recordatorios propios con lo que el plan permite ajustar.
+- Errores: C1, C3, C4.
+
+#### `PATCH /reminders/{reminder_id}`
+- Operación: `update_own_reminder` · Permiso: `reminders.manage_own` · Ruta: P · Trazabilidad: HU-28, RF-49 · Patrón: - · Éxito: 200
+- Solicitud: `schedule`, `is_active`, solo dentro de lo que permite el plan.
+- Respuesta: el recordatorio actualizado.
+- Errores: C1, C3, C4, C5; `403 FORBIDDEN` (el ajuste excede lo que permite el plan).
+
+### 8.8 Métricas glucémicas y pronóstico (M7, M9)
+
+Las métricas y los pronósticos se calculan con el perfil de metas asignado al paciente (nunca con valores del código). Los días y las noches se calculan en la zona de la clínica. `window` acepta `24h`, `7d`, `14d` y `30d`. Con datos insuficientes la respuesta lo dice y no muestra un porcentaje engañoso.
+
+#### `GET /patients/{patient_id}/metrics`
+- Operación: `get_patient_metrics` · Permiso: `metrics.read_assigned` · Ruta: F · Trazabilidad: HU-29, RF-51, RF-52, RF-54, RF-55 · Patrón: P14, P19, P11, P09 · Éxito: 200
+- Solicitud: `window` (por defecto `14d`), `compare_previous` (booleano, por defecto `true`).
+- Respuesta: `window`, `period_from`, `period_to`, `timezone`, `target_profile` (`id`, `code`, `version`), `data_sufficiency_pct`, `is_sufficient` y `confidence` (`NORMAL` o `LOW_CONFIDENCE`); `metrics` con `tir_pct`, `tbr_l1_pct`, `tbr_l2_pct`, `tbr_pct`, `tar_l1_pct`, `tar_l2_pct`, `tar_pct`, `mean_glucose_mg_dl`, `gmi_pct`, `cv_pct` y `hypo_events_count`; y, si se pide, `previous` (mismas métricas de la ventana anterior del mismo tamaño) y `tir_delta_pct` (puntos porcentuales, con signo). Para un paciente con SMBG no hay AGP, CV ni GMI: se devuelven las métricas de glucometría (nombres por definir). Escribe una fila `GLYCEMIC_METRICS` en `audit.data_access_log`.
+- Errores: C1, C2, C4, C5.
+
+#### `GET /patients/{patient_id}/metrics/agp`
+- Operación: `get_patient_agp` · Permiso: `metrics.read_assigned` · Ruta: P · Trazabilidad: HU-30, RF-53, RF-55 · Patrón: P14, P11, P09 · Éxito: 200
+- Solicitud: `days` (por defecto 14), `resolution` (`hour` o `15min`).
+- Respuesta: `bins` (por franja del día local: `p5`, `p25`, `p50`, `p75` y `p95` en mg/dL), `target_range` (`low` y `high` del perfil), `data_sufficiency_pct` e `is_sufficient`. Con datos insuficientes `bins` va vacío y `is_sufficient` es `false` (aviso "datos insuficientes").
+- Errores: C1, C2, C4, C5.
+
+#### `GET /patients/me/metrics`
+- Operación: `get_own_metrics` · Permiso: `metrics.read_own` · Ruta: P · Trazabilidad: HU-29, RF-51, RF-55 · Patrón: P14, P19 · Éxito: 200
+- Solicitud: `window`, `compare_previous`.
+- Respuesta: las métricas propias con la forma de `GET /patients/{patient_id}/metrics`. Solo las del paciente autenticado.
+- Errores: C1, C3, C4.
+
+#### `GET /patients/{patient_id}/forecast`
+- Operación: `get_patient_forecast` · Permiso: `ai.forecasts.read_assigned` · Ruta: F · Trazabilidad: HU-36, HU-40, RF-66, RF-75, RF-76 · Patrón: P11, P18, P06 · Éxito: 200
+- Solicitud: `mode` (`SHORT_TERM` u `OVERNIGHT`, por defecto `SHORT_TERM`).
+- Respuesta: `mode`, `generated_at`, `model_name`, `model_version`, `is_fallback`, `fallback_reason`, `trend` (`FALLING`, `STABLE` o `RISING`), `points` (`horizon_minutes`, `timestamp`, `p10`, `p50`, `p90`), `risk` (`hypo_probability` y `hyper_probability` por horizonte) y `explanation` (`summary`, `factors`, `data_refs`). `RemoteAiServiceProxy` llama al servicio con un seudónimo, con tiempo máximo de 3 s; si hay timeout, error o circuito abierto responde el respaldo lineal con `is_fallback: true` (la interfaz muestra "Respaldo por reglas"). La salida se guarda en `ai.glucose_forecasts`. Con datos insuficientes (por ejemplo un paciente con SMBG): `points` vacío, `is_fallback: true` y `fallback_reason: INSUFFICIENT_DATA`. Si la IA y el respaldo fallan no hay `5xx`: la API responde `200` con el respaldo.
+- Errores: C1, C2, C4, C5. La IA caída **no** es un error (G35).
+
+#### `GET /patients/me/forecast`
+- Operación: `get_own_forecast` · Permiso: `ai.forecasts.read_own` · Ruta: P · Trazabilidad: HU-36, RF-64, RF-66 · Patrón: P11, P18 · Éxito: 200
+- Solicitud: `mode`.
+- Respuesta: tendencia y banda `p10` a `p90` por horizonte con `is_fallback`. **Nunca contiene una dosis de insulina.**
+- Errores: C1, C3, C4.
+
+### 8.9 Alertas, reglas y notificaciones (M8)
+
+Estados de la alerta: `OPEN`, `ACKNOWLEDGED`, `RESOLVED`, `ESCALATED` (`OPEN → ACKNOWLEDGED → RESOLVED` y `OPEN → ESCALATED → ACKNOWLEDGED`). Las alertas las crea el sistema (evaluación de reglas, planificador, síntomas de alarma, pronóstico); no hay endpoint para crearlas. El escalamiento por la cadena paciente, médico principal, equipo y administrador lo corre el sistema (`AlertEscalationHandler`, P12) y no tiene endpoint propio: reconocer la alerta lo detiene. Las notificaciones por correo y Web Push dicen solo "Tienes una alerta nueva en Insumap", sin valores clínicos.
+
+#### `POST /alert-rules`
+- Operación: `create_alert_rule` · Permiso: `alert_rules.manage` · Ruta: P · Trazabilidad: HU-31, RF-56, RF-57, RF-58 · Patrón: P08, P09 · Éxito: 201
+- Solicitud: `name`, `alert_type`, `priority`, `condition` (árbol de condiciones: nodos de umbral, duración y tasa de cambio, combinados con `ALL_OF` y `ANY_OF`; campos de cada nodo por definir, G16) y `escalation` (tiempos por eslabón de la cadena). Los umbrales y las duraciones son datos de la regla, no del código.
+- Respuesta: `id`, `version` (1), `status`, `name`, `alert_type`, `priority`, `condition`, `escalation`.
+- Errores: C1, C2, C4.
+
+#### `GET /alert-rules`
+- Operación: `list_alert_rules` · Permiso: `alert_rules.read` · Ruta: P · Trazabilidad: HU-31, RF-56 · Patrón: - · Éxito: 200
+- Solicitud: `alert_type`, `limit`, `cursor`.
+- Respuesta: reglas vigentes de la clínica.
+- Errores: C1, C2, C4.
+
+#### `GET /alert-rules/{rule_id}`
+- Operación: `get_alert_rule` · Permiso: `alert_rules.read` · Ruta: P · Trazabilidad: HU-31, RF-56 · Patrón: P08 · Éxito: 200
+- Solicitud: `rule_id` en la ruta.
+- Respuesta: la regla con su árbol y su historial de versiones.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /alert-rules/{rule_id}/versions`
+- Operación: `create_alert_rule_version` · Permiso: `alert_rules.manage` · Ruta: P · Trazabilidad: HU-31, RF-56 · Patrón: P08, P09 · Éxito: 201
+- Solicitud: los campos de la regla que cambian. Una regla activa no se edita: se versiona y la anterior queda para el historial.
+- Respuesta: la regla con la versión siguiente.
+- Errores: C1, C2, C4, C5.
+
+#### `GET /alerts`
+- Operación: `list_alerts` · Permiso: `alerts.read_assigned` o `alerts.read_own` · Ruta: P · Trazabilidad: HU-33, HU-32, RF-65 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `status`, `type`, `from`, `to`, `patient_id` (solo médico), `limit`, `cursor`. El médico ve las alertas de sus pacientes asignados; el paciente, las propias.
+- Respuesta: alertas con `id`, `patient_id`, `type` (`HYPOGLYCEMIA`, `HYPERGLYCEMIA`, `ADHERENCE`, `PREDICTIVE`), `level` (1, 2 o 3 en hipoglucemia), `priority`, `status`, `opened_at`, `rule_id`, `is_fallback` (alerta predictiva por tendencia lineal: "Respaldo por reglas") y `simulated`. Para el médico escribe una fila `ALERTS` en `audit.data_access_log`.
+- Errores: C1, C2, C3, C4; `404 NOT_FOUND` (un `patient_id` no asignado o ajeno).
+
+#### `GET /alerts/summary`
+- Operación: `get_alert_summary` · Permiso: `alerts.read_summary` · Ruta: P · Trazabilidad: HU-34, RF-60, RF-83 · Patrón: P10 · Éxito: 200
+- Solicitud: sin parámetros. Se declara antes que `GET /alerts/{alert_id}`.
+- Respuesta: conteos agregados (`open_count`, `escalated_count`) y `by_care_team` (médico principal y cantidad sin atender). Nunca glucosa ni valores; los conteos pequeños se agrupan.
+- Errores: C1, C2.
+
+#### `GET /alerts/{alert_id}`
+- Operación: `get_alert` · Permiso: `alerts.read_assigned` o `alerts.read_own` · Ruta: P · Trazabilidad: HU-33, RF-59, RF-65 · Patrón: P18, P11, P09 · Éxito: 200
+- Solicitud: `alert_id` en la ruta.
+- Respuesta: la alerta con su `history` (cadena de estados: quién, cuándo y nota) y a quién se notificó. El historial es append-only.
+- Errores: C1, C2, C3, C4, C5.
+
+#### `POST /alerts/{alert_id}/acknowledge`
+- Operación: `acknowledge_alert` · Permiso: `alerts.acknowledge` o `alerts.acknowledge_own` · Ruta: P · Trazabilidad: HU-33, HU-34, RF-59, RF-60 · Patrón: P18, P12, P11 · Éxito: 200
+- Solicitud: `note` (opcional). El médico reconoce la de un paciente asignado; el paciente, la suya (primer paso de la cadena).
+- Respuesta: la alerta con `status: ACKNOWLEDGED`, quién y cuándo. Detiene el escalamiento.
+- Errores: C1, C2, C3, C4, C5; `409 INVALID_STATE_TRANSITION` (por ejemplo, una alerta `RESOLVED`).
+
+#### `POST /alerts/{alert_id}/resolve`
+- Operación: `resolve_alert` · Permiso: `alerts.resolve` · Ruta: P · Trazabilidad: HU-33, RF-59 · Patrón: P18, P11 · Éxito: 200
+- Solicitud: `note` (obligatoria, con límite de `FieldLimits`).
+- Respuesta: la alerta con `status: RESOLVED` y la nota en su historial.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (solo una alerta `ACKNOWLEDGED` se resuelve).
+
+#### `GET /notifications`
+- Operación: `list_notifications` · Permiso: `notifications.read_own` · Ruta: P · Trazabilidad: HU-32, HU-35, RF-61 · Patrón: P07 · Éxito: 200
+- Solicitud: `unread_only` (booleano), `limit`, `cursor`. La pueden llamar los cuatro roles.
+- Respuesta: notificaciones in-app propias con `id`, `type`, `title`, `body`, `created_at`, `read_at` y la referencia del recurso (por ejemplo la alerta). No incluye contenido que el rol no pueda ver.
+- Errores: C1, C2, C3, C4 (según el rol de quien llama).
+
+#### `POST /notifications/{notification_id}/read`
+- Operación: `mark_notification_read` · Permiso: `notifications.read_own` · Ruta: P · Trazabilidad: HU-35, RF-61 · Patrón: - · Éxito: 204
+- Solicitud: sin cuerpo.
+- Respuesta: sin cuerpo.
+- Errores: C1, C2, C3, C4, C5.
+
+#### `GET /notification-preferences`
+- Operación: `get_notification_preferences` · Permiso: `notification_preferences.manage_own` · Ruta: P · Trazabilidad: HU-35, RF-61, RF-62 · Patrón: P07 · Éxito: 200
+- Solicitud: sin parámetros.
+- Respuesta: `channels` (`EMAIL`, `WEB_PUSH`, `IN_APP`, cada uno habilitado o no) y `quiet_hours` (`start`, `end` en hora local).
+- Errores: C1, C2, C3.
+
+#### `PUT /notification-preferences`
+- Operación: `update_notification_preferences` · Permiso: `notification_preferences.manage_own` · Ruta: P · Trazabilidad: HU-35, RF-61, RF-62 · Patrón: P07 · Éxito: 200
+- Solicitud: `channels` y `quiet_hours`. Las notificaciones críticas (hipoglucemia nivel 2 y 3) no se silencian.
+- Respuesta: las preferencias guardadas.
+- Errores: C1, C2, C3, C4.
+
+#### `PUT /notification-preferences/web-push-subscription`
+- Operación: `register_web_push_subscription` · Permiso: `notification_preferences.manage_own` · Ruta: P · Trazabilidad: HU-35, RF-61 · Patrón: P07 · Éxito: 204
+- Solicitud: `endpoint` (solo `https`, host en `PUSH_ENDPOINT_ALLOWED_HOSTS`, sin IP literal) y `keys` (`p256dh`, `auth`). El endpoint lo envía el navegador y se trata como dato no confiable.
+- Respuesta: sin cuerpo.
+- Errores: C1, C2, C3, C4 (un endpoint rechazado responde `422` y registra `PUSH_ENDPOINT_REJECTED`).
+
+#### `DELETE /notification-preferences/web-push-subscription`
+- Operación: `remove_web_push_subscription` · Permiso: `notification_preferences.manage_own` · Ruta: P · Trazabilidad: HU-35, RF-61 · Patrón: P07 · Éxito: 204
+- Solicitud: sin cuerpo.
+- Respuesta: sin cuerpo. No es un registro clínico: se puede borrar.
+- Errores: C1, C2, C3.
