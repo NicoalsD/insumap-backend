@@ -312,6 +312,200 @@ Cada endpoint tiene un bloque con la misma forma:
 - Un listado devuelve `{"items": [...], "next_cursor": ...}` (sección 3) y acepta `limit` y `cursor`; no se repite en cada bloque.
 - Las respuestas de recursos clínicos del paciente incluyen `simulated` (sección 1.2).
 
+### 8.0 Resumen e índice
+
+Endpoints por sección. Post-MVP son los que atienden requisitos de las fases 10 a 12; el resto es MVP (fases 1 a 9):
+
+| Sección | Módulo | Endpoints | Post-MVP |
+|---|---|---|---|
+| 8.1 | Salud y metadatos | 3 | 0 |
+| 8.2 | Autenticación y activación (M1, M3) | 15 | 0 |
+| 8.3 | Clínicas, sedes y personal (M2) | 20 | 4 |
+| 8.4 | Pacientes, importación y credenciales (M3) | 16 | 0 |
+| 8.5 | Equipo de atención (M4) | 5 | 0 |
+| 8.6 | Registros del paciente y expediente (M5) | 26 | 0 |
+| 8.7 | Plan de tratamiento, metas y recordatorios (M6) | 24 | 0 |
+| 8.8 | Métricas glucémicas y pronóstico (M7, M9) | 5 | 0 |
+| 8.9 | Alertas, reglas y notificaciones (M8) | 15 | 0 |
+| 8.10 | IA y soporte a decisiones (M9) | 13 | 4 |
+| 8.11 | Dashboard médico, notas y reportes (M10) | 8 | 0 |
+| 8.12 | Mensajería y seguimiento (M11, Post-MVP) | 5 | 5 |
+| 8.13 | Auditoría, consentimiento y privacidad (M12) | 13 | 7 |
+| | **Total** | **168** | **20** |
+
+Índice de todos los endpoints. **R** es `F` (ruta fijada por un documento o por el código) o `P` (propuesta de este archivo). El detalle de cada uno está en su sección.
+
+| Método | Ruta | Operación | Permiso | R | Éxito |
+|---|---|---|---|---|---|
+| GET | `/health` | `get_health` | público | F | 200 |
+| GET | `/ready` | `get_readiness` | público | F | 200 |
+| GET | `/meta/field-limits` | `get_field_limits` | público | F | 200 |
+| POST | `/auth/login` | `login` | público | F | 200 |
+| POST | `/auth/mfa/verify` | `verify_mfa_challenge` | público (con `challenge_token`) | F | 200 |
+| POST | `/auth/mfa/enrollment` | `start_mfa_enrollment` | token de enrolamiento (personal sin MFA) | F | 200 |
+| POST | `/auth/mfa/enrollment/confirm` | `confirm_mfa_enrollment` | token de enrolamiento | F | 200 |
+| POST | `/auth/mfa/recovery-codes` | `regenerate_mfa_recovery_codes` | autenticado (personal con sesión completa) | F | 200 |
+| GET | `/auth/me` | `get_current_user` | autenticado | F | 200 |
+| POST | `/auth/refresh` | `refresh_session` | cookie de refresh | F | 200 |
+| POST | `/auth/logout` | `logout` | autenticado (cookie y JWT) | F | 204 |
+| POST | `/auth/logout-all` | `logout_all_sessions` | autenticado (cookie y JWT) | F | 204 |
+| POST | `/auth/password/change` | `change_password` | autenticado | F | 200 |
+| POST | `/auth/password-reset/request` | `request_password_reset` | público | F | 202 |
+| POST | `/auth/password-reset/complete` | `complete_password_reset` | público (con token de un solo uso) | F | 204 |
+| POST | `/auth/email-verification/confirm` | `confirm_email_verification` | público (con token de un solo uso) | F | 204 |
+| POST | `/auth/activation/verify` | `verify_activation_code` | público | F | 200 |
+| POST | `/auth/activation/complete` | `complete_activation` | público (con `activation_token`) | F | 200 |
+| POST | `/clinics` | `create_clinic` | `clinics.manage` | P | 201 |
+| GET | `/clinics` | `list_clinics` | `clinics.manage` | P | 200 |
+| GET | `/clinics/{clinic_id}` | `get_clinic` | `clinics.manage` | P | 200 |
+| PATCH | `/clinics/{clinic_id}` | `update_clinic` | `clinics.manage` | P | 200 |
+| POST | `/clinics/{clinic_id}/suspend` | `suspend_clinic` | `clinics.manage` | P | 200 |
+| POST | `/clinics/{clinic_id}/reactivate` | `reactivate_clinic` | `clinics.manage` | P | 200 |
+| POST | `/clinics/{clinic_id}/admins` | `create_clinic_admin` | `clinic_admins.manage` | P | 201 |
+| POST | `/clinics/{clinic_id}/admins/{user_id}/reset-access` | `reset_clinic_admin_access` | `clinic_admins.manage` | P | 204 |
+| GET | `/clinics/current` | `get_current_clinic` | `clinics.read` | P | 200 |
+| POST | `/sites` | `create_site` | `sites.manage` | P | 201 |
+| GET | `/sites` | `list_sites` | `sites.manage` | P | 200 |
+| PATCH | `/sites/{site_id}` | `update_site` | `sites.manage` | P | 200 |
+| PUT | `/users/{user_id}/sites` | `set_user_sites` | `sites.manage` | P | 200 |
+| POST | `/users` | `create_user` | `users.manage` | P | 201 |
+| GET | `/users` | `list_users` | `users.read` | P | 200 |
+| GET | `/users/{user_id}` | `get_user` | `users.read` | P | 200 |
+| PATCH | `/users/{user_id}` | `update_user` | `users.manage` | P | 200 |
+| POST | `/users/{user_id}/deactivate` | `deactivate_user` | `users.manage` | P | 200 |
+| POST | `/users/{user_id}/unlock` | `unlock_user` | `users.manage` | F | 204 |
+| POST | `/users/{user_id}/mfa-reset` | `reset_user_mfa` | `users.manage` | P | 204 |
+| GET | `/patients` | `list_patients` | `patients.read_roster` | P | 200 |
+| GET | `/patients/{patient_id}` | `get_patient_administrative_view` | `patients.read_roster` | P | 200 |
+| POST | `/patients/{patient_id}/suspend` | `suspend_patient` | `patients.manage_status` | P | 200 |
+| POST | `/patients/{patient_id}/reactivate` | `reactivate_patient` | `patients.manage_status` | P | 200 |
+| POST | `/patients/{patient_id}/deactivate` | `deactivate_patient` | `patients.manage_status` | P | 200 |
+| GET | `/imports/csv-template` | `download_csv_import_template` | `patients.import` | P | 200 |
+| POST | `/imports/fhir` | `create_fhir_import_preview` | `patients.import` | P | 201 |
+| POST | `/imports/csv` | `create_csv_import_preview` | `patients.import` | P | 201 |
+| GET | `/imports` | `list_import_batches` | `import_batches.read` | P | 200 |
+| GET | `/imports/{batch_id}` | `get_import_batch` | `import_batches.read` | P | 200 |
+| GET | `/imports/{batch_id}/rows` | `list_import_rows` | `import_batches.read` | P | 200 |
+| GET | `/imports/{batch_id}/errors` | `download_import_errors` | `import_batches.read` | P | 200 |
+| POST | `/imports/{batch_id}/confirm` | `confirm_import` | `patients.import` | P | 202 |
+| POST | `/patients/{patient_id}/credential-invitations` | `issue_patient_credentials` | `credentials.issue` | F | 201 |
+| POST | `/credential-invitations/batch` | `issue_credentials_batch` | `credentials.issue` | F | 200 |
+| POST | `/credential-invitations/{invitation_id}/revoke` | `revoke_credential_invitation` | `credentials.revoke` | F | 204 |
+| GET | `/care-team/assignments` | `list_care_team_assignments` | `care_team.read` | P | 200 |
+| POST | `/care-team/assignments` | `assign_doctor` | `care_team.assign` | P | 201 |
+| POST | `/care-team/assignments/{assignment_id}/make-primary` | `set_primary_doctor` | `care_team.assign` | P | 200 |
+| POST | `/care-team/assignments/{assignment_id}/reassign` | `reassign_doctor` | `care_team.assign` | P | 201 |
+| POST | `/care-team/assignments/{assignment_id}/end` | `end_assignment` | `care_team.assign` | P | 200 |
+| POST | `/readings` | `record_glucose_reading` | `glucose.write_own` | F | 201 |
+| POST | `/readings/batch` | `record_glucose_readings_batch` | `glucose.write_own` | P | 200 |
+| POST | `/readings/cgm-import` | `import_cgm_readings` | `glucose.write_own` | P | 200 |
+| GET | `/readings` | `list_glucose_readings` | `glucose.read_own` | P | 200 |
+| GET | `/patients/{patient_id}/readings` | `list_patient_glucose_readings` | `patients.read_assigned` | P | 200 |
+| POST | `/insulin-doses` | `record_insulin_dose` | `records.write_own` | P | 201 |
+| GET | `/insulin-doses` | `list_insulin_doses` | `records.read_own` | P | 200 |
+| POST | `/meals` | `record_meal` | `records.write_own` | P | 201 |
+| GET | `/meals` | `list_meals` | `records.read_own` | P | 200 |
+| POST | `/activities` | `record_activity` | `records.write_own` | P | 201 |
+| GET | `/activities` | `list_activities` | `records.read_own` | P | 200 |
+| POST | `/symptoms` | `record_symptoms` | `records.write_own` | P | 201 |
+| GET | `/symptoms` | `list_symptoms` | `records.read_own` | P | 200 |
+| POST | `/lab-results` | `record_own_lab_result` | `labs.write_own` | P | 201 |
+| POST | `/patients/{patient_id}/lab-results` | `record_patient_lab_result` | `labs.write_assigned` | P | 201 |
+| GET | `/lab-results` | `list_lab_results` | `records.read_own` | P | 200 |
+| GET | `/patients/{patient_id}/lab-results` | `list_patient_lab_results` | `patients.read_assigned` | P | 200 |
+| POST | `/records/{record_type}/{record_id}/corrections` | `correct_record` | `records.correct_own` | P | 201 |
+| POST | `/records/{record_type}/{record_id}/annulments` | `annul_record` | `records.correct_own` | P | 201 |
+| GET | `/timeline` | `get_own_timeline` | `records.read_own` | P | 200 |
+| GET | `/patients/{patient_id}/timeline` | `get_patient_timeline` | `patients.read_assigned` | P | 200 |
+| GET | `/timeline/export` | `export_own_timeline` | `records.read_own` | P | 200 |
+| GET | `/patients/{patient_id}/timeline/export` | `export_patient_timeline` | `patients.read_assigned` | P | 200 |
+| GET | `/patients/me` | `get_own_patient_profile` | `patients.read_own` | P | 200 |
+| GET | `/patients/me/overview` | `get_own_overview` | `patients.read_own` | P | 200 |
+| GET | `/patients/{patient_id}/overview` | `get_patient_overview` | `patients.read_assigned` | F | 200 |
+| POST | `/protocol-templates` | `create_protocol_template` | `protocol_templates.manage` | P | 201 |
+| GET | `/protocol-templates` | `list_protocol_templates` | `protocol_templates.read` | P | 200 |
+| GET | `/protocol-templates/{template_id}` | `get_protocol_template` | `protocol_templates.read` | P | 200 |
+| POST | `/protocol-templates/{template_id}/versions` | `create_protocol_template_version` | `protocol_templates.manage` | P | 201 |
+| POST | `/protocol-templates/{template_id}/retire` | `retire_protocol_template` | `protocol_templates.manage` | P | 200 |
+| POST | `/treatment-plans` | `create_treatment_plan` | `treatment_plans.manage` | P | 201 |
+| GET | `/treatment-plans` | `list_treatment_plans` | `treatment_plans.manage` | P | 200 |
+| GET | `/treatment-plans/{plan_id}` | `get_treatment_plan` | `treatment_plans.manage` | P | 200 |
+| PATCH | `/treatment-plans/{plan_id}` | `update_treatment_plan` | `treatment_plans.manage` | P | 200 |
+| POST | `/treatment-plans/{plan_id}/activate` | `activate_treatment_plan` | `treatment_plans.manage` | P | 200 |
+| POST | `/treatment-plans/{plan_id}/versions` | `create_treatment_plan_version` | `treatment_plans.manage` | P | 201 |
+| GET | `/treatment-plans/{plan_id}/snapshots` | `list_treatment_plan_snapshots` | `treatment_plans.manage` | P | 200 |
+| POST | `/treatment-plans/{plan_id}/restore` | `restore_treatment_plan` | `treatment_plans.manage` | P | 201 |
+| GET | `/patients/me/treatment-plan` | `get_own_treatment_plan` | `treatment_plans.read_own` | P | 200 |
+| POST | `/target-profiles` | `create_target_profile` | `target_profiles.manage` | P | 201 |
+| GET | `/target-profiles` | `list_target_profiles` | `target_profiles.manage` o `target_profiles.assign` | P | 200 |
+| GET | `/target-profiles/{profile_id}` | `get_target_profile` | `target_profiles.manage` o `target_profiles.assign` | P | 200 |
+| POST | `/target-profiles/{profile_id}/versions` | `create_target_profile_version` | `target_profiles.manage` | P | 201 |
+| PUT | `/patients/{patient_id}/target-profile` | `assign_target_profile` | `target_profiles.assign` | P | 200 |
+| POST | `/patients/{patient_id}/reminders` | `create_reminder` | `reminders.manage_assigned` | P | 201 |
+| GET | `/patients/{patient_id}/reminders` | `list_patient_reminders` | `reminders.manage_assigned` | P | 200 |
+| PATCH | `/patients/{patient_id}/reminders/{reminder_id}` | `update_patient_reminder` | `reminders.manage_assigned` | P | 200 |
+| GET | `/reminders` | `list_own_reminders` | `reminders.manage_own` | P | 200 |
+| PATCH | `/reminders/{reminder_id}` | `update_own_reminder` | `reminders.manage_own` | P | 200 |
+| GET | `/patients/{patient_id}/metrics` | `get_patient_metrics` | `metrics.read_assigned` | F | 200 |
+| GET | `/patients/{patient_id}/metrics/agp` | `get_patient_agp` | `metrics.read_assigned` | P | 200 |
+| GET | `/patients/me/metrics` | `get_own_metrics` | `metrics.read_own` | P | 200 |
+| GET | `/patients/{patient_id}/forecast` | `get_patient_forecast` | `ai.forecasts.read_assigned` | F | 200 |
+| GET | `/patients/me/forecast` | `get_own_forecast` | `ai.forecasts.read_own` | P | 200 |
+| POST | `/alert-rules` | `create_alert_rule` | `alert_rules.manage` | P | 201 |
+| GET | `/alert-rules` | `list_alert_rules` | `alert_rules.read` | P | 200 |
+| GET | `/alert-rules/{rule_id}` | `get_alert_rule` | `alert_rules.read` | P | 200 |
+| POST | `/alert-rules/{rule_id}/versions` | `create_alert_rule_version` | `alert_rules.manage` | P | 201 |
+| GET | `/alerts` | `list_alerts` | `alerts.read_assigned` o `alerts.read_own` | P | 200 |
+| GET | `/alerts/summary` | `get_alert_summary` | `alerts.read_summary` | P | 200 |
+| GET | `/alerts/{alert_id}` | `get_alert` | `alerts.read_assigned` o `alerts.read_own` | P | 200 |
+| POST | `/alerts/{alert_id}/acknowledge` | `acknowledge_alert` | `alerts.acknowledge` o `alerts.acknowledge_own` | P | 200 |
+| POST | `/alerts/{alert_id}/resolve` | `resolve_alert` | `alerts.resolve` | P | 200 |
+| GET | `/notifications` | `list_notifications` | `notifications.read_own` | P | 200 |
+| POST | `/notifications/{notification_id}/read` | `mark_notification_read` | `notifications.read_own` | P | 204 |
+| GET | `/notification-preferences` | `get_notification_preferences` | `notification_preferences.manage_own` | P | 200 |
+| PUT | `/notification-preferences` | `update_notification_preferences` | `notification_preferences.manage_own` | P | 200 |
+| PUT | `/notification-preferences/web-push-subscription` | `register_web_push_subscription` | `notification_preferences.manage_own` | P | 204 |
+| DELETE | `/notification-preferences/web-push-subscription` | `remove_web_push_subscription` | `notification_preferences.manage_own` | P | 204 |
+| GET | `/recommendations` | `list_recommendations` | `recommendations.read_assigned` | P | 200 |
+| GET | `/recommendations/{recommendation_id}` | `get_recommendation` | `recommendations.read_assigned` | P | 200 |
+| POST | `/recommendations/{recommendation_id}/approve` | `approve_recommendation` | `recommendations.decide` | P | 200 |
+| POST | `/recommendations/{recommendation_id}/modify` | `modify_recommendation` | `recommendations.decide` | P | 200 |
+| POST | `/recommendations/{recommendation_id}/reject` | `reject_recommendation` | `recommendations.decide` | P | 200 |
+| GET | `/patients/{patient_id}/risk` | `get_patient_risk` | `ai.risk.read_assigned` | P | 200 |
+| GET | `/patients/{patient_id}/pattern-findings` | `list_pattern_findings` | `ai.risk.read_assigned` | P | 200 |
+| POST | `/patients/{patient_id}/pattern-findings/{finding_id}/dismiss` | `dismiss_pattern_finding` | `ai.risk.read_assigned` | P | 200 |
+| POST | `/patients/{patient_id}/clinical-summaries` | `create_clinical_summary` | `clinical_summaries.generate` | P | 201 |
+| GET | `/patients/{patient_id}/clinical-summaries/{summary_id}` | `get_clinical_summary` | `clinical_summaries.generate` | P | 200 |
+| POST | `/assistant/messages` | `send_assistant_message` | `assistant.use` | P | 200 |
+| GET | `/dropout-risks` | `list_dropout_risks` | `ai.dropout_risk.read` | P | 200 |
+| GET | `/ai-evaluations` | `list_ai_evaluations` | `ai_evaluations.read` | P | 200 |
+| GET | `/dashboard/triage` | `get_triage_dashboard` | `dashboard.read_assigned` | P | 200 |
+| POST | `/dashboard/patients/{patient_id}/review` | `mark_patient_reviewed` | `dashboard.read_assigned` | P | 200 |
+| POST | `/patients/{patient_id}/clinical-notes` | `create_clinical_note` | `clinical_notes.manage` | P | 201 |
+| GET | `/patients/{patient_id}/clinical-notes` | `list_clinical_notes` | `clinical_notes.manage` | P | 200 |
+| POST | `/reports/patient` | `create_patient_report` | `reports.generate_assigned` | P | 200 |
+| POST | `/reports/me` | `create_own_report` | `reports.generate_own` | P | 200 |
+| POST | `/reports/clinic` | `create_clinic_report` | `reports.generate_clinic` | P | 200 |
+| GET | `/clinic-kpis` | `get_clinic_kpis` | `clinic_kpis.read` | P | 200 |
+| GET | `/messages` | `list_messages` | `messages.use_own` o `messages.use_assigned` | P | 200 |
+| POST | `/messages` | `send_message` | `messages.use_own` o `messages.use_assigned` | P | 201 |
+| POST | `/follow-ups` | `create_follow_up` | `follow_ups.manage` | P | 201 |
+| GET | `/follow-ups` | `list_follow_ups` | `follow_ups.manage` o `follow_ups.read_own` | P | 200 |
+| POST | `/follow-ups/{follow_up_id}/close` | `close_follow_up` | `follow_ups.manage` | P | 200 |
+| GET | `/audit-log` | `list_audit_log` | `audit.read` | P | 200 |
+| GET | `/audit-log/data-access` | `list_data_access_log` | `audit.read` | P | 200 |
+| POST | `/audit-log/verifications` | `verify_audit_chain` | `audit.read` | P | 200 |
+| GET | `/security-events` | `list_security_events` | `audit.read` o `audit.read_platform` | P | 200 |
+| GET | `/public/privacy-notices/{privacy_notice_version_id}` | `get_privacy_notice` | público | P | 200 |
+| GET | `/consents/me` | `get_own_consent` | `consents.manage_own` | P | 200 |
+| POST | `/consents/me/acceptances` | `accept_consent` | `consents.manage_own` | P | 201 |
+| POST | `/consents/me/withdrawals` | `withdraw_consent` | `consents.manage_own` | P | 200 |
+| GET | `/consents` | `list_consent_statuses` | `consents.read_status` | P | 200 |
+| POST | `/privacy-requests` | `create_privacy_request` | `privacy_requests.create_own` | P | 201 |
+| GET | `/privacy-requests` | `list_privacy_requests` | `privacy_requests.create_own` o `privacy_requests.manage` | P | 200 |
+| POST | `/privacy-requests/{request_id}/resolve` | `resolve_privacy_request` | `privacy_requests.manage` | P | 200 |
+| GET | `/privacy-requests/{request_id}/export` | `export_privacy_request_data` | `privacy_requests.create_own` | P | 200 |
+
 ### 8.1 Salud y metadatos
 
 #### `GET /health`
@@ -679,13 +873,13 @@ Cada endpoint tiene un bloque con la misma forma:
 Las rutas de registro (`/readings`, `/insulin-doses`, `/meals`, `/activities`, `/symptoms`, `/lab-results`, `/timeline`) son del paciente autenticado: el `patient_id` sale del token, nunca de la ruta ni del cuerpo. El médico lee los mismos datos con `/patients/{patient_id}/...` y el permiso `patients.read_assigned`. Los registros son append-only: no hay `PUT`, `PATCH` ni `DELETE`. Todo registro nuevo exige consentimiento vigente (`403 CONSENT_REQUIRED`) y la cuenta del paciente en `ACTIVE`.
 
 #### `POST /readings`
-- Operación: `record_glucose_reading` · Permiso: `glucose.write_own` · Ruta: F · Trazabilidad: HU-15, RF-31, RF-33, RNF-20 · Patrón: P12, P17 · Éxito: 201 (200 si repite)
+- Operación: `record_glucose_reading` · Permiso: `glucose.write_own` · Ruta: F · Trazabilidad: HU-15, HU-56, RF-31, RF-33, RF-98, RNF-20 · Patrón: P12, P17 · Éxito: 201 (200 si repite)
 - Solicitud: `client_reading_id` (UUID generado por la app), `value` (número), `unit` (`mg/dL` o `mmol/L`), `measured_at` (ISO 8601 con zona), `source` (`MANUAL`, `SMBG` o `CGM`), `context` (ayunas, antes o después de comer, al acostarse, ejercicio u otro; los valores de la enumeración están por definir, G8), `note` (opcional, longitud de `FieldLimits`).
 - Respuesta: `id`, `client_reading_id`, `value_mg_dl` (siempre en mg/dL), `measured_at`, `source`, `context`, `status` (`ACCEPTED` o `FLAGGED`), `issue_codes` (`DUPLICATE_SUSPECTED`, `IMPLAUSIBLE_RATE_OF_CHANGE`, `UNIT_MISMATCH_SUSPECTED`), `simulated`. Una lectura sospechosa se guarda `FLAGGED`, nunca se oculta. Repetir el mismo contenido responde `200` con la original y no duplica nada. Con `201` trae `Location`. La respuesta no espera a las alertas: los suscriptores del evento `GlucoseReadingRecorded` corren después del commit.
 - Errores: C1, C3, C4; `409 CONFLICT` (mismo `client_reading_id` con otro contenido), `422 GLUCOSE_OUT_OF_RANGE` (fuera del rango medible de la clínica; no se guarda), `422 READING_IN_FUTURE`, `422 READING_TOO_OLD`.
 
 #### `POST /readings/batch`
-- Operación: `record_glucose_readings_batch` · Permiso: `glucose.write_own` · Ruta: P · Trazabilidad: HU-16, RF-32, RF-33, RNF-11, RNF-20 · Patrón: P12 · Éxito: 200
+- Operación: `record_glucose_readings_batch` · Permiso: `glucose.write_own` · Ruta: P · Trazabilidad: HU-16, RF-32, RF-33, RF-98, RNF-11, RNF-20 · Patrón: P12 · Éxito: 200
 - Solicitud: `items` (hasta 500 lecturas, 512 KiB), cada una con los campos de `POST /readings`. Es el envío de la cola offline.
 - Respuesta: `items` en el mismo orden, cada uno con `client_reading_id`, `result` (`CREATED`, `DUPLICATE` o `REJECTED`), `reading_id` si se guardó y, si fue rechazada, `reason_code` con el código de error de la validación. Las válidas se guardan aunque otra se rechace. Reenviar el lote devuelve `DUPLICATE` sin duplicar. El lote queda en `monitoring.sync_batches`.
 - Errores: C1, C3, C4 (más de 500 elementos responde `422`; más de 512 KiB, `413`).
@@ -1008,7 +1202,7 @@ Las métricas y los pronósticos se calculan con el perfil de metas asignado al 
 - Operación: `get_patient_forecast` · Permiso: `ai.forecasts.read_assigned` · Ruta: F · Trazabilidad: HU-36, HU-40, RF-66, RF-75, RF-76 · Patrón: P11, P18, P06 · Éxito: 200
 - Solicitud: `mode` (`SHORT_TERM` u `OVERNIGHT`, por defecto `SHORT_TERM`).
 - Respuesta: `mode`, `generated_at`, `model_name`, `model_version`, `is_fallback`, `fallback_reason`, `trend` (`FALLING`, `STABLE` o `RISING`), `points` (`horizon_minutes`, `timestamp`, `p10`, `p50`, `p90`), `risk` (`hypo_probability` y `hyper_probability` por horizonte) y `explanation` (`summary`, `factors`, `data_refs`). `RemoteAiServiceProxy` llama al servicio con un seudónimo, con tiempo máximo de 3 s; si hay timeout, error o circuito abierto responde el respaldo lineal con `is_fallback: true` (la interfaz muestra "Respaldo por reglas"). La salida se guarda en `ai.glucose_forecasts`. Con datos insuficientes (por ejemplo un paciente con SMBG): `points` vacío, `is_fallback: true` y `fallback_reason: INSUFFICIENT_DATA`. Si la IA y el respaldo fallan no hay `5xx`: la API responde `200` con el respaldo.
-- Errores: C1, C2, C4, C5. La IA caída **no** es un error (G35).
+- Errores: C1, C2, C4, C5. La IA caída **no** es un error (G33).
 
 #### `GET /patients/me/forecast`
 - Operación: `get_own_forecast` · Permiso: `ai.forecasts.read_own` · Ruta: P · Trazabilidad: HU-36, RF-64, RF-66 · Patrón: P11, P18 · Éxito: 200
@@ -1355,3 +1549,71 @@ La mensajería no es un canal de emergencias: toda respuesta del hilo lleva el a
 - Solicitud: `format` (`json` o `fhir`). Solo para la solicitud aprobada del propio paciente.
 - Respuesta: los datos del paciente en JSON o FHIR, con el documento completo descifrado solo en esta exportación. Escribe filas `EXPORT` y `DECRYPT` en `audit.data_access_log`.
 - Errores: C1, C3, C4, C5; `409 INVALID_STATE_TRANSITION` (la solicitud no está aprobada).
+
+## 9. Trazabilidad
+
+Todo endpoint del catálogo cita al menos una historia de usuario o un requisito. Todas las historias HU-01 a HU-55 y los requisitos RF-01 a RF-100 tienen un endpoint o aparecen en esta sección, salvo los vacíos de la sección 10.
+
+### 9.1 Capacidades que no tienen endpoint propio
+
+Las atiende un proceso del sistema (evento, planificador o regla transversal) o un actor que no es esta API. Se listan para que nadie busque una ruta que no existe.
+
+| Requisitos | Capacidad | Quién la atiende | Dónde se ve en la API |
+|---|---|---|---|
+| RF-04, RF-07, RF-14, RF-19, RF-21, RF-30, RF-33 | Política de contraseñas, permisos desde la BD, aislamiento por clínica, deduplicación por MRN, documento cifrado, proxy de asignación y validación en cadena | Reglas transversales (`PatientRecordAccessProxy`, RLS, `GlucoseReadingValidationHandler`) | Los códigos `403`, `404`, `409` y `422` de cada endpoint |
+| RF-57, RF-58, RF-62, RF-63, RF-64 | Detección de hipoglucemia e hiperglucemia, reducción de la fatiga de alertas, aviso de adherencia y alerta predictiva | Suscriptores de eventos (`GlucoseReadingRecorded`) y planificador | Aparecen como alertas en `GET /alerts` y como notificaciones en `GET /notifications` |
+| RF-60 | Escalamiento de una alerta sin reconocer | `AlertEscalationHandler` (P12) | `GET /alerts/{alert_id}` (historial) y `GET /alerts/summary`; reconocer la alerta lo detiene |
+| RF-71 | Vencimiento (`EXPIRED`) de una recomendación y aplicación al plan | Planificador y `ApproveRecommendationCommand` | `GET /recommendations` (estado) |
+| RF-74 | Cálculo del riesgo de abandono | Planificador y IA7 | `GET /dropout-risks` |
+| RF-75, RF-76 | Seudonimización hacia la IA y respaldo determinista | `AiServiceClientAdapter`, `RemoteAiServiceProxy` | `is_fallback` y `fallback_reason` en las salidas de IA |
+| RF-88, RF-89, RF-94, RF-95 | Cadena de hashes, auditoría de lecturas, retención y registro de eventos de seguridad | Triggers de la base de datos, `PhiAccessAuditDecorator`, jobs | `GET /audit-log`, `GET /audit-log/data-access` y `GET /security-events` los consultan |
+| RF-96, RF-97 | Marca de datos simulados e importación de la clínica demo | Campo `simulated` en las respuestas; el importador real | Sección 1.2 y `POST /imports/fhir` |
+| RF-98, HU-56 | Lecturas en vivo del simulador | `insumap-simulator` llama a `POST /readings` con tokens de paciente | `POST /readings` (misma validación y mismos límites que cualquier cliente) |
+| RF-99, RF-100 | Escenarios y datasets de entrenamiento | `insumap-simulator` | Ninguna: son del simulador |
+| RF-87 | Tareas de contacto por abandono | Sin permiso para el `CLINIC_ADMIN` en el catálogo | Vacío G29 |
+
+### 9.2 Permisos sin endpoint
+
+| Permiso | Motivo |
+|---|---|
+| `demo_data.manage` | Los documentos dicen que el backend no tiene rutas de simulación ([`Datos-simulados.md`](Datos-simulados.md), sección 11): la clínica demo se crea con `POST /clinics` (`is_demo`) y se llena por el importador real. "Reiniciar" la clínica demo no tiene ruta definida (G12). |
+
+## 10. Vacíos y diferencias entre documentos y código
+
+Cada fila es algo que falta o que no coincide. Esta tabla es la lista de trabajo pendiente de la Fase 0. **Usado aquí** es lo que este archivo asumió mientras no se decida.
+
+| ID | Tema | Qué dicen las fuentes | Usado aquí | Quién lo resuelve |
+|---|---|---|---|---|
+| G1 | Nombre del `401` | El código define `UNAUTHENTICATED` (`ErrorCode` y la clave `unauthenticated`). `Seguridad.md`, `Actores-y-permisos.md`, las historias y `api-documentation.md` dicen `UNAUTHORIZED`. | `UNAUTHENTICATED` (es lo que ve el frontend generado). Alinear los otros documentos o renombrar el código antes de la fase 3. | Drako Salazar |
+| G2 | Estado de `VALIDATION_ERROR` | Las historias de usuario dicen `400`. `Seguridad.md`, `Arquitectura.md`, `AGENTS.md` y el código dicen `422`. | `422` | Documentación de historias |
+| G3 | Forma del cuerpo de error | Las historias (convenciones) dicen `{"error": {"code", "message", "details", "request_id"}}`. `AGENTS.md`, `Arquitectura.md` y el código dicen `detail` y el `request_id` solo en la cabecera `X-Request-ID`. | `detail` y cabecera | Documentación de historias |
+| G4 | Elemento de `detail.errors` | El código emite `field` y `type`. `api-documentation.md` propone `field` y `message`. `Seguridad.md` (decisión 17) propone agregar `code`. | Se documenta lo que emite el código | Drako Salazar (cambio en `api.errors` y en la guía) |
+| G5 | Tamaño del cuerpo | `Seguridad.md` dice 64 KiB (`BODY_MAX_BYTES`), `Arquitectura.md` usa `MAX_JSON_BODY_BYTES` y el código usa `MAX_REQUEST_BODY_BYTES` de 1 MiB. Los límites de importación (hasta 10 MiB) y de lotes superan el global, y `BodySizeLimitMiddleware` hoy los bloquearía. | 1 MiB global y excepción por ruta para importaciones y lotes | Drako Salazar |
+| G6 | Marca de datos simulados | `RF-96` y `HU-55`: `simulated: true`. `Arquitectura.md`: `data_source = "SIMULATED"`. `Datos-simulados.md`: `is_demo` y el texto "Datos simulados". | `simulated` en toda respuesta; `is_demo` en la clínica; `data_source` solo se menciona en el expediente. Elegir uno. | Nicolas Diaz |
+| G7 | Campos de una lectura de glucosa | `Arquitectura.md` (paso 4) usa `value` y `unit`. El ejemplo de `api-documentation.md` usa `value_mg_dl`. HU-15 exige aceptar mmol/L. | Entrada `value` y `unit`; salida `value_mg_dl` | Nicolas Mora |
+| G8 | Enumeraciones sin definir | Contexto de la glucosa (RF-31 lista valores sueltos), tipo de comida, tipo e intensidad de la actividad y tipo de recordatorio. Solo `FASTING` y `POST_MEAL` aparecen en `Metricas-clinicas.md`. | "Por definir" | Nicolas Mora |
+| G9 | Idempotencia y `Idempotency-Key` | La política de CORS permite la cabecera `Idempotency-Key`, pero ningún documento define un endpoint que la use. Solo las lecturas de glucosa tienen identificador de cliente (`client_reading_id`). RNF-11 pide registrar sin conexión todo (insulina, comidas, actividad, síntomas) y RNF-20 pide idempotencia por UUID de cliente. El lote offline (RF-32) cubre solo lecturas. | Sin `Idempotency-Key`; lote solo de lecturas; los demás `POST` no son idempotentes | Nicolas Mora |
+| G10 | Catálogos | `Actores-y-permisos.md` (3.1) menciona "catálogos" que solo exigen sesión, pero no hay rutas: productos de insulina (P23), lista de síntomas y síntomas de alarma, tipos de comida y de actividad, motivos de rechazo de recomendaciones. | Sin endpoints de catálogo; los valores salen del esquema OpenAPI hasta que se definan | Nicolas Mora |
+| G11 | Hoja de activación y entrega | `Seguridad.md` dice que la hoja PDF o HTML sale en la respuesta de la emisión y que la JSON es solo para clínicas demo, pero no dice cómo se pide cada formato ni los valores de `delivery_status`. No dice si en el canal `EMAIL` el código vuelve al administrador. | `PRINT` devuelve el código; `EMAIL` no. Formato por definir. | Drako Salazar |
+| G12 | Datos demo y simulador | `demo_data.manage` (crear, reiniciar e importar datos demo) no tiene endpoint, y `Datos-simulados.md` dice que no hay rutas de simulación. HU-56 exige `403` a un token de una clínica no demo, pero ningún documento dice cómo el backend sabe que quien envía es el simulador. | Sin endpoint; `GET /clinics/current` expone `is_demo` | Nicolas Mora y Drako Salazar |
+| G13 | Ciclo de vida del personal | No hay requisito para reactivar personal desactivado, reemitir la invitación de personal que venció a los 7 días, cambiar el rol de un usuario ni nada que use `/memberships` (prefijo propuesto en `api-documentation.md`). Seguridad registra `ROLE_CHANGED` y `tv + 1` en un cambio de rol, sin endpoint. La ruta del restablecimiento de MFA tampoco está fijada. | No se agregan esos endpoints. `/memberships` queda sin uso. | Nicolas Diaz |
+| G14 | Sesión al restablecer la contraseña | `Seguridad.md` (sección 5) dice que el cambio o el restablecimiento le da al dispositivo actual una sesión nueva. Para el restablecimiento sin sesión previa eso saltaría el MFA del personal. | `password-reset/complete` responde `204` y exige iniciar sesión | Drako Salazar |
+| G15 | Permisos que ninguna acción nombra | Descartar un hallazgo de IA (HU-38), marcar un paciente como revisado (RF-79), leer planes y notas del paciente asignado por el médico, leer los resultados de HbA1c propios, listar sedes. Ninguna tiene un código en el catálogo. | Se reutiliza el permiso más cercano (`ai.risk.read_assigned`, `dashboard.read_assigned`, `treatment_plans.manage`, `clinical_notes.manage`, `records.read_own`, `sites.manage`). Agregar los códigos en `Actores-y-permisos.md` y como semilla en `insumap-database`. | Drako Salazar |
+| G16 | Contenido interno sin definir | Estructura de plantillas y planes, nodos del árbol de reglas, estados de lote y de fila de importación (solo `SKIPPED_DUPLICATE`), columnas del CSV de pacientes, resultado por paciente en el lote de credenciales, periodo de los reportes, código de error de un Bundle `SIMULATED` en una clínica no demo y de un Bundle sin la marca, y códigos de cada invariante de un plan. | "Por definir" | Drako Salazar |
+| G17 | Activación del personal y del simulador | `Seguridad.md` dice que el personal no da fecha de nacimiento; `POST /auth/activation/verify` la pide a los pacientes. `Datos-simulados.md` (8.3) dice que el simulador activa con MRN y código, y `Seguridad.md` (decisión 6) lo cambia a código y fecha de nacimiento. El simulador renueva sesión con la cookie y `X-Requested-With`, que `Datos-simulados.md` no menciona. El frontend necesita saber si pedir el correo (`email_required`, propuesto). | `birth_date` solo para pacientes; ver `Seguridad.md` decisión 6 | Nicolas Mora |
+| G18 | Reutilización de un refresh | `HU-03` dice `401 UNAUTHORIZED`; `Seguridad.md` (decisión 3) y `testing-plan.md` dicen `401 SESSION_REVOKED`. | `SESSION_REVOKED` | Documentación de historias |
+| G19 | Recomendaciones: `APPLIED` y falta de IA | RF-71 y `Modulo-IA.md` dicen que aprobar crea una versión `DRAFT` y que `APPLIED` ocurre al crearla, mientras HU-39 solo dice `APPROVED`. HU-40 pide informar el motivo cuando la IA no genera sugerencias, sin campo definido. Un vencimiento (`EXPIRED`) decidido responde `409 INVALID_STATE_TRANSITION` por analogía. | `status` de la aprobación más `draft_plan_id`; `unavailable_reason` propuesto | Nicolas Mora |
+| G20 | Errores de una lectura | HU-15 llama `VALIDATION_ERROR` a la fecha futura; `Arquitectura.md` usa `READING_IN_FUTURE` y `READING_TOO_OLD`. `api-documentation.md` da `DUPLICATE_READING` como ejemplo de `409`, y `Arquitectura.md` responde `409 CONFLICT`. El mensaje de `GLUCOSE_OUT_OF_RANGE` difiere entre `api-documentation.md` y `Arquitectura.md`. | Códigos de `Arquitectura.md`; mensaje de `Arquitectura.md` | Nicolas Mora |
+| G21 | Salud | `Seguridad.md` dice que `/health` devuelve `{"status": "ok"}` sin consultar la base de datos; RNF-18 pide el estado de la BD y la IA. `GET /ready` (código) no está en ningún documento de diseño. | Como el código: `/health` (vida) y `/ready` (disponibilidad con `503`) | Nicolas Diaz |
+| G22 | `X-Request-ID` | `Arquitectura.md` y `Contrato-IA.md` escriben `X-Request-Id`; `Seguridad.md` y el código `X-Request-ID`. `Seguridad.md` (sección 11) acepta solo UUID; el código acepta cualquier valor de 1 a 64 caracteres `[A-Za-z0-9._-]`. | Como el código | Drako Salazar |
+| G23 | Paginación | Solo `api-documentation.md` define `limit`, `cursor`, `items` y `next_cursor`. No hay convención de orden ni de filtros. | Se aplica a todos los listados; el orden por defecto es el más reciente primero salvo el triage, que va por riesgo | Drako Salazar |
+| G24 | Datos insuficientes en métricas | `Metricas-clinicas.md` (2.2) calcula igual y marca `LOW_CONFIDENCE`; RF-55 pide no mostrar un porcentaje engañoso. | La respuesta trae `is_sufficient` y `confidence`; el frontend decide qué mostrar | Drako Salazar |
+| G25 | Documentos y campos que faltan | No existen `Modelo-de-datos.md`, `Diccionario-de-datos.md`, `Cumplimiento-y-privacidad.md`, `Plan-de-commits.md`, `Roles-y-planeacion.md`, `.agents/security.md`, `.agents/input-validation.md` ni `.agents/design-patterns.md`, así que no hay nombres de campo de perfil ni longitudes. `FieldLimits` implementa 7 constantes (los límites de notas, nombres y lotes de las políticas aún no están). La forma de `GET /meta/field-limits` y el contenido FHIR de la exportación no están definidos. | Nombres de campo propuestos en `snake_case`; longitudes "de `FieldLimits`" | Drako Salazar |
+| G26 | CORS | `Seguridad.md` exige las cabeceras `X-Requested-With` e `Idempotency-Key` y exponer `Retry-After`. El código (`main.py`) permite solo `Authorization`, `Content-Type` y `X-Request-ID` y expone solo `X-Request-ID`. El refresh desde un navegador fallaría en el preflight. | Se documenta lo que exige la política | Drako Salazar |
+| G27 | Textos y listas configurables por la clínica | HU-15 (aviso de acción inmediata ante hipoglucemia), RF-37 (síntomas de alarma configurados) y IA6 (material educativo aprobado) hablan de contenido configurado por la clínica, sin permiso ni endpoint para gestionarlo. | No se agregan endpoints | Nicolas Mora |
+| G28 | `403` o `404` para mensajes y notas | `Actores-y-permisos.md` (V8) dice `404` para el administrador que lee mensajes o notas; HU-46 y HU-49 dicen `403`; `Seguridad.md` (6.5) decide `403` porque se decide antes de buscar el recurso. | `403 FORBIDDEN` | Documentación de actores |
+| G29 | Tareas de contacto | RF-87 y HU-43 piden que la clínica cree tareas de contacto, pero `follow_ups.manage` es solo del médico y el `CLINIC_ADMIN` no tiene permiso para crearlas ni leerlas sin ver datos clínicos. | Sin endpoint | Nicolas Diaz |
+| G30 | Lista del médico fuera del triage | El médico solo tiene `GET /dashboard/triage` como lista de sus pacientes. No hay búsqueda por nombre o MRN ni un listado simple de pacientes asignados. | Sin endpoint extra | Nicolas Diaz |
+| G31 | Alerta por síntoma de alarma | HU-19 dice que un síntoma de alarma crea una alerta para el equipo, pero ningún documento define su `type`. | `GET /alerts` lista el `type` sin ese valor | Drako Salazar |
+| G32 | Mensajes de error propuestos | Solo ocho códigos tienen mensaje en `messages_es.json`. Los de la sección 6.3 marcados "propuesto" son texto de este archivo. | Texto propuesto | Drako Salazar |
+| G33 | Pronóstico: lectura o llamada | `Modulo-IA.md` (sección 14) muestra que `GET /patients/{id}/forecast` llama a la IA por el proxy y guarda el resultado. `Arquitectura.md` dice que leer el expediente no llama a la IA y que el pronóstico se refresca como máximo una vez por intervalo tras una lectura. | `GET .../forecast` pasa por `RemoteAiServiceProxy` (con respaldo); `overview` devuelve el último guardado | Nicolas Mora |
