@@ -275,7 +275,7 @@ src/insumap/
 | [ ] | `docs/Patrones-de-diseno.md` | Catálogo P01 a P23 |
 | [ ] | `docs/Modulo-IA.md` y `docs/Contrato-IA.md` | Casos IA1 a IA7, evaluación y contrato backend-IA |
 | [ ] | `docs/Datos-simulados.md` | Clínica demo, escenarios y modos del simulador |
-| [ ] | `docs/Seguridad.md` y `docs/Cumplimiento-y-privacidad.md` | Controles y normativa colombiana con fuentes verificadas |
+| [x] | `docs/Seguridad.md` y `docs/Cumplimiento-y-privacidad.md` | Controles y normativa colombiana con fuentes verificadas |
 | [ ] | `docs/Metricas-clinicas.md` | TIR, TBR, TAR, CV, GMI y AGP con sus fuentes |
 | [ ] | `docs/Stack-tecnologico.md` | Tecnologías y versiones |
 | [ ] | `docs/Roles-y-planeacion.md` y `docs/Plan-de-commits.md` | Reparto por integrante y plan de commits `B###`, `D###`, `F###`, `A###`, `S###` |
