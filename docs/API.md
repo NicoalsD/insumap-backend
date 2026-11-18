@@ -293,3 +293,383 @@ Los tags de Swagger van en español. Esta tabla confirma los prefijos que propus
 | Mensajería | `/api/v1/messages`, `/follow-ups` | M11 |
 | Auditoría | `/api/v1/audit-log`, `/security-events` | M12 |
 | Consentimiento y privacidad | `/api/v1/consents`, `/privacy-requests` | M12 |
+
+## 8. Catálogo de endpoints
+
+Cada endpoint tiene un bloque con la misma forma:
+
+```text
+#### `MÉTODO /ruta`
+- Operación: `operation_id` · Permiso: código(s) · Ruta: F o P · Trazabilidad: HU y RF · Patrón: Pnn · Éxito: HTTP
+- Solicitud: ...
+- Respuesta: ...
+- Errores: conjuntos y códigos propios
+```
+
+- Las rutas se escriben sin el prefijo `/api/v1`, salvo `/health` y `/ready`. Todas las rutas de este catálogo cuelgan de `/api/v1`.
+- Los campos que un documento nombra (`client_reading_id`, `activation_code`, `birth_date`, `is_fallback`, etc.) son canónicos. Los demás nombres de campo son **propuestos** y se confirman en `Modelo-de-datos.md` y `Diccionario-de-datos.md`, que aún no existen en el repositorio (G25).
+- Los permisos van como códigos de `iam.permissions`. "autenticado" significa que solo exige sesión (acciones sobre la propia cuenta). "público" significa sin sesión.
+- Un listado devuelve `{"items": [...], "next_cursor": ...}` (sección 3) y acepta `limit` y `cursor`; no se repite en cada bloque.
+- Las respuestas de recursos clínicos del paciente incluyen `simulated` (sección 1.2).
+
+### 8.1 Salud y metadatos
+
+#### `GET /health`
+- Operación: `get_health` · Permiso: público · Ruta: F · Trazabilidad: RNF-18 · Patrón: - · Éxito: 200
+- Solicitud: sin parámetros. Vive fuera de `/api/v1`.
+- Respuesta: `{"status": "ok"}`. Prueba de vida: no consulta la base de datos ni la IA, para que la suspensión de Neon no marque el servicio como caído.
+- Errores: ninguno propio. Nunca responde `401`.
+
+#### `GET /ready`
+- Operación: `get_readiness` · Permiso: público · Ruta: F · Trazabilidad: RNF-18, RNF-08 · Patrón: - · Éxito: 200
+- Solicitud: sin parámetros. Vive fuera de `/api/v1`.
+- Respuesta: `{"status": "ok"}` si la API puede recibir tráfico.
+- Errores: `503` con `{"status": "unavailable"}` (modelo `HealthResponse`, no el formato canónico) si una dependencia no está lista.
+
+#### `GET /meta/field-limits`
+- Operación: `get_field_limits` · Permiso: público · Ruta: F · Trazabilidad: RNF-05, RNF-15 · Patrón: - · Éxito: 200
+- Solicitud: sin parámetros.
+- Respuesta: `limits` (objeto con un campo por constante de `FieldLimits`, en `snake_case` y sin datos personales). Hoy: `request_id_max_length`, `email_max_length`, `password_min_length`, `password_max_length`, `max_request_body_bytes`, `page_size_default` y `page_size_max`. Crece con `FieldLimits`. `Cache-Control: public, max-age=300`. La forma exacta del objeto la fija esta propuesta (G25).
+- Errores: `429 RATE_LIMITED`, `500 INTERNAL_ERROR`.
+
+### 8.2 Autenticación y activación (M1, M3)
+
+#### `POST /auth/login`
+- Operación: `login` · Permiso: público · Ruta: F · Trazabilidad: HU-01, RF-01, RF-05 · Patrón: P18 · Éxito: 200
+- Solicitud: `email` (se normaliza con NFKC, recorte y minúsculas; máximo `email_max_length`), `password` (máximo `password_max_length`).
+- Respuesta: `status` (`AUTHENTICATED`, `MFA_CHALLENGE` o `MFA_ENROLLMENT_REQUIRED`, sección 2.3). Con `AUTHENTICATED`: `access_token` y la cookie de refresh. Con `MFA_CHALLENGE`: `challenge_token`. Con `MFA_ENROLLMENT_REQUIRED`: `access_token` de enrolamiento, sin refresh. Se verifica siempre un Argon2id por intento, exista o no el correo.
+- Errores: `401 INVALID_CREDENTIALS` (mensaje genérico; también para cuentas `IMPORTED` o `INVITED`, que no tienen contraseña), `403 ACCOUNT_NOT_ACTIVE` y `403 CLINIC_SUSPENDED` (solo tras verificar una contraseña correcta), `429 RATE_LIMITED` con `Retry-After` (bloqueo por pareja correo-IP, por correo o por IP), `422`, `413`, `500`.
+
+#### `POST /auth/mfa/verify`
+- Operación: `verify_mfa_challenge` · Permiso: público (con `challenge_token`) · Ruta: F · Trazabilidad: HU-02, RF-03 · Patrón: - · Éxito: 200
+- Solicitud: `challenge_token`, `code` (TOTP de 6 dígitos o código de respaldo `XXXXX-XXXXX`).
+- Respuesta: `status: AUTHENTICATED`, `access_token` con `amr: ["pwd", "otp"]` y la cookie de refresh.
+- Errores: `401 INVALID_CREDENTIALS` (código incorrecto, repetido o ya usado; cuenta para el bloqueo), `401 UNAUTHENTICATED` (reto vencido, usado o agotado: 5 minutos y 5 intentos), `429`, `422`, `413`, `500`.
+
+#### `POST /auth/mfa/enrollment`
+- Operación: `start_mfa_enrollment` · Permiso: token de enrolamiento (personal sin MFA) · Ruta: F · Trazabilidad: HU-02, RF-03 · Patrón: - · Éxito: 200
+- Solicitud: sin cuerpo.
+- Respuesta: `secret` (base32, 32 caracteres) y `otpauth_uri` (`otpauth://totp/Insumap:<correo>?secret=...&issuer=Insumap`). Se devuelven una sola vez, con `Cache-Control: no-store`. El QR se dibuja en el navegador.
+- Errores: `401 UNAUTHENTICATED`, `401 SESSION_REVOKED`, `403 FORBIDDEN` (rol sin MFA, es decir `PATIENT`), `429`, `500`. Nunca `MFA_REQUIRED`.
+
+#### `POST /auth/mfa/enrollment/confirm`
+- Operación: `confirm_mfa_enrollment` · Permiso: token de enrolamiento · Ruta: F · Trazabilidad: HU-02, RF-03 · Patrón: - · Éxito: 200
+- Solicitud: `code` (TOTP vigente).
+- Respuesta: igual que `AUTHENTICATED` más `recovery_codes` (10 códigos `XXXXX-XXXXX`, de un solo uso, mostrados una sola vez). El factor queda activo solo tras confirmar.
+- Errores: `401 INVALID_CREDENTIALS` (TOTP incorrecto o repetido), `401 UNAUTHENTICATED`, `401 SESSION_REVOKED`, `403 FORBIDDEN`, `429`, `422`, `500`.
+
+#### `POST /auth/mfa/recovery-codes`
+- Operación: `regenerate_mfa_recovery_codes` · Permiso: autenticado (personal con sesión completa) · Ruta: F · Trazabilidad: HU-02, RF-03 · Patrón: P09 · Éxito: 200
+- Solicitud: `code` (TOTP vigente).
+- Respuesta: `recovery_codes` nuevos, una sola vez. Los anteriores quedan invalidados.
+- Errores: C1, C2, C4; `401 INVALID_CREDENTIALS` (TOTP incorrecto).
+
+#### `GET /auth/me`
+- Operación: `get_current_user` · Permiso: autenticado · Ruta: F · Trazabilidad: HU-01, RF-07, RF-08, HU-55 · Patrón: - · Éxito: 200
+- Solicitud: sin parámetros. También la puede llamar el personal sin MFA verificado y el paciente con consentimiento pendiente.
+- Respuesta: `user` (`id`, `email`, `full_name`), `role`, `clinic` (`id`, `name`, `is_demo`, `simulated`; `null` para `PLATFORM_ADMIN`), `permissions` (lista de códigos leída de la base de datos), `mfa_enabled`, `consent_required`.
+- Errores: `401 UNAUTHENTICATED`, `401 SESSION_REVOKED`, `429`, `500`.
+
+#### `POST /auth/refresh`
+- Operación: `refresh_session` · Permiso: cookie de refresh · Ruta: F · Trazabilidad: HU-03, RF-02 · Patrón: - · Éxito: 200
+- Solicitud: sin cuerpo. Cabecera obligatoria `X-Requested-With: insumap-web`. Si `Origin` está presente debe estar en `CORS_ORIGINS`; si `Sec-Fetch-Site` es `cross-site` se rechaza.
+- Respuesta: `access_token` nuevo y la cookie de refresh rotada. El refresh anterior queda revocado (`ROTATED`). No hay ventana de gracia.
+- Errores: `401 UNAUTHENTICATED` (refresh desconocido o vencido, sin más detalle), `401 SESSION_REVOKED` (refresh ya rotado: se revoca toda la familia, `tv + 1` y se registra el evento de seguridad), `403 FORBIDDEN` (falla CSRF), `429` (30 por minuto por usuario), `500`.
+
+#### `POST /auth/logout`
+- Operación: `logout` · Permiso: autenticado (cookie y JWT) · Ruta: F · Trazabilidad: HU-03, RF-02 · Patrón: - · Éxito: 204
+- Solicitud: sin cuerpo. Exige `X-Requested-With: insumap-web`. Revoca la familia de la cookie y borra la cookie. El frontend descarta el access token de memoria.
+- Errores: `401 UNAUTHENTICATED`, `401 SESSION_REVOKED`, `403 FORBIDDEN` (falla CSRF), `429`, `500`.
+
+#### `POST /auth/logout-all`
+- Operación: `logout_all_sessions` · Permiso: autenticado (cookie y JWT) · Ruta: F · Trazabilidad: HU-03, RF-02 · Patrón: - · Éxito: 204
+- Solicitud: sin cuerpo. Exige `X-Requested-With: insumap-web`. Revoca todas las familias y hace `tv + 1`: los access tokens vigentes mueren por el chequeo del `tv`.
+- Errores: iguales a `logout`.
+
+#### `POST /auth/password/change`
+- Operación: `change_password` · Permiso: autenticado · Ruta: F · Trazabilidad: HU-03, RF-04 · Patrón: P09 · Éxito: 200
+- Solicitud: `current_password`, `new_password` (12 a 128 caracteres tras NFKC; sin reglas de composición; no puede estar en la lista de contraseñas comunes, contener el correo, nombre o documento, ni repetir una de las últimas 5).
+- Respuesta: sesión nueva del dispositivo actual (`status: AUTHENTICATED`, `access_token` y cookie nueva). Las demás sesiones quedan revocadas (`tv + 1`).
+- Errores: C1, C4; `401 INVALID_CREDENTIALS` (contraseña actual incorrecta). La política incumplida responde `422 VALIDATION_ERROR`.
+
+#### `POST /auth/password-reset/request`
+- Operación: `request_password_reset` · Permiso: público · Ruta: F · Trazabilidad: HU-03, RF-06 · Patrón: P07 · Éxito: 202
+- Solicitud: `email`.
+- Respuesta: siempre `202` sin datos, exista o no el correo. Si la cuenta existe, está activa y su correo está verificado, se envía un enlace de un solo uso (30 minutos, token de 256 bits en el fragmento `#token=`).
+- Errores: `422`, `413`. El exceso de tasa (5 por hora por IP, 3 por hora por correo) se ignora y se responde `202`; solo el límite por minuto de la API responde `429`.
+
+#### `POST /auth/password-reset/complete`
+- Operación: `complete_password_reset` · Permiso: público (con token de un solo uso) · Ruta: F · Trazabilidad: HU-03, RF-06, RF-04 · Patrón: - · Éxito: 204
+- Solicitud: `token`, `new_password` (misma política).
+- Respuesta: sin cuerpo. Se hace `tv + 1` y se revocan todas las familias. El usuario inicia sesión de nuevo (G14).
+- Errores: `410 INVITATION_INVALID` (enlace usado, vencido o inexistente), `429` (10 por minuto por IP), `422`, `413`, `500`.
+
+#### `POST /auth/email-verification/confirm`
+- Operación: `confirm_email_verification` · Permiso: público (con token de un solo uso) · Ruta: F · Trazabilidad: HU-10, RF-24 · Patrón: - · Éxito: 204
+- Solicitud: `token` (24 horas de vigencia).
+- Respuesta: sin cuerpo. El correo queda verificado.
+- Errores: `410 INVITATION_INVALID`, `429`, `422`, `413`, `500`.
+
+#### `POST /auth/activation/verify`
+- Operación: `verify_activation_code` · Permiso: público · Ruta: F · Trazabilidad: HU-10, RF-24, RF-22, HU-05 · Patrón: P18 · Éxito: 200
+- Solicitud: `activation_code` (`XXXX-XXXX-XXXX-XXXX`; se normaliza a mayúsculas sin guiones, `O` a `0`, `I` y `L` a `1`), `birth_date` (obligatoria para pacientes; las invitaciones de personal no la piden, G17).
+- Respuesta: `activation_token` (opaco, 15 minutos, un solo uso), `clinic_name`, `privacy_notice_version_id` (versión vigente; su texto sale de `GET /public/privacy-notices/{privacy_notice_version_id}`) y `email_required` (propuesto: indica si hay que pedir el correo). **No** devuelve el nombre del paciente ni otros datos personales.
+- Errores: `410 INVITATION_INVALID` (un solo error para código mal formado, inexistente, vencido, usado, reemplazado, revocado, bloqueado o fecha incorrecta; 5 fallos de fecha con un código real bloquean la invitación), `429` (10 por minuto y 50 por hora por IP), `422`, `413`, `500`.
+
+#### `POST /auth/activation/complete`
+- Operación: `complete_activation` · Permiso: público (con `activation_token`) · Ruta: F · Trazabilidad: HU-10, HU-05, RF-24, RF-90, RF-04 · Patrón: P18, P17 · Éxito: 200
+- Solicitud: `activation_token`, `new_password` (misma política), `email` (obligatorio si la importación no lo traía; queda sin verificar y se envía un enlace de 24 horas), `consent` (`privacy_notice_version_id`, `accepted`, `ai_external_processing`; este último es un consentimiento aparte y opcional para el asistente con LLM externo).
+- Respuesta: para un paciente, `status: AUTHENTICATED`, `access_token` y la cookie de refresh; la cuenta pasa de `INVITED` a `ACTIVE`, la invitación a `USED` y se guarda el consentimiento, todo en una transacción. Para personal, `status: MFA_ENROLLMENT_REQUIRED` con el token de enrolamiento. El evento `PatientActivated` se publica después del commit.
+- Errores: `403 CONSENT_REQUIRED` (sin `accepted: true`; la cuenta sigue `INVITED`), `409 CONSENT_VERSION_OUTDATED`, `409 EMAIL_UNAVAILABLE`, `410 INVITATION_INVALID` (incluye un `activation_token` inválido), `429`, `422` (política de contraseña), `413`, `500`.
+
+### 8.3 Clínicas, sedes y personal (M2)
+
+#### `POST /clinics`
+- Operación: `create_clinic` · Permiso: `clinics.manage` · Ruta: P · Trazabilidad: HU-04, RF-09 · Patrón: - · Éxito: 201
+- Solicitud: `name`, `tax_id` (identificación fiscal), `is_demo` (booleano, por defecto `false`), `timezone` (nombre IANA, por defecto `America/Bogota`).
+- Respuesta: `id`, `name`, `tax_id`, `status` (`ACTIVE`), `is_demo`, `simulated`, `timezone`, `created_at`. La clínica nace aislada como tenant.
+- Errores: C1, C2, C4; `409 CONFLICT` (nombre repetido).
+
+#### `GET /clinics`
+- Operación: `list_clinics` · Permiso: `clinics.manage` · Ruta: P · Trazabilidad: HU-04, RF-09, RF-10 · Patrón: - · Éxito: 200
+- Solicitud: `status` (`ACTIVE` o `SUSPENDED`), `is_demo`, `limit`, `cursor`.
+- Respuesta: listado de clínicas con los campos de `POST /clinics`. Nunca datos de pacientes.
+- Errores: C1, C2, C4.
+
+#### `GET /clinics/{clinic_id}`
+- Operación: `get_clinic` · Permiso: `clinics.manage` · Ruta: P · Trazabilidad: HU-04, RF-09 · Patrón: - · Éxito: 200
+- Solicitud: `clinic_id` en la ruta.
+- Respuesta: los campos de `POST /clinics` más `suspended_at` y el motivo de la suspensión si aplica.
+- Errores: C1, C2, C4, C5.
+
+#### `PATCH /clinics/{clinic_id}`
+- Operación: `update_clinic` · Permiso: `clinics.manage` · Ruta: P · Trazabilidad: HU-04, RF-10 · Patrón: P09 · Éxito: 200
+- Solicitud: `name`, `tax_id`, `is_demo`, `timezone` (todos opcionales). Marcar o desmarcar la clínica como demo también lo hace este endpoint.
+- Respuesta: la clínica actualizada.
+- Errores: C1, C2, C4, C5; `409 CONFLICT` (nombre repetido).
+
+#### `POST /clinics/{clinic_id}/suspend`
+- Operación: `suspend_clinic` · Permiso: `clinics.manage` · Ruta: P · Trazabilidad: HU-04, RF-10 · Patrón: P09, P18 · Éxito: 200
+- Solicitud: `reason` (10 a 500 caracteres). Se revocan las sesiones de su personal y sus pacientes y ninguno puede iniciar sesión.
+- Respuesta: la clínica con `status: SUSPENDED`.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (ya suspendida), `422 REASON_REQUIRED`.
+
+#### `POST /clinics/{clinic_id}/reactivate`
+- Operación: `reactivate_clinic` · Permiso: `clinics.manage` · Ruta: P · Trazabilidad: HU-04, RF-10 · Patrón: P09, P18 · Éxito: 200
+- Solicitud: sin cuerpo.
+- Respuesta: la clínica con `status: ACTIVE`. Restablece el acceso de su personal y sus pacientes.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (no está suspendida).
+
+#### `POST /clinics/{clinic_id}/admins`
+- Operación: `create_clinic_admin` · Permiso: `clinic_admins.manage` · Ruta: P · Trazabilidad: HU-04, RF-11 · Patrón: P13, P09 · Éxito: 201
+- Solicitud: `email`, `full_name`.
+- Respuesta: `user_id`, `email`, `role: CLINIC_ADMIN`, `invitation_expires_at`. La invitación `STAFF_ACTIVATION` (7 días) va solo por correo; el código no se devuelve. El administrador debe enrolar MFA en su primer ingreso.
+- Errores: C1, C2, C4, C5; `409 CONFLICT` (el correo ya pertenece a otra cuenta).
+
+#### `POST /clinics/{clinic_id}/admins/{user_id}/reset-access`
+- Operación: `reset_clinic_admin_access` · Permiso: `clinic_admins.manage` · Ruta: P · Trazabilidad: HU-04, RF-11, RF-03 · Patrón: P09 · Éxito: 204
+- Solicitud: `reason` (10 a 500 caracteres). Restablece el MFA del administrador (`tv + 1`, familias revocadas, aviso al titular) y emite una invitación nueva por correo. Nadie restablece su propio MFA.
+- Respuesta: sin cuerpo.
+- Errores: C1, C2, C4, C5; `422 REASON_REQUIRED`.
+
+#### `GET /clinics/current`
+- Operación: `get_current_clinic` · Permiso: `clinics.read` · Ruta: P · Trazabilidad: RF-14, RF-96, HU-55 · Patrón: - · Éxito: 200
+- Solicitud: sin parámetros. La clínica sale del token.
+- Respuesta: `id`, `name`, `status`, `is_demo`, `simulated`, `timezone`. El simulador usa `is_demo` para verificar que apunta a una clínica demo antes de enviar lecturas.
+- Errores: C1, C2.
+
+#### `POST /sites`
+- Operación: `create_site` · Permiso: `sites.manage` · Ruta: P · Trazabilidad: RF-15 (Post-MVP) · Patrón: - · Éxito: 201
+- Solicitud: `name` (más campos de la sede por definir).
+- Respuesta: `id`, `name`, `simulated`.
+- Errores: C1, C2, C4; `409 CONFLICT` (nombre repetido).
+
+#### `GET /sites`
+- Operación: `list_sites` · Permiso: `sites.manage` · Ruta: P · Trazabilidad: RF-15 (Post-MVP) · Patrón: - · Éxito: 200
+- Solicitud: `limit`, `cursor`.
+- Respuesta: sedes de la clínica.
+- Errores: C1, C2, C4.
+
+#### `PATCH /sites/{site_id}`
+- Operación: `update_site` · Permiso: `sites.manage` · Ruta: P · Trazabilidad: RF-15 (Post-MVP) · Patrón: - · Éxito: 200
+- Solicitud: `name`.
+- Respuesta: la sede actualizada.
+- Errores: C1, C2, C4, C5; `409 CONFLICT`.
+
+#### `PUT /users/{user_id}/sites`
+- Operación: `set_user_sites` · Permiso: `sites.manage` · Ruta: P · Trazabilidad: RF-15 (Post-MVP) · Patrón: P09 · Éxito: 200
+- Solicitud: `site_ids` (lista de sedes de la misma clínica; un médico puede pertenecer a varias).
+- Respuesta: el personal con sus sedes.
+- Errores: C1, C2, C4, C5 (usuario o sede de otra clínica).
+
+#### `POST /users`
+- Operación: `create_user` · Permiso: `users.manage` · Ruta: P · Trazabilidad: HU-05, RF-12 · Patrón: P09 · Éxito: 201
+- Solicitud: `email`, `full_name`, `role` (`DOCTOR` o `CLINIC_ADMIN`), `professional_license` (registro profesional) y `specialty` (especialidad). El usuario queda en la clínica del creador.
+- Respuesta: `id`, `email`, `role`, `is_active`, `invitation_expires_at`. Recibe una invitación `STAFF_ACTIVATION` solo por correo y debe enrolar MFA en su primer ingreso. El código no se devuelve.
+- Errores: C1, C2, C4; `409 CONFLICT` (correo ya registrado).
+
+#### `GET /users`
+- Operación: `list_users` · Permiso: `users.read` · Ruta: P · Trazabilidad: HU-05, RF-12 · Patrón: - · Éxito: 200
+- Solicitud: `role`, `is_active`, `limit`, `cursor`.
+- Respuesta: personal de la clínica del usuario (`id`, `email`, `full_name`, `role`, `is_active`, `specialty`).
+- Errores: C1, C2, C4.
+
+#### `GET /users/{user_id}`
+- Operación: `get_user` · Permiso: `users.read` · Ruta: P · Trazabilidad: HU-05, RF-14 · Patrón: - · Éxito: 200
+- Solicitud: `user_id` en la ruta.
+- Respuesta: el personal con su perfil profesional y su estado de MFA (`mfa_enabled`).
+- Errores: C1, C2, C4, C5 (personal de otra clínica responde `404`).
+
+#### `PATCH /users/{user_id}`
+- Operación: `update_user` · Permiso: `users.manage` · Ruta: P · Trazabilidad: HU-05, RF-12 · Patrón: P09 · Éxito: 200
+- Solicitud: `full_name`, `professional_license`, `specialty` (opcionales). El cambio de rol no está definido (G13).
+- Respuesta: el personal actualizado.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /users/{user_id}/deactivate`
+- Operación: `deactivate_user` · Permiso: `users.manage` · Ruta: P · Trazabilidad: HU-05, RF-13 · Patrón: P13, P09 · Éxito: 200
+- Solicitud: sin cuerpo. Revoca todas las sesiones del usuario (`tv + 1`) y sus asignaciones de pacientes quedan pendientes de reasignar.
+- Respuesta: el personal con `is_active: false` y `patients_pending_reassignment` (cantidad). La lista de esos pacientes sale de `GET /patients?without_doctor=true`.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (ya desactivado).
+
+#### `POST /users/{user_id}/unlock`
+- Operación: `unlock_user` · Permiso: `users.manage` · Ruta: F · Trazabilidad: RF-05, HU-01 · Patrón: P09 · Éxito: 204
+- Solicitud: sin cuerpo. Quita el bloqueo global del correo (20 fallos en 60 minutos). Queda auditado y registra `ACCOUNT_UNLOCKED`.
+- Respuesta: sin cuerpo.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /users/{user_id}/mfa-reset`
+- Operación: `reset_user_mfa` · Permiso: `users.manage` · Ruta: P · Trazabilidad: HU-02, RF-03 · Patrón: P09 · Éxito: 204
+- Solicitud: `reason` (10 a 500 caracteres). Incrementa `tv`, revoca las familias, registra `MFA_RESET` (severidad alta) y avisa al titular. En el siguiente login el usuario enrola de nuevo. Nadie restablece su propio MFA.
+- Respuesta: sin cuerpo.
+- Errores: C1, C2, C4, C5; `403 FORBIDDEN` (quien lo pide es el propio titular), `422 REASON_REQUIRED`.
+
+### 8.4 Pacientes, importación y credenciales (M3)
+
+#### `GET /patients`
+- Operación: `list_patients` · Permiso: `patients.read_roster` · Ruta: P · Trazabilidad: HU-09, HU-05, RF-13, RF-21 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `account_status` (`IMPORTED`, `INVITED`, `ACTIVE`, `SUSPENDED`, `DEACTIVATED`), `without_doctor` (booleano: pacientes sin médico vigente), `import_batch_id`, `limit`, `cursor`.
+- Respuesta: vista administrativa (`PatientAdministrativeView`): `id`, `full_name`, `mrn`, `document_last4`, `account_status`, `primary_doctor_id`, `assigned_doctor_count`, `invitation_status`, `simulated`. Nunca datos clínicos ni el documento completo. Escribe una sola fila `PATIENT_LIST` en `audit.data_access_log`.
+- Errores: C1, C2, C4.
+
+#### `GET /patients/{patient_id}`
+- Operación: `get_patient_administrative_view` · Permiso: `patients.read_roster` · Ruta: P · Trazabilidad: HU-09, HU-14, RF-30 · Patrón: P11, P09 · Éxito: 200
+- Solicitud: `patient_id` en la ruta.
+- Respuesta: la vista administrativa con los médicos asignados y el estado de la invitación. El `DOCTOR` no usa esta ruta: su detalle clínico es `GET /patients/{patient_id}/overview`.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /patients/{patient_id}/suspend`
+- Operación: `suspend_patient` · Permiso: `patients.manage_status` · Ruta: P · Trazabilidad: HU-11, RF-26 · Patrón: P18, P09 · Éxito: 200
+- Solicitud: `reason` (obligatorio). Revoca las sesiones del paciente (`tv + 1`).
+- Respuesta: el paciente con `account_status: SUSPENDED`.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (solo `ACTIVE` pasa a `SUSPENDED`), `422 REASON_REQUIRED`.
+
+#### `POST /patients/{patient_id}/reactivate`
+- Operación: `reactivate_patient` · Permiso: `patients.manage_status` · Ruta: P · Trazabilidad: HU-11, RF-26 · Patrón: P18, P09 · Éxito: 200
+- Solicitud: `reason` (opcional).
+- Respuesta: el paciente con `account_status: ACTIVE`.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (solo `SUSPENDED` pasa a `ACTIVE`; `DEACTIVATED` es terminal).
+
+#### `POST /patients/{patient_id}/deactivate`
+- Operación: `deactivate_patient` · Permiso: `patients.manage_status` · Ruta: P · Trazabilidad: HU-11, RF-26 · Patrón: P18, P09 · Éxito: 200
+- Solicitud: `reason` (obligatorio). Desde `IMPORTED`, `INVITED`, `ACTIVE` o `SUSPENDED`. Revoca sesiones e invitación pendiente. Es terminal.
+- Respuesta: el paciente con `account_status: DEACTIVATED`.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION`, `422 REASON_REQUIRED`.
+
+#### `GET /imports/csv-template`
+- Operación: `download_csv_import_template` · Permiso: `patients.import` · Ruta: P · Trazabilidad: HU-07, RF-17 · Patrón: P03 · Éxito: 200
+- Solicitud: sin parámetros.
+- Respuesta: `text/csv` UTF-8 con la plantilla de columnas. Incluye `mrn` y `birth_date` como obligatorias; las demás columnas están por definir (G16).
+- Errores: C1, C2.
+
+#### `POST /imports/fhir`
+- Operación: `create_fhir_import_preview` · Permiso: `patients.import` · Ruta: P · Trazabilidad: HU-06, HU-54, RF-16, RF-18, RF-97 · Patrón: P03, P06, P20 · Éxito: 201
+- Solicitud: cuerpo crudo `application/fhir+json` con un Bundle FHIR R4 (`collection` o `transaction`). Solo `Patient`, `Practitioner`, `Condition`, `Observation` (LOINC) y `MedicationRequest`; otros tipos quedan como incidencia de fila sin detener el lote. Máximo 10 MiB, 5.000 entradas y 32 niveles. Exige `birth_date` en cada paciente. Un Bundle con la marca `SIMULATED` solo entra en una clínica demo.
+- Respuesta: `batch_id`, `source: FHIR`, `status` (por definir), `totals` (válidas, con advertencia, con error, `SKIPPED_DUPLICATE`), `simulated`. **No crea ninguna cuenta**: es solo la previsualización. Una fila inválida no impide ver las demás.
+- Errores: C1, C2, C4, `415 UNSUPPORTED_MEDIA_TYPE` (XML o archivo comprimido), `413` (más de 10 MiB), `429` (10 por hora por clínica); la regla de origen simulado no tiene código definido (G16).
+
+#### `POST /imports/csv`
+- Operación: `create_csv_import_preview` · Permiso: `patients.import` · Ruta: P · Trazabilidad: HU-07, HU-54, RF-17, RF-18, RF-97 · Patrón: P03, P06, P20 · Éxito: 201
+- Solicitud: cuerpo crudo `text/csv` UTF-8, separador `,` o `;` detectado en el encabezado (sin BOM). Máximo 2 MiB, 5.000 filas, 40 columnas y 1.000 caracteres por celda.
+- Respuesta: igual que `POST /imports/fhir` con `source: CSV`.
+- Errores: C1, C2, C4, `415`, `413`, `429`. Columnas faltantes responde `422 VALIDATION_ERROR` con el nombre de la columna en `detail.errors`. Un archivo que no es UTF-8 responde `422` sin procesar filas.
+
+#### `GET /imports`
+- Operación: `list_import_batches` · Permiso: `import_batches.read` · Ruta: P · Trazabilidad: HU-08, RF-20 · Patrón: - · Éxito: 200
+- Solicitud: `source` (`FHIR` o `CSV`), `limit`, `cursor`.
+- Respuesta: lotes con `batch_id`, `source`, `status`, `created_by`, `created_at`, `totals`, `simulated`.
+- Errores: C1, C2, C4.
+
+#### `GET /imports/{batch_id}`
+- Operación: `get_import_batch` · Permiso: `import_batches.read` · Ruta: P · Trazabilidad: HU-08, RF-20 · Patrón: - · Éxito: 200
+- Solicitud: `batch_id` en la ruta.
+- Respuesta: totales (creados, omitidos, con error), autor, origen y fecha. Sirve para consultar el avance tras confirmar.
+- Errores: C1, C2, C4, C5.
+
+#### `GET /imports/{batch_id}/rows`
+- Operación: `list_import_rows` · Permiso: `import_batches.read` · Ruta: P · Trazabilidad: HU-06, HU-07, HU-08, RF-18, RF-20 · Patrón: - · Éxito: 200
+- Solicitud: `status` (filtro), `limit`, `cursor`.
+- Respuesta: por fila `row_number`, `status` (`SKIPPED_DUPLICATE` es el único valor que los documentos nombran; los demás están por definir), `issue_codes` y `patient_id` si se creó. No devuelve la fila cruda: el archivo original no se guarda.
+- Errores: C1, C2, C4, C5.
+
+#### `GET /imports/{batch_id}/errors`
+- Operación: `download_import_errors` · Permiso: `import_batches.read` · Ruta: P · Trazabilidad: HU-08, RF-20 · Patrón: - · Éxito: 200
+- Solicitud: `batch_id` en la ruta.
+- Respuesta: `text/csv` con `row`, `column` y `cause` por cada fila con error, sin datos clínicos. Las celdas que empiezan con `=`, `+`, `-`, `@`, tabulador o retorno de carro se prefijan con `'` contra la inyección de fórmulas.
+- Errores: C1, C2, C4, C5.
+
+#### `POST /imports/{batch_id}/confirm`
+- Operación: `confirm_import` · Permiso: `patients.import` · Ruta: P · Trazabilidad: HU-06, HU-07, RF-18, RF-19, RF-21 · Patrón: P20, P03, P09 · Éxito: 202
+- Solicitud: sin cuerpo. Confirma el lote completo: crea solo las filas válidas como pacientes `IMPORTED`, deduplica por MRN de la clínica (`SKIPPED_DUPLICATE`, sin crear un segundo paciente) y guarda el documento cifrado y con hash. Corre en segundo plano (objetivo de 1.000 filas en 60 s).
+- Respuesta: el lote con su `status` de procesamiento. El avance se consulta con `GET /imports/{batch_id}`. Cada cuenta nace sin contraseña y sin acceso.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (el lote ya se confirmó).
+
+#### `POST /patients/{patient_id}/credential-invitations`
+- Operación: `issue_patient_credentials` · Permiso: `credentials.issue` · Ruta: F · Trazabilidad: HU-09, RF-22, RF-23, RF-25, HU-05 · Patrón: P13, P09, P07, P18 · Éxito: 201
+- Solicitud: `channel` (`PRINT` o `EMAIL`). Emitir de nuevo sobre un paciente `INVITED` es el reenvío: la invitación anterior queda `REVOKED` y se crea un código nuevo. Sobre un paciente `ACTIVE` emite una invitación `PASSWORD_RESET` (para quien no tiene correo verificado).
+- Respuesta: `invitation_id`, `purpose` (`PATIENT_ACTIVATION` o `PASSWORD_RESET`), `status: PENDING`, `channel`, `expires_at` (7 días), `delivery_status` (por definir) y, solo para `PRINT`, `activation_code` en claro. El código aparece **solo en esta respuesta**, con `Cache-Control: no-store`; la API no lo guarda ni lo repite. La hoja imprimible (PDF o HTML) se genera en esta respuesta y no se almacena; en una clínica demo puede venir también la hoja JSON (`sheet_id`, `clinic_id`, `issued_at`, `expires_at`, `items` con `patient_mrn`, `activation_code` y `expires_at`). La forma de pedir cada formato está por definir (G11). El paciente pasa a `INVITED`.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (paciente `SUSPENDED` o `DEACTIVATED`), `429` (300 por hora por clínica). Un correo que falla queda registrado como envío fallido; reintentar es emitir de nuevo.
+
+#### `POST /credential-invitations/batch`
+- Operación: `issue_credentials_batch` · Permiso: `credentials.issue` · Ruta: F · Trazabilidad: HU-09, RF-22, RF-25 · Patrón: P13, P09, P07 · Éxito: 200
+- Solicitud: `patient_ids` (hasta 100 por petición), `channel`.
+- Respuesta: un elemento por paciente con su resultado y, para `PRINT`, el código en claro una sola vez, con `Cache-Control: no-store`. Los valores del resultado están por definir (G16).
+- Errores: C1, C2, C4, `429` (10 lotes por hora por clínica).
+
+#### `POST /credential-invitations/{invitation_id}/revoke`
+- Operación: `revoke_credential_invitation` · Permiso: `credentials.revoke` · Ruta: F · Trazabilidad: HU-09, RF-23 · Patrón: P13, P09, P18 · Éxito: 204
+- Solicitud: sin cuerpo. La invitación pasa a `REVOKED` y el paciente vuelve a `IMPORTED`; el código se rechaza después con `410 INVITATION_INVALID`.
+- Respuesta: sin cuerpo.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (la invitación no está pendiente).
+
+### 8.5 Equipo de atención (M4)
+
+#### `GET /care-team/assignments`
+- Operación: `list_care_team_assignments` · Permiso: `care_team.read` · Ruta: P · Trazabilidad: HU-12, HU-13, RF-29 · Patrón: P11 · Éxito: 200
+- Solicitud: `patient_id`, `doctor_id`, `status` (`ACTIVE` o `ENDED`), `limit`, `cursor`. El `CLINIC_ADMIN` ve las de su clínica; el `DOCTOR`, solo las propias.
+- Respuesta: `id`, `patient_id`, `doctor_id`, `is_primary`, `started_at`, `ended_at`, `end_reason`. Con `status=ENDED` es el historial con fechas y motivo.
+- Errores: C1, C2, C4.
+
+#### `POST /care-team/assignments`
+- Operación: `assign_doctor` · Permiso: `care_team.assign` · Ruta: P · Trazabilidad: HU-12, RF-27, RF-28 · Patrón: P13, P09 · Éxito: 201
+- Solicitud: `patient_id`, `doctor_id` (médico activo de la misma clínica), `is_primary`. Un paciente con equipo tiene exactamente un médico principal; el primer médico asignado queda como principal.
+- Respuesta: la asignación.
+- Errores: C1, C2, C4; `404 NOT_FOUND` (médico o paciente de otra clínica o inexistente), `409 CONFLICT` (ya hay una asignación vigente de ese médico).
+
+#### `POST /care-team/assignments/{assignment_id}/make-primary`
+- Operación: `set_primary_doctor` · Permiso: `care_team.assign` · Ruta: P · Trazabilidad: HU-12, RF-28 · Patrón: P13, P09 · Éxito: 200
+- Solicitud: sin cuerpo. El anterior principal deja de serlo en la misma operación.
+- Respuesta: la asignación con `is_primary: true`.
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (la asignación ya terminó).
+
+#### `POST /care-team/assignments/{assignment_id}/reassign`
+- Operación: `reassign_doctor` · Permiso: `care_team.assign` · Ruta: P · Trazabilidad: HU-13, RF-29 · Patrón: P13, P09 · Éxito: 201
+- Solicitud: `new_doctor_id`, `reason`. Termina la asignación actual y crea la del médico nuevo, que hereda `is_primary`.
+- Respuesta: la asignación nueva.
+- Errores: C1, C2, C4, C5; `404 NOT_FOUND` (médico nuevo de otra clínica), `409 INVALID_STATE_TRANSITION`, `422 REASON_REQUIRED`.
+
+#### `POST /care-team/assignments/{assignment_id}/end`
+- Operación: `end_assignment` · Permiso: `care_team.assign` · Ruta: P · Trazabilidad: HU-13, RF-29, V10 · Patrón: P13, P09 · Éxito: 200
+- Solicitud: `reason` y, si es el médico principal, `new_primary_assignment_id`. El médico retirado deja de ver al paciente y recibe `404` sobre él; sus decisiones previas siguen en la auditoría.
+- Respuesta: la asignación con `ended_at`.
+- Errores: C1, C2, C4, C5; `409 CONFLICT` (retirar al único médico principal sin reemplazo), `409 INVALID_STATE_TRANSITION` (ya terminó), `422 REASON_REQUIRED`.
