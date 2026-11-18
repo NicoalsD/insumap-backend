@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: lint, tipos, arquitectura y pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Instala dependencias bloqueadas
+        run: uv sync --locked
+
+      - name: Lint (ruff check)
+        run: uv run ruff check .
+
+      - name: Formato (ruff format)
+        run: uv run ruff format --check .
+
+      - name: Tipos (mypy strict)
+        run: uv run mypy
+
+      - name: Contratos de arquitectura (import-linter)
+        run: uv run lint-imports
+
+      # Docker está disponible en el runner para las pruebas con Testcontainers.
+      - name: Pruebas con cobertura
+        run: uv run pytest

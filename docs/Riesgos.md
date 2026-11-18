@@ -1,0 +1,51 @@
+# Riesgos
+
+Matriz de riesgos de Insumap. Se revisa al cierre de cada fase del plan.
+
+> **Aviso:** Insumap es un proyecto académico, no es un dispositivo médico y la IA solo apoya al médico. Los riesgos clínicos describen lo que pasaría **si** el sistema se usara con pacientes reales; por eso se trabaja solo con datos simulados.
+
+**Escala:** Probabilidad (P) y Impacto (I) de 1 (bajo) a 3 (alto). **Exposición = P × I.** Los riesgos con exposición 6 o más se revisan en cada fase. La columna **Responsable** es la cuenta que vigila el riesgo y propone la acción: `NicoalsD`, `Drako2305` o `nicomora70`.
+
+## 1. Matriz
+
+| ID | Riesgo | P | I | Exp. | Mitigación | Contingencia | Responsable |
+|---|---|---|---|---|---|---|---|
+| RG-01 | **Seguridad clínica:** una alerta tardía, una métrica errónea o una lectura inverosímil llevan a una decisión clínica equivocada | 2 | 3 | 6 | Validación en cadena (RF-33), lecturas sospechosas marcadas y no ocultas, métricas con casos de referencia (RF-51, RF-52), aviso "datos insuficientes" (RF-55), alertas críticas nunca silenciadas (RF-62), aviso permanente de proyecto académico | Retirar de la UI la métrica afectada y corregir con una versión nueva; todo dato clínico es append-only, así que la corrección no pierde historia | `Drako2305` |
+| RG-02 | **Error o sesgo de la IA:** un pronóstico o una recomendación son incorrectos, o el modelo funciona peor para un subgrupo (por ejemplo, DM2 o gestacional) por entrenarse con simulaciones | 3 | 3 | 9 | Human-in-the-loop (RNF-19): ninguna recomendación se aplica sin el médico (RF-70); toda salida con explicación y versión de modelo (RF-75); respaldo determinista (RF-76); evaluación contra el respaldo y por subgrupo (RF-77); la IA nunca da dosis al paciente | Desactivar el modelo afectado con una variable de entorno y operar con el respaldo por reglas; reportar la limitación en la presentación | `nicomora70` |
+| RG-03 | **Brecha de privacidad:** un dato de salud se expone por un fallo de aislamiento, de autorización o de logs | 2 | 3 | 6 | RLS por clínica y pruebas de aislamiento en la CI (RNF-04), `PatientRecordAccessProxy` (RF-30), auditoría de cada lectura (RF-89), sin datos personales en logs (RNF-18), documento cifrado (RF-21), Gitleaks y CodeQL (RNF-22) | Revocar tokens, rotar secretos, consultar la auditoría para delimitar el alcance y aplicar el procedimiento de incidentes (por definir en [Seguridad.md](Seguridad.md)) | `Drako2305` |
+| RG-04 | **Fuga hacia el LLM:** datos identificables llegan al proveedor externo del LLM, que en capas gratuitas puede usarlos para entrenar | 2 | 3 | 6 | Solo seudónimo hacia IA y LLM (RF-75, RNF-06), `PhiRedactingTextGenerator`, prueba de la carga útil, solo datos simulados o seudonimizados, proveedor elegido tras verificar sus términos (RNF-23) | Cambiar de proveedor o desactivar IA5 e IA6 (plantilla determinista y respuestas predefinidas) | `nicomora70` |
+| RG-05 | **Marco regulatorio:** malinterpretar la Ley 1581 de 2012, el Decreto 1377 de 2013, la Resolución 1995 de 1999 o la regulación de dispositivos médicos, o que se tome Insumap como dispositivo médico | 2 | 3 | 6 | Aviso fijo "no es un dispositivo médico", fuentes verificadas en [Cumplimiento-y-privacidad.md](Cumplimiento-y-privacidad.md), consentimiento versionado (RF-90), derechos del titular (RF-93), sin datos reales | Presentar el proyecto como prototipo académico y declarar la limitación; consultar a un asesor jurídico antes de cualquier piloto real | `NicoalsD` |
+| RG-06 | **Adopción por los médicos:** el médico no usa el dashboard porque agrega trabajo o no confía en la IA | 2 | 3 | 6 | Triage con la razón de cada bandera (RF-67), 1 clic al detalle (RNF-09), resumen previo a la consulta (RF-72), diseño con revisión de usuarios, la IA se puede ignorar sin consecuencias | Reducir el panel a la lista priorizada y las alertas, y dejar las funciones de IA como opcionales | `NicoalsD` |
+| RG-07 | **Fatiga de alertas:** demasiadas alertas hacen que el médico y el paciente las ignoren y se pierda una crítica | 3 | 3 | 9 | Deduplicación, agrupación y horario de silencio (RF-62), críticas nunca silenciadas, escalamiento escalonado (RF-60), reglas configurables por la clínica (RF-56), seguimiento de la tasa de alertas por paciente | Subir umbrales o duraciones de las reglas por perfil y revisar con la clínica demo; desactivar las alertas de menor prioridad | `Drako2305` |
+| RG-08 | **Calidad de los datos:** lecturas faltantes, duplicadas, sin zona horaria o mal convertidas (mg/dL y mmol/L) producen métricas engañosas | 3 | 2 | 6 | Unidad única en mg/dL, validación en cadena (RF-33), idempotencia por UUID (RF-32), cobertura mínima (RF-55), zona horaria `America/Bogota` solo en presentación (RNF-17) | Marcar el periodo como "datos insuficientes" y pedir corrección o reimportación | `nicomora70` |
+| RG-09 | **Importación con datos sucios:** el origen FHIR o CSV de la clínica trae duplicados, MRN repetidos o campos faltantes | 3 | 2 | 6 | Previsualización con errores por fila (RF-18), deduplicación por MRN (RF-19), historial de lotes (RF-20), plantilla CSV descargable (RF-17), Bundles de prueba en `tests/fixtures` | Corregir en origen y reimportar el lote; la importación es idempotente por MRN | `Drako2305` |
+| RG-10 | **Límites del hosting gratuito:** el arranque en frío de Render, la memoria insuficiente para Chronos-Bolt o las cuotas de Neon y Vercel degradan el servicio | 3 | 2 | 6 | Indicador de arranque y tiempo de espera mayor en la primera petición (RNF-08), modelo ligero en CPU y medición de memoria antes de la fase 10, índices adecuados y lotes (RNF-21), IA con respaldo (RF-76) | Usar un modelo más pequeño o desactivar la IA; migrar a otro plan gratuito o a uno pagado mínimo durante la presentación | `NicoalsD` |
+| RG-11 | **Costo y disponibilidad del LLM:** el proveedor gratuito cambia precios, limita llamadas o se cae | 3 | 2 | 6 | Proveedor compatible con OpenAI y configurable por variables de entorno (RNF-23), límite diario y caché, respaldo determinista (RF-72, RF-73), elección final en la fase 10 tras verificar precios | Cambiar de proveedor sin tocar el código o usar solo las plantillas deterministas | `nicomora70` |
+| RG-12 | **Capacidad del equipo:** tres personas, cinco repositorios, 12 fases y una meta de 150 commits o más solo en el backend | 3 | 3 | 9 | MVP acotado (fases 1 a 9 y `backfill`), orden por dependencias, plan de commits por integrante ([Plan-de-commits.md](Plan-de-commits.md)), commits pequeños, no partir commits para llegar a la cifra | Mover lo `Post-MVP` (IA5, IA6, M11, consola de auditoría y modo `live`) a trabajo futuro en la presentación | `NicoalsD` |
+| RG-13 | **Integración de cinco repositorios:** contratos desalineados entre backend, base de datos, frontend, IA y simulador | 2 | 2 | 4 | `db-schema.lock` y CI con checkout de `insumap-database` (RES-03), OpenAPI como contrato, [Contrato-IA.md](Contrato-IA.md), prueba de deriva de `FieldLimits` (RNF-16) | Congelar el contrato antes de cada fase y corregir primero en el backend | `Drako2305` |
+| RG-14 | **Datos simulados tomados como reales** en una demo o captura | 2 | 3 | 6 | Marca "Datos simulados" en UI, reportes y API (RF-96, HU-55), clínica `is_demo` separada, correos `example.test` y documentos inválidos a propósito | Revisar los textos antes de cada demo y retirar cualquier captura sin marca | `nicomora70` |
+| RG-15 | **Cuentas o sesiones comprometidas:** robo de credenciales o de un dispositivo del personal | 2 | 3 | 6 | Argon2id (RNF-01), MFA obligatorio del personal (RNF-03), refresh con rotación y detección de reutilización (RNF-02), rate limiting y bloqueo (RF-05) | Cerrar todas las sesiones, revocar la familia de tokens y restablecer el acceso desde `PLATFORM_ADMIN` o `CLINIC_ADMIN` | `Drako2305` |
+| RG-16 | **Accesibilidad y usabilidad del paciente:** pacientes mayores o con baja habilidad digital no pueden registrar o activar su cuenta | 2 | 2 | 4 | PWA mobile-first (RNF-11), WCAG 2.2 AA (RNF-10), registro de glucosa en 3 pasos (RNF-09), pruebas con axe y Playwright, mensajes claros en español | Ofrecer registro asistido por la clínica o la hoja impresa de credenciales (RF-25) | `NicoalsD` |
+| RG-17 | **Sobreconfianza en la IA** (sesgo de automatización): el médico aprueba recomendaciones sin revisarlas | 2 | 3 | 6 | La UI distingue "propuesta de IA" de "decisión del médico" (RNF-19), explicación y datos de apoyo visibles, motivo obligatorio al modificar o rechazar (RF-70), evaluación del uso en la fase 10 | Pedir confirmación adicional en recomendaciones de mayor impacto y revisar la tasa de aprobación sin cambios | `nicomora70` |
+| RG-18 | **Entrega de credenciales:** el correo no llega o la hoja impresa se pierde y un tercero activa la cuenta | 2 | 2 | 4 | Código de un solo uso con expiración y guardado como hash (RF-22), reenvío que invalida el anterior (RF-23), rate limiting de activación (RF-24) | Revocar y reemitir la invitación | `Drako2305` |
+
+## 2. Mapa de calor
+
+| Impacto \ Probabilidad | 1 (baja) | 2 (media) | 3 (alta) |
+|---|---|---|---|
+| **3 (alto)** | - | RG-01, RG-03, RG-04, RG-05, RG-06, RG-14, RG-15, RG-17 | RG-02, RG-07, RG-12 |
+| **2 (medio)** | - | RG-13, RG-16, RG-18 | RG-08, RG-09, RG-10, RG-11 |
+| **1 (bajo)** | - | - | - |
+
+## 3. Supuestos
+
+- Los planes gratuitos de Render, Vercel y Neon alcanzan para el MVP y la presentación. Se verifica al inicio de cada fase.
+- Chronos-Bolt corre en CPU con la memoria del hosting elegido; por verificar antes de la fase 10.
+- El proveedor de LLM se elige en la fase 10 tras verificar precios y capa gratuita vigentes.
+- No hay datos reales de pacientes en ningún entorno; la evaluación de la IA se hace con datos simulados y así se declara.
+- Las metas clínicas y umbrales de alerta son semillas del consenso internacional; la clínica los ajusta en la base de datos.
+- Las fuentes legales colombianas se verifican y se citan en [Cumplimiento-y-privacidad.md](Cumplimiento-y-privacidad.md).
+
+## Documentos relacionados
+
+[Insumap.md](Insumap.md) · [Requerimientos.md](Requerimientos.md) · [Seguridad.md](Seguridad.md) · [Modulo-IA.md](Modulo-IA.md) · [Roles-y-planeacion.md](Roles-y-planeacion.md)

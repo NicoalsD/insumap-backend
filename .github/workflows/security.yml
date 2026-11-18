@@ -1,0 +1,71 @@
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+  schedule:
+    - cron: "17 6 * * 1"
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: CodeQL (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inicializa CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: python
+          build-mode: none
+          queries: security-extended
+
+      - name: Analiza
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:python
+
+  gitleaks:
+    name: gitleaks (secretos)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Busca secretos en el historial
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  pip-audit:
+    name: pip-audit (dependencias)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Exporta las dependencias de producción bloqueadas
+        run: >-
+          uv export --locked --no-dev --no-emit-project
+          --format requirements-txt > requirements-audit.txt
+
+      - name: Busca vulnerabilidades conocidas
+        run: uvx pip-audit -r requirements-audit.txt --disable-pip --strict
