@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from insumap.domain.monitoring.glucose import ReadingContext, ReadingSource
@@ -27,3 +27,16 @@ class GlucoseWindow:
     end: datetime
     points: tuple[GlucosePoint, ...]
     has_enough_data: bool
+
+
+def elapsed_minutes(start: datetime, end: datetime) -> Decimal:
+    """Real minutes between two instants.
+
+    Subtracting two datetimes with the same ``tzinfo`` ignores daylight saving,
+    so both are taken to UTC first: a local day can last 23 or 25 hours.
+    """
+    seconds = (end.astimezone(UTC) - start.astimezone(UTC)).total_seconds()
+    return Decimal(str(seconds)) / SECONDS_PER_MINUTE
+
+
+SECONDS_PER_MINUTE = Decimal(60)
