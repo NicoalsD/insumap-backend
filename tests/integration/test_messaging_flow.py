@@ -227,3 +227,31 @@ def test_follow_up_row_keeps_the_close_time_and_note(
     assert row[1] == "MISSED"
     assert row[2] == NOTE
     assert row[3] is not None
+
+
+def test_an_alarm_message_is_flagged_and_the_team_row_persists_without_text(
+    api: TestClient,
+    staff: dict[str, dict[str, str]],
+    assigned: UUID,
+    demo_world: DemoWorld,
+    migrated_url: str,
+) -> None:
+    patient = _patient_headers(api)
+    text = "Tuve una convulsión esta noche"
+
+    sent = api.post("/api/v1/messages", headers=patient, json={"body": text})
+
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["alarm_keywords_detected"] == ["convulsión"]
+    with psycopg.connect(migrated_url) as conn:
+        rows = conn.execute(
+            "SELECT notification_type, message_key, entity_type, params::text"
+            " FROM alerts.notifications WHERE recipient_user_id = %s"
+            " AND message_key = 'notification.message_alarm'",
+            (demo_world.doctor_user_id,),
+        ).fetchall()
+    assert len(rows) == 1
+    notification_type, message_key, entity_type, params = rows[0]
+    assert (notification_type, entity_type) == ("MESSAGE", "THREAD")
+    assert message_key == "notification.message_alarm"
+    assert "convulsión" not in params

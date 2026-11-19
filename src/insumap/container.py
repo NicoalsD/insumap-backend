@@ -233,6 +233,7 @@ from insumap.application.identity.sessions import (
     RefreshSessionUseCase,
 )
 from insumap.application.messaging.list_messages import ListMessagesUseCase
+from insumap.application.messaging.message_notifications import MessageNotifier
 from insumap.application.messaging.send_message import SendMessageUseCase
 from insumap.application.metrics.forecast import GetForecastUseCase
 from insumap.application.metrics.metrics import (
@@ -395,6 +396,7 @@ from insumap.application.users.commands import (
 from insumap.application.users.queries import GetStaffUseCase, ListStaffUseCase
 from insumap.domain.identity.password_policy import PasswordPolicy
 from insumap.domain.identity.refresh_token import RefreshTokenLifetime
+from insumap.domain.messaging.alarm_keywords import AlarmKeywordDetector
 from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistry
 from insumap.domain.monitoring.events import GlucoseReadingRecorded
 from insumap.domain.monitoring.validation import build_validation_chain
@@ -2703,8 +2705,12 @@ class Container:
                 patients=messaging.patients,
                 ids=adapters.ids,
                 clock=self.clock,
-                in_app=notifications.in_app,
-                catalog=self.message_catalog,
+                notifier=MessageNotifier(
+                    in_app=notifications.in_app,
+                    web_push=notifications.web_push,
+                    catalog=self.message_catalog,
+                ),
+                alarm=AlarmKeywordDetector(),
                 rate_limit=RateLimitCheck(
                     adapters.rate_limiter,
                     RateLimitRule(

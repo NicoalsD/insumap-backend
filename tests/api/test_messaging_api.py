@@ -5,6 +5,7 @@ from uuid import UUID
 
 import pytest
 
+from insumap.application.messaging.message_notifications import MESSAGE_ALARM_KEY
 from insumap.domain.care_team.assignment import CareAssignment
 from insumap.domain.identity.consent import ConsentAction, ConsentRecord, ConsentScope
 from insumap.domain.identity.permissions import PermissionCode
@@ -272,3 +273,59 @@ def test_a_message_over_the_limit_is_refused_with_retry_after(
     assert response.json()["error"]["code"] == "RATE_LIMITED"
     assert response.headers["Retry-After"]
     assert api.in_app.delivered == []
+
+
+ALARM_TEXT = "Tuve una convulsión esta noche"
+
+
+def test_a_sent_message_reports_its_alarm_words_and_keeps_its_text(
+    api: IdentityApi,
+) -> None:
+    _assign_doctor(api)
+    sent = api.client.post(
+        "/api/v1/messages", headers=patient(api), json={"body": ALARM_TEXT}
+    )
+
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["alarm_keywords_detected"] == ["convulsión"]
+    assert sent.json()["body"] == ALARM_TEXT
+
+
+def test_a_message_without_alarm_words_reports_an_empty_list(
+    api: IdentityApi,
+) -> None:
+    _assign_doctor(api)
+    sent = api.client.post(
+        "/api/v1/messages", headers=patient(api), json={"body": "Hoy estoy bien"}
+    )
+
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["alarm_keywords_detected"] == []
+
+
+def test_the_listing_does_not_carry_the_alarm_field(api: IdentityApi) -> None:
+    _assign_doctor(api)
+    api.client.post("/api/v1/messages", headers=patient(api), json={"body": ALARM_TEXT})
+
+    listing = api.client.get("/api/v1/messages", headers=patient(api))
+
+    assert listing.status_code == 200, listing.text
+    assert "alarm_keywords_detected" not in listing.json()["items"][0]
+
+
+def test_the_alarm_notice_to_the_doctor_carries_no_text(api: IdentityApi) -> None:
+    _assign_doctor(api)
+    api.client.post("/api/v1/messages", headers=patient(api), json={"body": ALARM_TEXT})
+
+    in_app = [
+        d
+        for d in api.in_app.delivered
+        if d.entry is not None and d.entry.message_key == MESSAGE_ALARM_KEY
+    ]
+    pushed = api.web_push.delivered
+    assert [d.recipient.user_id for d in in_app] == [DOCTOR]
+    assert [d.recipient.user_id for d in pushed] == [DOCTOR]
+    for delivered in [*in_app, *pushed]:
+        assert "convulsión" not in delivered.body.lower()
+        assert "esta noche" not in delivered.body
+        assert "Tuve" not in delivered.body

@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, Field
 
 from insumap.api.routers.common import StrictRequest
+from insumap.application.messaging.send_message import SentMessage
 from insumap.domain.follow_ups.follow_up import (
     FollowUp,
     FollowUpOutcome,
@@ -55,6 +56,29 @@ class MessageResponse(BaseModel):
             body=message.body,
             sent_at=message.sent_at,
             simulated=simulated,
+        )
+
+
+class SentMessageResponse(MessageResponse):
+    """The stored message of a send, with the alarm words its text carries."""
+
+    alarm_keywords_detected: list[str] = Field(
+        description=(
+            "Palabras de alarma halladas en el texto, sin el texto. Vacía si no hay "
+            "ninguna; con palabras, la app sugiere llamar a urgencias."
+        )
+    )
+
+    @classmethod
+    def of_sent(cls, sent: SentMessage, *, simulated: bool) -> Self:
+        message = sent.message
+        return cls(
+            id=message.message_id,
+            sender_role=message.sender_role,
+            body=message.body,
+            sent_at=message.sent_at,
+            simulated=simulated,
+            alarm_keywords_detected=list(sent.alarm_keywords),
         )
 
 
