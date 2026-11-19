@@ -32,5 +32,9 @@
   "notification.staff_activation.subject": "Activa tu cuenta del personal de Insumap",
   "notification.staff_activation.external": "Tu clínica te dio de alta en Insumap. Usa este código de activación en los próximos {days} días: {code} Es de un solo uso. Si no esperabas este mensaje, comunícate con tu clínica.",
   "notification.mfa_reset.subject": "Se restableció el segundo factor de tu cuenta de Insumap",
-  "notification.mfa_reset.external": "Se restableció el segundo factor (MFA) de tu cuenta de Insumap. Al volver a iniciar sesión deberás configurarlo de nuevo. Si no fuiste tú, comunícate con tu clínica."
+  "notification.mfa_reset.external": "Se restableció el segundo factor (MFA) de tu cuenta de Insumap. Al volver a iniciar sesión deberás configurarlo de nuevo. Si no fuiste tú, comunícate con tu clínica.",
+  "reminder.measurement": "Es hora de medir tu glucosa.",
+  "reminder.insulin_dose": "Es hora de registrar tu dosis de insulina.",
+  "reminder.control": "Es hora de tu control con el equipo de salud.",
+  "reminder.registration": "Es hora de registrar tus datos del día."
 }
