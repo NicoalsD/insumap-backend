@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Final, Self
+from typing import Annotated, Any, Final, Self
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from insumap.api.routers.common import StrictRequest
 from insumap.application.ai.assessments import (
@@ -99,6 +99,19 @@ class RiskResponse(BaseModel):
         )
 
 
+class DismissPatternFindingRequest(StrictRequest):
+    """The doctor's note that dismisses a finding; blank notes are refused."""
+
+    note: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True,
+            min_length=FieldLimits.PATTERN_FINDING_NOTE_MIN_LENGTH,
+            max_length=FieldLimits.PATTERN_FINDING_NOTE_MAX_LENGTH,
+        ),
+    ] = Field(description="Nota obligatoria: por qué se descarta el hallazgo.")
+
+
 class PatternFindingResponse(BaseModel):
     """One pattern or anomaly detected by IA3 (a suggestion the doctor reviews)."""
 
@@ -113,6 +126,11 @@ class PatternFindingResponse(BaseModel):
     is_fallback: bool
     fallback_reason: str | None
     generated_at: datetime
+    status: str = Field(
+        description="`DISMISSED` cuando el médico lo descartó; si no, `NEW`."
+    )
+    dismissed_at: datetime | None
+    dismissed_by: UUID | None
     label: str
     simulated: bool
 
@@ -130,6 +148,9 @@ class PatternFindingResponse(BaseModel):
             is_fallback=view.is_fallback,
             fallback_reason=view.fallback_reason,
             generated_at=view.generated_at,
+            status=view.status,
+            dismissed_at=view.dismissed_at,
+            dismissed_by=view.dismissed_by,
             label=label,
             simulated=simulated,
         )
@@ -140,6 +161,14 @@ class DropoutRiskResponse(BaseModel):
 
     patient_id: UUID
     patient_name: str
+    account_status: str | None = Field(
+        description="Estado de la cuenta del paciente; solo en la lista del "
+        "administrador, `null` para el médico."
+    )
+    days_without_record: int | None = Field(
+        description="Días desde el último registro; `null` si nunca registró nada "
+        "o si es la lista del médico."
+    )
     risk_tier: RiskTier | None
     explanation: ExplanationResponse
     is_fallback: bool
@@ -153,6 +182,8 @@ class DropoutRiskResponse(BaseModel):
         return cls(
             patient_id=view.patient_id,
             patient_name=view.patient_name,
+            account_status=view.account_status,
+            days_without_record=view.days_without_record,
             risk_tier=view.risk_tier,
             explanation=ExplanationResponse(
                 summary=view.explanation.summary, factors=[], data_refs=[]

@@ -10,7 +10,7 @@ decisions and the minimization are exercised exactly as in production.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any, final, override
 from uuid import UUID
@@ -45,16 +45,21 @@ from insumap.application.ai.records import (
     AssistantConversationPort,
     ClinicalSummaryReadPort,
     ClinicalSummaryView,
+    DropoutRiskClinicReadPort,
     DropoutRiskReadPort,
     DropoutRiskView,
     PatientAiProfilePort,
     PatternFindingReadPort,
+    PatternFindingReviewPort,
     PatternFindingView,
+    PlatformAiEvaluationReadPort,
 )
 from insumap.application.common.pagination import Page, PageRequest, build_page
 from insumap.application.metrics.forecast import FallbackReason
 from insumap.domain.ai.circuit_breaker import CircuitBreaker, CircuitPolicy
+from insumap.domain.ai.finding_review import FindingDismissal
 from insumap.domain.ai.risk import RiskTier, RuleBasedRiskStrategy
+from insumap.domain.identity.errors import InvalidStateTransitionError
 from insumap.infrastructure.ai.proxy import RemoteAiServiceProxy
 from insumap.infrastructure.ai.pseudonymizer import HmacPseudonymizer
 from insumap.infrastructure.ai_adapters import AiAdapters
@@ -161,14 +166,53 @@ def _page[T](rows: Sequence[T], key: Callable[[T], UUID], page: PageRequest) -> 
 @final
 @dataclass
 class FakePatternFindings(PatternFindingReadPort):
+    """The findings, and the dismissals the reviews port records against them."""
+
     items: list[PatternFindingView] = field(default_factory=list)
+    dismissals: dict[UUID, tuple[datetime, UUID]] = field(default_factory=dict)
+
+    def _view(self, item: PatternFindingView) -> PatternFindingView:
+        dismissed = self.dismissals.get(item.finding_id)
+        if dismissed is None:
+            return item
+        return replace(item, dismissed_at=dismissed[0], dismissed_by=dismissed[1])
 
     @override
     def list_for_patient(
         self, patient_id: UUID, page: PageRequest
     ) -> Page[PatternFindingView]:
         rows = [item for item in self.items if item.patient_id == patient_id]
-        return _page(rows, lambda item: item.finding_id, page)
+        return _page(
+            [self._view(item) for item in rows], lambda item: item.finding_id, page
+        )
+
+    @override
+    def get_for_patient(
+        self, patient_id: UUID, finding_id: UUID
+    ) -> PatternFindingView | None:
+        for item in self.items:
+            if item.finding_id == finding_id and item.patient_id == patient_id:
+                return self._view(item)
+        return None
+
+
+@final
+@dataclass
+class FakePatternFindingReviews(PatternFindingReviewPort):
+    """Appends dismissals and refuses a second one, as ``UNIQUE(finding_id)`` does."""
+
+    findings: FakePatternFindings
+    rows: list[FindingDismissal] = field(default_factory=list)
+
+    @override
+    def add(self, dismissal: FindingDismissal) -> None:
+        if dismissal.finding_id in self.findings.dismissals:
+            raise InvalidStateTransitionError("PATTERN_FINDING", "DISMISSED", "DISMISS")
+        self.findings.dismissals[dismissal.finding_id] = (
+            dismissal.reviewed_at,
+            dismissal.reviewed_by,
+        )
+        self.rows.append(dismissal)
 
 
 @final
@@ -187,6 +231,21 @@ class FakeDropoutRisks(DropoutRiskReadPort):
             if (doctor_id, item.patient_id) in self.assigned
             and (tier is None or item.risk_tier is tier)
         ]
+        return _page(rows, lambda item: item.patient_id, page)
+
+
+@final
+@dataclass
+class FakeClinicDropoutRisks(DropoutRiskClinicReadPort):
+    """The administrative list of the clinic (``ai.dropout_risk_list()``)."""
+
+    items: list[DropoutRiskView] = field(default_factory=list)
+
+    @override
+    def list_for_clinic(
+        self, *, tier: RiskTier | None, page: PageRequest
+    ) -> Page[DropoutRiskView]:
+        rows = [item for item in self.items if tier is None or item.risk_tier is tier]
         return _page(rows, lambda item: item.patient_id, page)
 
 
@@ -219,6 +278,20 @@ class FakeSummaryReads(ClinicalSummaryReadPort):
         return self.items.get(summary_id)
 
 
+def _evaluation_page(
+    items: Sequence[AiEvaluationView], filters: AiEvaluationFilter, page: PageRequest
+) -> Page[AiEvaluationView]:
+    rows = [
+        item
+        for item in items
+        if (filters.use_case is None or item.use_case == filters.use_case)
+        and (
+            filters.model_version is None or item.model_version == filters.model_version
+        )
+    ]
+    return _page(rows, lambda item: item.evaluation_id, page)
+
+
 @final
 @dataclass
 class FakeEvaluations(AiEvaluationReadPort):
@@ -228,16 +301,21 @@ class FakeEvaluations(AiEvaluationReadPort):
     def list(
         self, filters: AiEvaluationFilter, page: PageRequest
     ) -> Page[AiEvaluationView]:
-        rows = [
-            item
-            for item in self.items
-            if (filters.use_case is None or item.use_case == filters.use_case)
-            and (
-                filters.model_version is None
-                or item.model_version == filters.model_version
-            )
-        ]
-        return _page(rows, lambda item: item.evaluation_id, page)
+        return _evaluation_page(self.items, filters, page)
+
+
+@final
+@dataclass
+class FakePlatformEvaluations(PlatformAiEvaluationReadPort):
+    """Every clinic's evaluations (``ai.platform_ai_evaluations()``)."""
+
+    items: list[AiEvaluationView] = field(default_factory=list)
+
+    @override
+    def list(
+        self, filters: AiEvaluationFilter, page: PageRequest
+    ) -> Page[AiEvaluationView]:
+        return _evaluation_page(self.items, filters, page)
 
 
 @final
@@ -321,8 +399,11 @@ class AiWorld:
             on_reply=self._remember_reply,
         )
         self.findings = FakePatternFindings()
+        self.pattern_reviews = FakePatternFindingReviews(self.findings)
         self.dropout = FakeDropoutRisks()
+        self.dropout_clinic = FakeClinicDropoutRisks()
         self.evaluations = FakeEvaluations()
+        self.platform_evaluations = FakePlatformEvaluations()
         self.profiles = FakePatientProfiles()
         self.conversations = FakeConversations()
         self.knowledge = FakeKnowledge()
@@ -369,9 +450,12 @@ class AiWorld:
             summaries=self.proxy,
             assistant=self.proxy,
             findings=self.findings,
+            pattern_reviews=self.pattern_reviews,
             dropout=self.dropout,
+            dropout_clinic=self.dropout_clinic,
             summary_reads=self.summary_reads,
             evaluations=self.evaluations,
+            platform_evaluations=self.platform_evaluations,
             patient_profiles=self.profiles,
             conversations=self.conversations,
             knowledge=self.knowledge,
@@ -380,12 +464,15 @@ class AiWorld:
 
 __all__ = [
     "AiWorld",
+    "FakeClinicDropoutRisks",
     "FakeConversations",
     "FakeDropoutRisks",
     "FakeEvaluations",
     "FakeKnowledge",
     "FakePatientProfiles",
+    "FakePatternFindingReviews",
     "FakePatternFindings",
+    "FakePlatformEvaluations",
     "FakeSummaryReads",
     "RecordingAiStore",
     "ScriptedAiService",

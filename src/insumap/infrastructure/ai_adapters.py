@@ -27,9 +27,12 @@ from insumap.application.ai.records import (
     ApprovedKnowledgePort,
     AssistantConversationPort,
     ClinicalSummaryReadPort,
+    DropoutRiskClinicReadPort,
     DropoutRiskReadPort,
     PatientAiProfilePort,
     PatternFindingReadPort,
+    PatternFindingReviewPort,
+    PlatformAiEvaluationReadPort,
 )
 from insumap.application.common.ids import IdGenerator
 from insumap.application.common.unit_of_work import TransactionFactory
@@ -47,9 +50,14 @@ from insumap.infrastructure.persistence.ai_read_repositories import (
     SqlApprovedKnowledge,
     SqlAssistantConversation,
     SqlClinicalSummaryReads,
+    SqlDropoutRiskClinicReads,
     SqlDropoutRiskReads,
     SqlPatientAiProfile,
     SqlPatternFindingReads,
+    SqlPlatformAiEvaluationReads,
+)
+from insumap.infrastructure.persistence.pattern_finding_review_repository import (
+    SqlPatternFindingReviews,
 )
 from insumap.infrastructure.persistence.recommendation_repository import (
     RecommendationRepository,
@@ -75,9 +83,12 @@ class AiAdapters:
     summaries: ClinicalSummaryPort
     assistant: AssistantPort
     findings: PatternFindingReadPort
+    pattern_reviews: PatternFindingReviewPort
     dropout: DropoutRiskReadPort
+    dropout_clinic: DropoutRiskClinicReadPort
     summary_reads: ClinicalSummaryReadPort
     evaluations: AiEvaluationReadPort
+    platform_evaluations: PlatformAiEvaluationReadPort
     patient_profiles: PatientAiProfilePort
     conversations: AssistantConversationPort
     knowledge: ApprovedKnowledgePort
@@ -139,9 +150,12 @@ def build_ai_adapters(
         summaries=proxy,
         assistant=proxy,
         findings=SqlPatternFindingReads(current),
+        pattern_reviews=SqlPatternFindingReviews(current),
         dropout=SqlDropoutRiskReads(current),
+        dropout_clinic=SqlDropoutRiskClinicReads(current),
         summary_reads=SqlClinicalSummaryReads(current),
         evaluations=SqlAiEvaluationReads(current),
+        platform_evaluations=SqlPlatformAiEvaluationReads(current),
         patient_profiles=SqlPatientAiProfile(current),
         conversations=SqlAssistantConversation(current, ids),
         knowledge=SqlApprovedKnowledge(current),

@@ -22,6 +22,7 @@ from insumap.application.ai.assessments import (
     SummarySection,
 )
 from insumap.application.common.pagination import Page, PageRequest
+from insumap.domain.ai.finding_review import FindingDismissal
 from insumap.domain.ai.risk import RiskTier
 
 
@@ -42,16 +43,40 @@ class PatternFindingView:
     is_fallback: bool
     fallback_reason: str | None
     generated_at: datetime
+    dismissed_at: datetime | None = None
+    dismissed_by: UUID | None = None
+
+    @property
+    def status(self) -> str:
+        """``DISMISSED`` once the doctor answered the finding, else ``NEW``."""
+        return "NEW" if self.dismissed_at is None else "DISMISSED"
 
 
 class PatternFindingReadPort(ABC):
-    """The findings of one patient, newest first (the assigned gate runs before)."""
+    """The findings of one patient, newest first (the assigned gate runs before).
+
+    Each view says whether the doctor dismissed it (``ai.pattern_finding_reviews``).
+    """
 
     @abstractmethod
     def list_for_patient(
         self, patient_id: UUID, page: PageRequest
     ) -> Page[PatternFindingView]:
         """One page of findings of the patient."""
+
+    @abstractmethod
+    def get_for_patient(
+        self, patient_id: UUID, finding_id: UUID
+    ) -> PatternFindingView | None:
+        """The finding if it belongs to the patient, else ``None`` (never a shadow)."""
+
+
+class PatternFindingReviewPort(ABC):
+    """Writes the doctor's dismissal; the caller's transaction commits it."""
+
+    @abstractmethod
+    def add(self, dismissal: FindingDismissal) -> None:
+        """Append the dismissal. A finding already dismissed raises the state error."""
 
 
 @final
@@ -66,6 +91,8 @@ class DropoutRiskView:
     is_fallback: bool
     fallback_reason: str | None
     generated_at: datetime
+    account_status: str | None = None
+    days_without_record: int | None = None
 
 
 class DropoutRiskReadPort(ABC):
@@ -76,6 +103,20 @@ class DropoutRiskReadPort(ABC):
         self, doctor_id: UUID, *, tier: RiskTier | None, page: PageRequest
     ) -> Page[DropoutRiskView]:
         """One page of the latest dropout assessment per assigned patient."""
+
+
+class DropoutRiskClinicReadPort(ABC):
+    """The administrative dropout list of the session clinic (CLINIC_ADMIN).
+
+    It comes from ``ai.dropout_risk_list()``, a definer function: the administrator
+    has no row level access to ``ai.risk_assessments``. No clinical values.
+    """
+
+    @abstractmethod
+    def list_for_clinic(
+        self, *, tier: RiskTier | None, page: PageRequest
+    ) -> Page[DropoutRiskView]:
+        """One page of the latest dropout assessment per patient of the clinic."""
 
 
 @final
@@ -131,6 +172,18 @@ class AiEvaluationView:
 
 class AiEvaluationReadPort(ABC):
     """The evaluations the session may see (RLS decides the clinic)."""
+
+    @abstractmethod
+    def list(
+        self, filters: AiEvaluationFilter, page: PageRequest
+    ) -> Page[AiEvaluationView]:
+        """One page, newest first."""
+
+
+class PlatformAiEvaluationReadPort(ABC):
+    """Every clinic's evaluations for PLATFORM_ADMIN, from
+    ``ai.platform_ai_evaluations()``, a definer function (the platform has no RLS
+    branch on ``ai``). Aggregated metrics only."""
 
     @abstractmethod
     def list(

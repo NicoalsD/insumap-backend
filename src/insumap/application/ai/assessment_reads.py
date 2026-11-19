@@ -3,6 +3,9 @@
 Nothing here calls the AI: these endpoints list what the system stored. Producers
 of findings and dropout rows (the nightly triage, RF-74) are not in the backend yet,
 so the lists are empty until they run (API.md 9.1).
+
+The administrators do not read ``ai`` rows under RLS: the clinic administrator's
+dropout list and the platform's evaluations come from definer functions.
 """
 
 from __future__ import annotations
@@ -15,10 +18,12 @@ from insumap.application.ai.records import (
     AiEvaluationFilter,
     AiEvaluationReadPort,
     AiEvaluationView,
+    DropoutRiskClinicReadPort,
     DropoutRiskReadPort,
     DropoutRiskView,
     PatternFindingReadPort,
     PatternFindingView,
+    PlatformAiEvaluationReadPort,
 )
 from insumap.application.common.actor import Actor
 from insumap.application.common.pagination import Page, PageRequest
@@ -60,11 +65,11 @@ class ListPatternFindingsUseCase:
 
 @final
 class ListDropoutRisksUseCase:
-    """``GET /dropout-risks`` for the doctor's assigned patients (IA7).
+    """``GET /dropout-risks``: the doctor's assigned patients (IA7), or the clinic's
+    administrative list for the CLINIC_ADMIN (``ai.dropout_risk_list()``).
 
-    The clinic admin list needs the definer function ``ai.dropout_risk_list()``,
-    which the migrations do not have yet, so only the doctor path is served. Row
-    level security would show the admin an empty list, so the admin is refused.
+    Any other role is refused before a read: the function would refuse it too, but
+    as a server error.
     """
 
     def __init__(
@@ -73,17 +78,22 @@ class ListDropoutRisksUseCase:
         uow: UnitOfWorkPort,
         assigned_gate: AssignedPatientGate,
         dropout: DropoutRiskReadPort,
+        clinic_dropout: DropoutRiskClinicReadPort,
     ) -> None:
         self._uow = uow
         self._assigned = assigned_gate
         self._dropout = dropout
+        self._clinic_dropout = clinic_dropout
 
     def execute(
         self, actor: Actor, *, tier: RiskTier | None, page: PageRequest
     ) -> Page[DropoutRiskView]:
-        """The latest dropout assessment of each assigned patient, audited (P09)."""
+        """The latest dropout assessment of each patient, audited (P09) for doctors."""
         permission = PermissionCode.AI_DROPOUT_RISK_READ
         actor.require(permission)
+        if actor.role is Role.CLINIC_ADMIN and actor.clinic_id is not None:
+            with self._uow.begin(TransactionContext.for_actor(actor)):
+                return self._clinic_dropout.list_for_clinic(tier=tier, page=page)
         if actor.role is not Role.DOCTOR:
             raise PermissionDeniedError
         with self._uow.begin(TransactionContext.for_actor(actor)) as unit:
@@ -98,24 +108,33 @@ class ListDropoutRisksUseCase:
 
 @final
 class ListAiEvaluationsUseCase:
-    """``GET /ai-evaluations``: the clinic's evaluations (RLS), not the platform ones.
+    """``GET /ai-evaluations``: the clinic's evaluations under RLS, or every clinic's
+    for the PLATFORM_ADMIN through ``ai.platform_ai_evaluations()``.
 
-    The platform list needs the definer function ``ai.platform_ai_evaluations()``,
-    which is not in the migrations yet, so a platform admin is refused.
+    The clinic policy already lets the CLINIC_ADMIN read its clinic's rows and the
+    global ones (``clinic_id`` NULL), so that path needs no function.
     """
 
     def __init__(
-        self, *, uow: UnitOfWorkPort, evaluations: AiEvaluationReadPort
+        self,
+        *,
+        uow: UnitOfWorkPort,
+        evaluations: AiEvaluationReadPort,
+        platform: PlatformAiEvaluationReadPort,
     ) -> None:
         self._uow = uow
         self._evaluations = evaluations
+        self._platform = platform
 
     def execute(
         self, actor: Actor, *, filters: AiEvaluationFilter, page: PageRequest
     ) -> Page[AiEvaluationView]:
         """Aggregated metrics only; never series of patients."""
         actor.require(PermissionCode.AI_EVALUATIONS_READ)
-        if actor.clinic_id is None or actor.role is Role.PLATFORM_ADMIN:
+        if actor.role is Role.PLATFORM_ADMIN:
+            with self._uow.begin(TransactionContext.for_actor(actor)):
+                return self._platform.list(filters, page)
+        if actor.clinic_id is None:
             raise PermissionDeniedError
         with self._uow.begin(TransactionContext.for_actor(actor)):
             return self._evaluations.list(filters, page)
