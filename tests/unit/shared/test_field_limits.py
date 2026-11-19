@@ -49,3 +49,23 @@ def test_request_id_pattern_accepts_the_maximum_length() -> None:
 )
 def test_request_id_pattern_rejects_unsafe_values(value: str) -> None:
     assert re.fullmatch(FieldLimits.REQUEST_ID_PATTERN, value) is None
+
+
+def test_activation_code_splits_into_whole_groups() -> None:
+    assert (
+        FieldLimits.ACTIVATION_CODE_LENGTH % FieldLimits.ACTIVATION_CODE_GROUP_SIZE == 0
+    )
+    assert FieldLimits.RECOVERY_CODE_LENGTH % FieldLimits.RECOVERY_CODE_GROUP_SIZE == 0
+
+
+def test_raw_code_inputs_fit_their_formatted_codes() -> None:
+    formatted_activation = FieldLimits.ACTIVATION_CODE_LENGTH + (
+        FieldLimits.ACTIVATION_CODE_LENGTH // FieldLimits.ACTIVATION_CODE_GROUP_SIZE
+    )
+    formatted_recovery = FieldLimits.RECOVERY_CODE_LENGTH + (
+        FieldLimits.RECOVERY_CODE_LENGTH // FieldLimits.RECOVERY_CODE_GROUP_SIZE
+    )
+
+    assert formatted_activation <= FieldLimits.ACTIVATION_CODE_INPUT_MAX_LENGTH
+    assert formatted_recovery <= FieldLimits.MFA_CODE_INPUT_MAX_LENGTH
+    assert FieldLimits.MFA_CODE_INPUT_MAX_LENGTH >= FieldLimits.TOTP_CODE_LENGTH
