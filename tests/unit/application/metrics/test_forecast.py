@@ -17,8 +17,8 @@ from insumap.application.metrics.forecast import (
     GetForecastUseCase,
     GlucoseForecast,
     GlucoseForecastPort,
-    Trend,
 )
+from insumap.domain.ai.linear_fallback import Trend
 from insumap.domain.identity.errors import PermissionDeniedError
 from insumap.domain.monitoring.glucose import ReadingSource
 from insumap.infrastructure.ai.unconfigured_forecast import (

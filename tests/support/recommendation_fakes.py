@@ -101,6 +101,8 @@ class InMemoryRecommendations(RecommendationRepositoryPort):
             item.recommendation_id: item for item in items
         }
         self.decisions: list[tuple[UUID, DecisionRecord]] = []
+        self.assignments: set[tuple[UUID, UUID]] = set()
+        """(doctor, patient) pairs with an open assignment, as the database checks."""
 
     @override
     def get(self, recommendation_id: UUID) -> Recommendation | None:
@@ -115,6 +117,10 @@ class InMemoryRecommendations(RecommendationRepositoryPort):
             for item in self.items.values()
             if (filters.patient_id is None or item.patient_id == filters.patient_id)
             and (filters.status is None or item.status is filters.status)
+            and (
+                filters.assigned_to is None
+                or (filters.assigned_to, item.patient_id) in self.assignments
+            )
         ]
         return build_page(
             rows, limit=page.limit, key=lambda item: item.recommendation_id

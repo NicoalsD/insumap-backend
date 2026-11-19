@@ -101,6 +101,11 @@ class Harness:
         )
 
 
+def _always_stale(recommendation: object, *, expected_lock_version: int) -> bool:
+    del recommendation, expected_lock_version
+    return False
+
+
 class _Clock:
     def __init__(self, instant: datetime) -> None:
         self._instant = instant
@@ -252,8 +257,7 @@ def test_a_stale_lock_version_is_a_conflict() -> None:
     harness = Harness()
     stale = make_recommendation(lock_version=3)
     harness.repo.items[RECOMMENDATION] = stale
-    original_save = harness.repo.save
-    harness.repo.save = lambda rec, expected_lock_version: False  # type: ignore[method-assign]
+    harness.repo.save = _always_stale  # type: ignore[method-assign]
 
     with pytest.raises(ConflictError):
         harness.run(
@@ -262,4 +266,3 @@ def test_a_stale_lock_version_is_a_conflict() -> None:
                 actor=doctor(), recommendation_id=RECOMMENDATION
             ),
         )
-    harness.repo.save = original_save  # type: ignore[method-assign]
