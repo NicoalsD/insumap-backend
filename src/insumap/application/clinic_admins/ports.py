@@ -3,7 +3,7 @@
 A platform administrator has no clinic in its session, so row level security
 does not let it write the clinic's accounts. The database functions of
 ``iam`` do those writes under ``SECURITY DEFINER`` (``insumap-database``,
-``db-v0.3.0``), and the port only calls them.
+``db-v0.5.0``), and the port only calls them.
 """
 
 from __future__ import annotations
@@ -34,6 +34,25 @@ class ProvisionedClinicAdmin:
     invitation_id: UUID
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ClinicAdminAccessReset:
+    """A new activation for an existing administrator; only the keyed hash goes in."""
+
+    clinic_id: UUID
+    user_id: UUID
+    code_hash: str
+    code_key_id: str
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ClinicAdminContact:
+    """Where the notices of a clinic administrator go: its e-mail and its name."""
+
+    email: str
+    full_name: str
+
+
 class ClinicAdminProvisioningPort(ABC):
     """Writes of the first clinic administrator (``iam`` function, db-v0.3.0)."""
 
@@ -44,4 +63,22 @@ class ClinicAdminProvisioningPort(ABC):
         A repeated email raises ``ConflictError``. A clinic that does not exist
         raises ``ResourceNotFoundError``; one that is not ``ACTIVE`` raises
         ``InvalidStateTransitionError``.
+        """
+
+    @abstractmethod
+    def reset_access(self, reset: ClinicAdminAccessReset) -> UUID:
+        """Reset an administrator (``iam.reset_clinic_admin_access``, db-v0.5.0).
+
+        Revokes its sessions, MFA factors and open invitations, bumps its
+        ``token_version`` and issues a new activation invitation. Returns the id
+        of that invitation. An administrator of another clinic, or one that does
+        not exist, raises ``ResourceNotFoundError``; a suspended or deactivated
+        account raises ``InvalidStateTransitionError``.
+        """
+
+    @abstractmethod
+    def contact(self, clinic_id: UUID, user_id: UUID) -> ClinicAdminContact:
+        """The e-mail and name of a clinic administrator (``iam.clinic_admin_contact``).
+
+        Not an administrator of that clinic raises ``ResourceNotFoundError``.
         """

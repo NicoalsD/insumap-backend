@@ -61,6 +61,8 @@ from insumap.application.care_team.list_assignments import (
 from insumap.application.clinic_admins.commands import (
     CreateClinicAdminCommand,
     CreateClinicAdminCommandHandler,
+    ResetClinicAdminAccessCommand,
+    ResetClinicAdminAccessCommandHandler,
 )
 from insumap.application.clinics.commands import (
     CreateClinicCommand,
@@ -427,6 +429,7 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     UpdatePatientReminderCommand,
     UpdateOwnReminderCommand,
     CreateClinicAdminCommand,
+    ResetClinicAdminAccessCommand,
     SuspendPatientCommand,
     ReactivatePatientCommand,
     DeactivatePatientCommand,
@@ -1079,6 +1082,24 @@ class Container:
                 CreateClinicAdminCommand,
                 guard.wrap(
                     CreateClinicAdminCommandHandler(
+                        clinics=platform.clinics,
+                        provisioning=clinic_admins.provisioning,
+                        codes=platform.activation_codes,
+                        code_hasher=adapters.code_hasher,
+                        channel=platform.email_channel,
+                        messages=self.message_catalog,
+                        clock=clock,
+                        current=current,
+                        invitation_ttl=timedelta(
+                            days=self.settings.staff_invitation_days
+                        ),
+                    )
+                ),
+            ),
+            bind(
+                ResetClinicAdminAccessCommand,
+                guard.wrap(
+                    ResetClinicAdminAccessCommandHandler(
                         clinics=platform.clinics,
                         provisioning=clinic_admins.provisioning,
                         codes=platform.activation_codes,
