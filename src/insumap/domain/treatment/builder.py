@@ -99,6 +99,13 @@ class TreatmentPlanBuilder:
                 and dose > self._limits.max_dose_units
             ):
                 found.append(PlanViolation(f"{path}.dose_units", "dose_above_limit"))
+        if item.injection_sites is not None:
+            if item.item_type is not ItemType.INSULIN:
+                found.append(
+                    PlanViolation(f"{path}.injection_sites", "sites_not_allowed")
+                )
+            elif not item.injection_sites:
+                found.append(PlanViolation(f"{path}.injection_sites", "sites_empty"))
         if item.days_of_week is not None and not _valid_days(item.days_of_week):
             found.append(PlanViolation(f"{path}.days_of_week", "days_invalid"))
         return found
