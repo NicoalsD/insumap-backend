@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     rate_limit_activation_per_ip_per_hour: int = Field(default=50, ge=1)
     rate_limit_refresh_per_user_per_minute: int = Field(default=30, ge=1)
 
+    # Patient records and exports (docs/API.md, section 5).
+    rate_limit_records_per_user_per_minute: int = Field(default=120, ge=1)
+    rate_limit_exports_per_user_per_hour: int = Field(default=20, ge=1)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def normalize_log_level(cls, value: object) -> object:
