@@ -6,6 +6,7 @@ import logging
 from typing import final, override
 
 from insumap.application.notifications.notification import (
+    InAppEntry,
     NotificationChannel,
     Recipient,
 )
@@ -28,8 +29,15 @@ class LoggingEmailChannel(NotificationChannel):
         return True
 
     @override
-    def deliver(self, *, recipient: Recipient, subject: str, body: str) -> None:
-        del subject, body
+    def deliver(
+        self,
+        *,
+        recipient: Recipient,
+        subject: str,
+        body: str,
+        entry: InAppEntry | None = None,
+    ) -> None:
+        del subject, body, entry
         logger.info(
             "Email notification handed over",
             extra={"recipient_id": str(recipient.user_id), "channel": "email"},

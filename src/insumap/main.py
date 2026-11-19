@@ -62,8 +62,13 @@ def create_app(container: Container | None = None) -> FastAPI:
     app.include_router(container.site_router.router)
     app.include_router(container.records_router.router)
     app.include_router(container.metrics_router.router)
+    app.include_router(container.target_profile_router.router)
+    app.include_router(container.reminder_router.router)
     app.include_router(container.user_router.router)
     app.include_router(container.treatment_router.router)
+    app.include_router(container.notification_router.router)
+    app.include_router(container.patient_router.router)
+    app.include_router(container.credential_router.router)
     return app
 
 
