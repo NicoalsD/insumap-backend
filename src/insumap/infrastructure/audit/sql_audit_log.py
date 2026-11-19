@@ -11,17 +11,14 @@ from insumap.infrastructure.persistence.transactions import CurrentSession
 
 APPEND_AUDIT_LOG = text(
     "SELECT audit.append_audit_log("
-    "p_clinic_id => :clinic_id, "
     "p_action => :action, p_entity_type => :entity_type, "
     "p_entity_id => :entity_id, p_reason => :reason, "
     "p_changed_fields => CAST(:changed_fields AS varchar[]), "
-    "p_request_id => :request_id)"
+    "p_request_id => :request_id, p_clinic_id => :clinic_id)"
 )
-"""Parameterized call of the signature fixed by ``insumap-database``.
-
-The function takes the actor, its role and the clinic from the transaction
-context (``app.user_id``, ``app.role``, ``app.clinic_id``), so none is passed.
-"""
+"""Call of the signature in ``insumap-database`` (db-v0.2.0). The function takes
+the actor from the transaction context (``app.user_id``, ``app.role``), which
+``apply_context`` set from the same actor, so the call does not repeat it."""
 
 
 @final
@@ -31,6 +28,10 @@ class SqlAuditLog(AuditLogPort):
     The trigger of the table computes the hash chain; this adapter never reads
     or writes ``chain_seq``, ``prev_hash`` or ``row_hash``. Rows carry
     identifiers and field names only.
+
+    The chain is per clinic: an action without a clinic (a platform
+    administrator acting on its own account) has no row here. Its security
+    event already goes to ``iam.security_events`` (Modelo de datos 9.8).
     """
 
     def __init__(self, current: CurrentSession) -> None:
@@ -38,6 +39,8 @@ class SqlAuditLog(AuditLogPort):
 
     @override
     def record(self, entry: AuditEntry) -> None:
+        if entry.clinic_id is None:
+            return
         self._current.get().execute(
             APPEND_AUDIT_LOG,
             {
