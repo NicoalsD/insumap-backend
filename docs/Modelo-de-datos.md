@@ -400,7 +400,7 @@ Catálogo de roles del sistema (RBAC). Semilla de `insumap-database`; el código
 - **RLS:** Plantilla RLS-0 (catálogo global). Sin RLS; `insumap_app` e `insumap_readonly` solo tienen `SELECT`. Solo el migrador escribe.
 - **Índices:** solo la clave primaria y las de unicidad.
 - **Retención:** Permanente (semilla).
-- **Casos de uso:** LoginUseCase, GetCurrentUserUseCase (`GET /auth/me`), Verificación de permisos (`PermissionCode`).
+- **Casos de uso:** LoginUseCase, GetCurrentUserUseCase (`GET /auth/current-user`), Verificación de permisos (`PermissionCode`).
 
 #### `iam.permissions`
 

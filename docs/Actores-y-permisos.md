@@ -51,7 +51,7 @@ MFA TOTP es obligatorio para todo rol distinto de `PATIENT` (ver [Seguridad.md](
   - `_own`: solo sobre los propios registros del usuario (paciente).
   - `_assigned`: solo sobre los pacientes asignados al médico en `clinic.care_team_assignments`.
   - sin sufijo: sobre la clínica del usuario (o la plataforma para `PLATFORM_ADMIN`).
-- Las acciones sobre la propia cuenta (cambiar contraseña, cerrar sesión, administrar MFA y sesiones propias, consultar `GET /auth/me`, catálogos) solo requieren estar autenticado, sin permiso adicional.
+- Las acciones sobre la propia cuenta (cambiar contraseña, cerrar sesión, administrar MFA y sesiones propias, consultar `GET /auth/current-user`, catálogos) solo requieren estar autenticado, sin permiso adicional.
 - Las acciones previas a la sesión (login, activación con código, recuperación de contraseña) no tienen permiso y se protegen con rate limiting.
 - Los permisos del catálogo son canónicos para el código; si un historial o requisito necesita uno nuevo, se agrega aquí primero.
 

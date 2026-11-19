@@ -63,7 +63,7 @@ Escenario: ingreso correcto de un paciente
   Dado una cuenta de paciente en estado ACTIVE con contraseña válida
   Cuando envía POST /auth/login con su correo y contraseña
   Entonces recibe un access token de 15 minutos y un refresh token opaco
-  Y GET /auth/me devuelve su rol PATIENT, su clínica y sus permisos
+  Y GET /auth/current-user devuelve su rol PATIENT, su clínica y sus permisos
 
 Escenario: credenciales incorrectas
   Dado una cuenta existente

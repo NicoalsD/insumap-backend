@@ -178,13 +178,13 @@ Decisiones:
 | Tolerancia de reloj | 30 segundos para `exp`, `nbf` e `iat` (`JWT_LEEWAY_SECONDS`) |
 | Claims obligatorios | `iss` (`JWT_ISSUER`), `aud` (`JWT_AUDIENCE`), `sub` (UUID del usuario), `role`, `clinic_id` (UUID; `null` solo para `PLATFORM_ADMIN`), `tv` (token_version), `sid` (id de la familia de refresh; `null` en la sesión de enrolamiento), `amr`, `jti`, `iat`, `nbf`, `exp` |
 | `amr` | `["pwd"]` para pacientes y para el personal que aún no enroló MFA; `["pwd", "otp"]` para el personal con MFA verificado |
-| Personal sin `"otp"` | Solo puede llamar a `/auth/mfa/enrollment*`, `GET /auth/me` y `/auth/logout`. Cualquier otra ruta responde `403 MFA_REQUIRED` |
+| Personal sin `"otp"` | Solo puede llamar a `/auth/mfa/enrollment*`, `GET /auth/current-user` y `/auth/logout`. Cualquier otra ruta responde `403 MFA_REQUIRED` |
 | Verificación por petición | En la misma transacción de la petición: `iam.users.status = 'ACTIVE'` (o `is_active` para el personal), `token_version = tv` y clínica activa. Si no se cumple: `401 SESSION_REVOKED` (o `403 CLINIC_SUSPENDED` si la clínica está suspendida) |
 | Token inválido | Ausente, mal formado, firma o `alg` incorrectos, `iss` o `aud` ajenos, vencido: `401 UNAUTHORIZED` |
 | Cabecera | `Authorization: Bearer <jwt>`. Si mide más de 2.048 bytes (`FieldLimits.AUTH_HEADER_MAX_BYTES`), se rechaza antes de decodificar |
 | Almacenamiento en el cliente | Solo en memoria del frontend. Nunca en `localStorage`, `sessionStorage`, IndexedDB ni cookies |
 
-Los permisos **no** van en el token: se leen de la BD (sección 6.1) y `GET /api/v1/auth/me` los devuelve al frontend. La consulta de `tv` en cada petición es una lectura por clave primaria. Se acepta su costo porque permite cortar de inmediato una sesión robada o una cuenta suspendida.
+Los permisos **no** van en el token: se leen de la BD (sección 6.1) y `GET /api/v1/auth/current-user` los devuelve al frontend. La consulta de `tv` en cada petición es una lectura por clave primaria. Se acepta su costo porque permite cortar de inmediato una sesión robada o una cuenta suspendida.
 
 ### 2.4 Refresh token y cookie
 
@@ -248,7 +248,7 @@ Las rutas exactas las publica [`API.md`](API.md). Las de abajo son las que fija 
 | `POST /api/v1/auth/mfa/enrollment` | Devuelve una sola vez el secreto y el URI `otpauth://` | Token de enrolamiento |
 | `POST /api/v1/auth/mfa/enrollment/confirm` | Confirma con un TOTP. Devuelve una sola vez los códigos de respaldo y la sesión completa | Token de enrolamiento |
 | `POST /api/v1/auth/mfa/recovery-codes` | Regenera los códigos de respaldo (exige un TOTP vigente) | Sesión completa |
-| `GET /api/v1/auth/me` | Usuario, rol, clínica, permisos, `mfa_enabled` y `consent_required` (RF-08) | Autenticado |
+| `GET /api/v1/auth/current-user` | Usuario, rol, clínica, permisos, `mfa_enabled` y `consent_required` (RF-08) | Autenticado |
 | `POST /api/v1/auth/refresh` | Rota el refresh de la cookie | Cookie y CSRF (sección 2.5) |
 | `POST /api/v1/auth/logout` y `/logout-all` | Cierre de sesión (sección 5) | Cookie y JWT |
 | `POST /api/v1/auth/password/change` | Cambio de contraseña con la actual | Autenticado |
@@ -399,7 +399,7 @@ Diagrama: `docs/images/secuencia-activacion.png` (propuesta; lo dibuja el agente
 
 Reglas:
 
-1. **Primer ingreso sin MFA** (HU-02): el login responde `MFA_ENROLLMENT_REQUIRED` con un access token de 15 minutos con `amr: ["pwd"]` y sin refresh. Ese token solo sirve para enrolar, para `GET /auth/me` y para cerrar sesión; cualquier otra ruta responde `403 MFA_REQUIRED`.
+1. **Primer ingreso sin MFA** (HU-02): el login responde `MFA_ENROLLMENT_REQUIRED` con un access token de 15 minutos con `amr: ["pwd"]` y sin refresh. Ese token solo sirve para enrolar, para `GET /auth/current-user` y para cerrar sesión; cualquier otra ruta responde `403 MFA_REQUIRED`.
 2. **Enrolamiento:**
    - El URI `otpauth://totp/Insumap:<correo>?secret=...&issuer=Insumap` y el secreto se devuelven una sola vez, con `no-store`.
    - El QR se dibuja en el navegador, no en el servidor.
@@ -874,7 +874,7 @@ Cada control tiene al menos una prueba que falla si el control se rompe. Las pru
 | Bloqueos | La pareja (correo, IP) se bloquea con 5 fallos y escala ×2 hasta 24 h; el correo se bloquea con 20 fallos desde IPs distintas; otra IP no queda bloqueada por la primera pareja; un correo inexistente también recibe `429` |
 | Cuenta o clínica inactiva | `SUSPENDED` con contraseña correcta da `403 ACCOUNT_NOT_ACTIVE`; clínica suspendida da `403 CLINIC_SUSPENDED` |
 | JWT | `alg: none` y `HS512` rechazados; `iss`, `aud`, `exp`, `nbf` y claims obligatorios validados; tolerancia de 30 s; llave de menos de 32 bytes impide el arranque; la llave anterior verifica pero no firma; cabecera de 2.049 bytes rechazada antes de decodificar |
-| MFA obligatorio | Personal sin `"otp"` en `amr` recibe `403 MFA_REQUIRED` en toda ruta salvo el enrolamiento, `GET /auth/me` y el logout |
+| MFA obligatorio | Personal sin `"otp"` en `amr` recibe `403 MFA_REQUIRED` en toda ruta salvo el enrolamiento, `GET /auth/current-user` y el logout |
 | `token_version` | Cambio de contraseña, de rol, suspensión, restablecimiento de MFA y `logout-all` invalidan el access token vigente (`401 SESSION_REVOKED`) |
 | Refresh | El token nuevo funciona y el anterior no; la BD no contiene el token en claro; dos rotaciones simultáneas del mismo token: solo una gana |
 | Reutilización | Reutilizar un token revoca la familia, hace `tv + 1`, responde `401 SESSION_REVOKED` y registra `REFRESH_TOKEN_REUSE_DETECTED` |
