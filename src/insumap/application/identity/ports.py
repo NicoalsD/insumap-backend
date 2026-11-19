@@ -423,6 +423,10 @@ class ActivationRepositoryPort(ABC):
     def activation_profile(self, patient_id: UUID) -> ActivationProfile | None:
         """Birth date, name, contact email and clinic name of the patient."""
 
+    @abstractmethod
+    def clinic_name(self, clinic_id: UUID) -> str | None:
+        """Name of the clinic of a staff invitation (the context must be set)."""
+
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PrivacyNotice:

@@ -129,6 +129,14 @@ class ActivationRepository(ActivationRepositoryPort):
             contact_email=row.contact_email,
         )
 
+    @override
+    def clinic_name(self, clinic_id: UUID) -> str | None:
+        return (
+            self._current.get()
+            .execute(select(ClinicOrm.name).where(ClinicOrm.id == clinic_id))
+            .scalar()
+        )
+
 
 @final
 class ConsentRepository(ConsentRepositoryPort):

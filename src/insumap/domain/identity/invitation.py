@@ -102,6 +102,15 @@ class CredentialInvitation:
             ),
         )
 
+    def verified(self, *, now: datetime) -> CredentialInvitation:
+        """Step 1 of a staff activation: possession of the emailed code is enough.
+
+        A pending, unexpired invitation becomes ``VERIFIED`` with no birth date
+        (``Seguridad.md``, 3.7).
+        """
+        self._ensure(InvitationStatus.PENDING, now)
+        return replace(self, status=InvitationStatus.VERIFIED, verified_at=now)
+
     def use(self, *, now: datetime) -> CredentialInvitation:
         """Step 2 of the activation: a verified invitation is consumed."""
         self._ensure(InvitationStatus.VERIFIED, now)
