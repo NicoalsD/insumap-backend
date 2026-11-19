@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
-from typing import Any, final, override
+from typing import Any, Final, final, override
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import Row, Select, and_, func, or_, select, text
 
 from insumap.application.ai.assessments import (
     AiExplanation,
@@ -29,11 +29,13 @@ from insumap.application.ai.records import (
     AssistantConversationPort,
     ClinicalSummaryReadPort,
     ClinicalSummaryView,
+    DropoutRiskClinicReadPort,
     DropoutRiskReadPort,
     DropoutRiskView,
     PatientAiProfilePort,
     PatternFindingReadPort,
     PatternFindingView,
+    PlatformAiEvaluationReadPort,
 )
 from insumap.application.common.ids import IdGenerator
 from insumap.application.common.pagination import Page, PageRequest, build_page
@@ -46,12 +48,35 @@ from insumap.infrastructure.persistence.orm import (
     KnowledgeDocumentOrm,
     PatientOrm,
     PatternFindingOrm,
+    PatternFindingReviewOrm,
     RiskAssessmentOrm,
 )
 from insumap.infrastructure.persistence.transactions import CurrentSession
 
 DROPOUT: str = "DROPOUT"
 APPROVED: str = "APPROVED"
+DROPOUT_LIST_SQL: Final = text(
+    "SELECT d.patient_id, d.patient_name, d.account_status, d.days_without_record,"
+    " d.risk_tier, d.explanation, d.is_fallback, d.fallback_reason, d.generated_at"
+    " FROM ai.dropout_risk_list() AS d"
+    " WHERE (CAST(:tier AS varchar) IS NULL OR d.risk_tier = CAST(:tier AS varchar))"
+    " AND (CAST(:after AS uuid) IS NULL OR d.patient_id < CAST(:after AS uuid))"
+    " ORDER BY d.patient_id DESC LIMIT :limit"
+)
+"""``ai.dropout_risk_list()`` (definer, CLINIC_ADMIN): the filters run in SQL."""
+PLATFORM_EVALUATIONS_SQL: Final = text(
+    "SELECT e.id, e.use_case, e.model_name, e.model_version, e.baseline_name,"
+    " e.cohort_ref, e.sample_size, e.model_metrics, e.baseline_metrics,"
+    " e.fallback_usage_pct, e.evaluated_at"
+    " FROM ai.platform_ai_evaluations() AS e"
+    " WHERE (CAST(:use_case AS varchar) IS NULL"
+    "   OR e.use_case = CAST(:use_case AS varchar))"
+    " AND (CAST(:model_version AS varchar) IS NULL"
+    "   OR e.model_version = CAST(:model_version AS varchar))"
+    " AND (CAST(:after AS uuid) IS NULL OR e.id < CAST(:after AS uuid))"
+    " ORDER BY e.id DESC LIMIT :limit"
+)
+"""``ai.platform_ai_evaluations()`` (definer, PLATFORM_ADMIN): filters run in SQL."""
 
 
 @final
@@ -65,21 +90,95 @@ class SqlPatternFindingReads(PatternFindingReadPort):
     def list_for_patient(
         self, patient_id: UUID, page: PageRequest
     ) -> Page[PatternFindingView]:
-        statement = (
-            select(PatternFindingOrm)
-            .where(
-                PatternFindingOrm.patient_id == patient_id,
-                PatternFindingOrm.is_shadow.is_(False),
-            )
-            .order_by(PatternFindingOrm.id.desc())
+        statement = _findings_statement().where(
+            PatternFindingOrm.patient_id == patient_id,
+            PatternFindingOrm.is_shadow.is_(False),
         )
         if page.after is not None:
             statement = statement.where(PatternFindingOrm.id < page.after)
-        rows = self._current.get().scalars(statement.limit(page.limit + 1)).all()
+        rows = self._current.get().execute(
+            statement.order_by(PatternFindingOrm.id.desc()).limit(page.limit + 1)
+        )
         return build_page(
-            [_finding(row) for row in rows],
+            [
+                _finding(finding, reviewed_at, reviewed_by)
+                for finding, reviewed_at, reviewed_by in rows.all()
+            ],
             limit=page.limit,
             key=lambda item: item.finding_id,
+        )
+
+    @override
+    def get_for_patient(
+        self, patient_id: UUID, finding_id: UUID
+    ) -> PatternFindingView | None:
+        row = (
+            self._current.get()
+            .execute(
+                _findings_statement().where(
+                    PatternFindingOrm.id == finding_id,
+                    PatternFindingOrm.patient_id == patient_id,
+                    PatternFindingOrm.is_shadow.is_(False),
+                )
+            )
+            .first()
+        )
+        if row is None:
+            return None
+        finding, reviewed_at, reviewed_by = row
+        return _finding(finding, reviewed_at, reviewed_by)
+
+
+@final
+class SqlDropoutRiskClinicReads(DropoutRiskClinicReadPort):
+    """The clinic's administrative dropout list through ``ai.dropout_risk_list()``."""
+
+    def __init__(self, current: CurrentSession) -> None:
+        self._current = current
+
+    @override
+    def list_for_clinic(
+        self, *, tier: RiskTier | None, page: PageRequest
+    ) -> Page[DropoutRiskView]:
+        rows = self._current.get().execute(
+            DROPOUT_LIST_SQL,
+            {
+                "tier": None if tier is None else tier.value,
+                "after": page.after,
+                "limit": page.limit + 1,
+            },
+        )
+        return build_page(
+            [_dropout_row(row) for row in rows.all()],
+            limit=page.limit,
+            key=lambda item: item.patient_id,
+        )
+
+
+@final
+class SqlPlatformAiEvaluationReads(PlatformAiEvaluationReadPort):
+    """Every clinic's evaluations through ``ai.platform_ai_evaluations()``."""
+
+    def __init__(self, current: CurrentSession) -> None:
+        self._current = current
+
+    @override
+    def list(
+        self, filters: AiEvaluationFilter, page: PageRequest
+    ) -> Page[AiEvaluationView]:
+        rows = self._current.get().execute(
+            PLATFORM_EVALUATIONS_SQL,
+            {
+                "use_case": filters.use_case,
+                "model_version": filters.model_version,
+                "after": page.after,
+                "limit": page.limit + 1,
+            },
+        )
+        return build_page(
+            [_evaluation_row(row) for row in rows.all()],
+            limit=page.limit,
+            key=lambda item: item.evaluation_id,
         )
 
 
@@ -304,7 +403,23 @@ def _explanation(raw: Mapping[str, Any] | None) -> AiExplanation:
     )
 
 
-def _finding(row: PatternFindingOrm) -> PatternFindingView:
+def _findings_statement() -> Select[PatternFindingOrm, datetime, UUID]:
+    """Each finding with its dismissal, if any (at most one: UNIQUE(finding_id))."""
+    return select(
+        PatternFindingOrm,
+        PatternFindingReviewOrm.reviewed_at,
+        PatternFindingReviewOrm.reviewed_by,
+    ).outerjoin(
+        PatternFindingReviewOrm,
+        PatternFindingReviewOrm.finding_id == PatternFindingOrm.id,
+    )
+
+
+def _finding(
+    row: PatternFindingOrm,
+    dismissed_at: datetime | None = None,
+    dismissed_by: UUID | None = None,
+) -> PatternFindingView:
     return PatternFindingView(
         finding_id=row.id,
         patient_id=row.patient_id,
@@ -318,6 +433,38 @@ def _finding(row: PatternFindingOrm) -> PatternFindingView:
         is_fallback=row.is_fallback,
         fallback_reason=row.fallback_reason,
         generated_at=row.generated_at,
+        dismissed_at=dismissed_at,
+        dismissed_by=dismissed_by,
+    )
+
+
+def _dropout_row(row: Row[Any]) -> DropoutRiskView:
+    return DropoutRiskView(
+        patient_id=row.patient_id,
+        patient_name=row.patient_name,
+        risk_tier=None if row.risk_tier is None else RiskTier(row.risk_tier),
+        explanation=_explanation(row.explanation),
+        is_fallback=row.is_fallback,
+        fallback_reason=row.fallback_reason,
+        generated_at=row.generated_at,
+        account_status=row.account_status,
+        days_without_record=row.days_without_record,
+    )
+
+
+def _evaluation_row(row: Row[Any]) -> AiEvaluationView:
+    return AiEvaluationView(
+        evaluation_id=row.id,
+        use_case=row.use_case,
+        model_name=row.model_name,
+        model_version=row.model_version,
+        baseline_name=row.baseline_name,
+        cohort_ref=row.cohort_ref,
+        sample_size=row.sample_size,
+        model_metrics=dict(row.model_metrics),
+        baseline_metrics=dict(row.baseline_metrics),
+        fallback_usage_pct=row.fallback_usage_pct,
+        evaluated_at=row.evaluated_at,
     )
 
 
