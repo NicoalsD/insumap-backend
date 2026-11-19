@@ -40,7 +40,7 @@ dev = [
 line-length = 88
 target-version = "py313"
 # La documentación en Markdown no se formatea con ruff; sus ejemplos son ilustrativos.
-extend-exclude = ["*.md"]
+extend-exclude = ["*.md", ".insumap-database"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "N", "PL", "S", "SIM", "RUF"]
