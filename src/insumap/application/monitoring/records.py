@@ -40,13 +40,27 @@ from insumap.domain.monitoring.records import (
     Meal,
     PhysicalActivity,
     Symptom,
+    SymptomEntry,
     hba1c_to_percent,
 )
 from insumap.shared.errors import ErrorCode, InsumapError
 from insumap.shared.time import Clock
 
 HBA1C_TEST_CODE = "HBA1C"
+LIPOHYPERTROPHY_CODE = "LIPOHYPERTROPHY"
+INJECTION_SITE_FIELD = "body.injection_site"
 SYMPTOM_FIELD = "body.symptom_code"
+
+
+def require_site_for(entry: SymptomEntry, data: SymptomData) -> None:
+    """Lipohypertrophy is about a place: without a site it is a ``422``."""
+    if entry.code == LIPOHYPERTROPHY_CODE and data.injection_site is None:
+        raise InsumapError(
+            ErrorCode.VALIDATION_ERROR,
+            detail={
+                "errors": [{"field": INJECTION_SITE_FIELD, "type": "site_required"}]
+            },
+        )
 
 
 @final
@@ -264,6 +278,7 @@ class RecordSymptomUseCase:
                         "errors": [{"field": SYMPTOM_FIELD, "type": "unknown_symptom"}]
                     },
                 )
+            require_site_for(entry, data)
             symptom = Symptom(
                 id=self._ids.new_id(),
                 clinic_id=scope.clinic_id,
@@ -274,6 +289,7 @@ class RecordSymptomUseCase:
                 symptom_at=data.occurred_at,
                 symptom=entry,
                 note=data.note,
+                injection_site=data.injection_site,
             )
             recorded = self._writer.write(uow, ClinicalRecordKind.SYMPTOMS, symptom)
             uow.commit()

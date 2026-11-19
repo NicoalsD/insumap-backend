@@ -252,12 +252,18 @@ class SymptomFields(RecordFields):
     )
     occurred_at: AwareDatetime
     note: NoteInput = None
+    injection_site: SiteCode | None = Field(
+        default=None,
+        description="Sitio de inyección del síntoma. Obligatorio con "
+        "`LIPOHYPERTROPHY` (`422` si falta); sirve para evitar ese sitio.",
+    )
 
     def to_data(self) -> SymptomData:
         return SymptomData(
             symptom_code=self.symptom_code,
             occurred_at=self.occurred_at,
             note=self.note,
+            injection_site=self.injection_site,
         )
 
 
@@ -434,6 +440,7 @@ class SymptomResponse(RecordResponse):
         '"contacta a tu equipo o a urgencias".'
     )
     note: str | None
+    injection_site: SiteCode | None
 
     @classmethod
     def of(cls, symptom: Symptom, *, simulated: bool) -> SymptomResponse:
@@ -443,6 +450,7 @@ class SymptomResponse(RecordResponse):
             occurred_at=symptom.symptom_at,
             alarm_detected=symptom.symptom.is_alarm,
             note=symptom.note,
+            injection_site=symptom.injection_site,
         )
 
 

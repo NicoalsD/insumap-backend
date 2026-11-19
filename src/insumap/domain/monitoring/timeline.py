@@ -97,6 +97,9 @@ class TimelineVisitor(ClinicalEventVisitor[tuple[TimelineEventType, TimelineData
         return TimelineEventType.SYMPTOM, {
             "symptom_code": event.symptom.code,
             "is_alarm": event.symptom.is_alarm,
+            "injection_site": None
+            if event.injection_site is None
+            else event.injection_site.value,
         }
 
 

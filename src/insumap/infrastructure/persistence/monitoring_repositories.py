@@ -241,6 +241,9 @@ def _symptom_to_orm(record: ClinicalRecord) -> SymptomOrm:
         occurred_at=symptom.symptom_at,
         symptom_id=symptom.symptom.symptom_id,
         note=symptom.note,
+        injection_site=None
+        if symptom.injection_site is None
+        else symptom.injection_site.value,
     )
 
 
@@ -253,6 +256,9 @@ def _symptom_to_domain(
         symptom_at=row.occurred_at,
         symptom=catalog[row.symptom_id],
         note=row.note,
+        injection_site=None
+        if row.injection_site is None
+        else SiteCode(row.injection_site),
     )
 
 

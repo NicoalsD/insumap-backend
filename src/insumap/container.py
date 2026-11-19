@@ -20,6 +20,7 @@ from insumap.api.routers.credentials import CredentialRouter
 from insumap.api.routers.dashboard import DashboardRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.imports import ImportRouter
+from insumap.api.routers.injection_sites import InjectionSitesRouter
 from insumap.api.routers.messaging import MessagingRouter
 from insumap.api.routers.meta import MetaRouter
 from insumap.api.routers.metrics import MetricsRouter
@@ -236,6 +237,7 @@ from insumap.application.monitoring.glucose import (
     RecordGlucoseReadingsBatchUseCase,
     RecordGlucoseReadingUseCase,
 )
+from insumap.application.monitoring.injection import GetOwnInjectionSitesUseCase
 from insumap.application.monitoring.profile import GetOwnPatientProfileUseCase
 from insumap.application.monitoring.queries import (
     ExportTimelineUseCase,
@@ -383,6 +385,7 @@ from insumap.domain.identity.password_policy import PasswordPolicy
 from insumap.domain.identity.refresh_token import RefreshTokenLifetime
 from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistry
 from insumap.domain.monitoring.events import GlucoseReadingRecorded
+from insumap.domain.monitoring.injection_rule import InjectionRulesV1Strategy
 from insumap.domain.monitoring.validation import build_validation_chain
 from insumap.domain.onboarding.vocabulary import SourceFormat
 from insumap.infrastructure.ai_adapters import (
@@ -820,6 +823,29 @@ class Container:
         self.messaging_router = self._build_messaging_router(
             adapters, monitoring, messaging, notifications
         )
+        self.injection_sites_router = self._build_injection_sites_router(
+            adapters, monitoring, treatment
+        )
+
+    def _build_injection_sites_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        treatment: TreatmentAdapters,
+    ) -> InjectionSitesRouter:
+        """Wire where the next dose goes: a pure rule over the patient's data (P19)."""
+        return InjectionSitesRouter(
+            injection_sites=GetOwnInjectionSitesUseCase(
+                uow=adapters.unit_of_work,
+                gate=OwnPatientGate(adapters.consents),
+                profiles=monitoring.body_profiles,
+                history=monitoring.injection_history,
+                plans=treatment.plans,
+                strategy=InjectionRulesV1Strategy(),
+                clock=self.clock,
+            ),
+            session_actor=self.full_session_actor,
+        )
 
     def _treatment_commands(
         self,
@@ -1038,6 +1064,7 @@ class Container:
                 alerts=alerts.alerts,
                 open_alerts=dashboard.open_alerts,
                 reminders=targets.reminders,
+                body_profiles=monitoring.body_profiles,
                 strategies=GlycemicTargetStrategyRegistry(),
                 clock=self.clock,
             ),

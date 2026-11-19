@@ -221,6 +221,9 @@ def test_the_overview_reports_the_target_and_no_plan(api: IdentityApi) -> None:
     # The identity clinic is a demo clinic: the marking must be consistent.
     assert body["simulated"] is True
     assert body["data_source"] == "SIMULATED"
+    assert body["sex"] == "FEMALE"
+    assert body["bmi"] == 23.4
+    assert body["pregnancy_status"] == "NONE"
 
 
 def test_the_clinic_kpis_show_counts_and_the_activation_rate(api: IdentityApi) -> None:

@@ -145,6 +145,7 @@ class SymptomOrm(RecordColumnsMixin, Base):
     occurred_at: Mapped[datetime] = _ts()
     symptom_id: Mapped[UUID] = mapped_column(Uuid)
     note: Mapped[str | None] = mapped_column(String(500))
+    injection_site: Mapped[str | None] = mapped_column(String(14))
 
 
 class LabResultOrm(RecordColumnsMixin, Base):

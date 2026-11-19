@@ -471,6 +471,17 @@ class TestRotation:
         assert row.last_used_at == hours_ago(30)
 
 
+def test_a_dose_with_a_site_but_no_spot_still_rotates_and_restarts_at_spot_1() -> None:
+    unspotted = InjectionHistoryEntry(
+        site=ABDOMEN_LEFT, spot=None, kind=BOLUS, administered_at=hours_ago(30)
+    )
+    result = run(history=(dose(ABDOMEN_RIGHT, 2, 10), unspotted))
+
+    assert result.suggestion is not None
+    assert (result.suggestion.site, result.suggestion.spot) == (ABDOMEN_LEFT, 1)
+    assert status_of(result, ABDOMEN_LEFT).last_spot is None
+
+
 class TestRotationPerInsulinFamily:
     def test_keeps_the_bolus_opposite_the_last_bolus_after_a_basal_on_the_thigh(
         self,

@@ -60,6 +60,7 @@ class SymptomData:
     symptom_code: str
     occurred_at: datetime
     note: str | None = None
+    injection_site: SiteCode | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

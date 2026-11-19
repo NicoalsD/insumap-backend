@@ -77,7 +77,7 @@ class InjectionHistoryEntry:
     """A dose already recorded with its site. Doses without a site do not rotate."""
 
     site: SiteCode
-    spot: int
+    spot: int | None
     kind: InsulinKind
     administered_at: datetime
 
@@ -312,7 +312,8 @@ class InjectionRulesV1Strategy(InjectionSiteStrategy):
             if pregnant and group is SiteGroup.ABDOMEN
             else ALL_SPOTS
         )
-        spot = _next_spot(cycle, 0 if chosen.last is None else chosen.last.spot)
+        last_spot = None if chosen.last is None else chosen.last.spot
+        spot = _next_spot(cycle, last_spot or 0)
 
         reasons: list[ReasonCode] = []
         if bolus and group is SiteGroup.ABDOMEN:

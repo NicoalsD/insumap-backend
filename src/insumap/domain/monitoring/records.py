@@ -151,6 +151,7 @@ class Symptom(TimelineRecord):
     symptom_at: datetime
     symptom: SymptomEntry
     note: str | None = None
+    injection_site: SiteCode | None = None
 
     @property
     @override

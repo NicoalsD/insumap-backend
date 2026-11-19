@@ -23,6 +23,10 @@ from insumap.application.dashboard.ports import OpenAlertCountPort
 from insumap.application.metrics.metrics import MetricWindow, metrics_for, period_of
 from insumap.application.metrics.ports import GlucoseSeriesPort, TargetProfilePort
 from insumap.application.monitoring.gate import AssignedPatientGate, OwnPatientGate
+from insumap.application.monitoring.injection import (
+    PatientBodyProfile,
+    PatientBodyProfilePort,
+)
 from insumap.application.monitoring.paging import PageQuery
 from insumap.application.monitoring.ports import GlucoseReadingPort, ReadingFilters
 from insumap.application.reminders.ports import ReminderRepositoryPort
@@ -62,6 +66,7 @@ class PatientOverview:
     open_alerts_count: int
     reminders: tuple[Reminder, ...]
     simulated: bool
+    body: PatientBodyProfile
 
 
 @final
@@ -77,7 +82,7 @@ class PatientOverviewFacade:
     Pattern: P10 Facade
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - one port per section of the start page
         self,
         *,
         uow: UnitOfWorkPort,
@@ -90,6 +95,7 @@ class PatientOverviewFacade:
         alerts: AlertRepositoryPort,
         open_alerts: OpenAlertCountPort,
         reminders: ReminderRepositoryPort,
+        body_profiles: PatientBodyProfilePort,
         strategies: GlycemicTargetStrategyRegistry,
         clock: Clock,
     ) -> None:
@@ -103,6 +109,7 @@ class PatientOverviewFacade:
         self._alerts = alerts
         self._open_alerts = open_alerts
         self._reminders = reminders
+        self._body_profiles = body_profiles
         self._strategies = strategies
         self._clock = clock
 
@@ -135,6 +142,9 @@ class PatientOverviewFacade:
         found = self._targets.for_patient(patient_id)
         if found is None:
             raise InsumapError(ErrorCode.INTERNAL_ERROR)  # no profile seeded
+        body = self._body_profiles.for_patient(patient_id)
+        if body is None:
+            raise InsumapError(ErrorCode.NOT_FOUND)
         profile = found.profile
         period = period_of(window, self._clock.now(), ZoneInfo(found.timezone))
         points = list(self._series.points(patient_id, period.start, period.end))
@@ -168,6 +178,7 @@ class PatientOverviewFacade:
             ),
             reminders=tuple(r for r in reminders.items if r.is_active),
             simulated=actor.clinic_is_demo,
+            body=body,
         )
 
     def _open_alert_list(self, patient_id: UUID) -> tuple[Alert, ...]:
