@@ -18,25 +18,20 @@ from insumap.application.common.actor import Actor
 from insumap.application.common.ids import IdGenerator
 from insumap.application.common.patient_scope import PatientScope
 from insumap.application.common.unit_of_work import TransactionContext, UnitOfWorkPort
-from insumap.application.messaging.message_notifications import (
-    MessageReceivedNotification,
-)
+from insumap.application.messaging.message_notifications import MessageNotifier
 from insumap.application.messaging.ports import (
     MessageThreadRepositoryPort,
     ThreadMessageRepositoryPort,
     ThreadReadRepositoryPort,
 )
-from insumap.application.notifications.notification import (
-    NotificationChannel,
-    PendingNotification,
-    Recipient,
-)
+from insumap.application.notifications.notification import Recipient
+from insumap.application.security.rate_limit import RateLimitCheck
 from insumap.domain.identity.errors import PermissionDeniedError
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
+from insumap.domain.messaging.alarm_keywords import AlarmKeywordDetector
 from insumap.domain.messaging.events import MessageSent
 from insumap.domain.messaging.message import MessageBody, SenderRole, ThreadMessage
-from insumap.shared.i18n import MessageCatalog
 from insumap.shared.time import Clock
 
 
@@ -49,9 +44,20 @@ class SendMessageInput:
     body: str
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SentMessage:
+    """The stored message and the alarm words its text carries (may be empty)."""
+
+    message: ThreadMessage
+    alarm_keywords: tuple[str, ...]
+
+
 @final
 class SendMessageUseCase:
     """Appends a message of the session user to the thread of a patient.
+
+    A patient's message with alarm words also tells the care team, without text
+    (RF-85). The team notice is sent after the commit.
 
     Pattern: P07 Bridge (notification to the other side), P17 Observer (event)
     """
@@ -68,8 +74,9 @@ class SendMessageUseCase:
         patients: PatientDirectoryPort,
         ids: IdGenerator,
         clock: Clock,
-        in_app: NotificationChannel,
-        catalog: MessageCatalog,
+        notifier: MessageNotifier,
+        rate_limit: RateLimitCheck,
+        alarm: AlarmKeywordDetector,
     ) -> None:
         self._uow = uow
         self._scope = scope
@@ -80,16 +87,20 @@ class SendMessageUseCase:
         self._patients = patients
         self._ids = ids
         self._clock = clock
-        self._in_app = in_app
-        self._catalog = catalog
+        self._notifier = notifier
+        self._rate_limit = rate_limit
+        self._alarm = alarm
 
-    def execute(self, input: SendMessageInput) -> ThreadMessage:
+    def execute(self, input: SendMessageInput) -> SentMessage:
         """Store the message, then notify the other side once it is committed."""
         actor = input.actor
         if actor.clinic_id is None:
             raise PermissionDeniedError
+        # Counted per user before any write: the answer is a 429 with Retry-After.
+        self._rate_limit.ensure(str(actor.user_id))
         # Validated before any write: a rejected text leaves no thread behind.
         body = MessageBody.parse(input.body)
+        alarm_keywords = self._alarm.detect(body.text)
         with self._uow.begin(TransactionContext.for_actor(actor)) as unit:
             patient_id = self._scope.enter(
                 actor,
@@ -132,15 +143,17 @@ class SendMessageUseCase:
                 ]
             )
             unit.commit()
-        for recipient in self._recipients(actor, patient_id, actor.clinic_id):
-            PendingNotification(
-                notification=MessageReceivedNotification(
-                    self._in_app, self._catalog, thread_id=thread.thread_id
-                ),
-                recipient=recipient,
-                is_demo=actor.clinic_is_demo,
-            ).send()
-        return message
+        recipients = self._recipients(actor, patient_id, actor.clinic_id)
+        self._notifier.received(
+            recipients, thread_id=thread.thread_id, is_demo=actor.clinic_is_demo
+        )
+        # Only a patient's words reach the team: a doctor's own warning does not
+        # page the team it came from.
+        if alarm_keywords and actor.role is Role.PATIENT:
+            self._notifier.alarm(
+                recipients, thread_id=thread.thread_id, is_demo=actor.clinic_is_demo
+            )
+        return SentMessage(message=message, alarm_keywords=alarm_keywords)
 
     def _recipients(
         self, actor: Actor, patient_id: UUID, clinic_id: UUID

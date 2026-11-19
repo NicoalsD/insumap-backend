@@ -28,6 +28,7 @@ from insumap.api.routers.messaging_schemas import (
     MessageListResponse,
     MessageResponse,
     SendMessageRequest,
+    SentMessageResponse,
 )
 from insumap.api.tags import ApiTag
 from insumap.application.commands.base import CommandBus
@@ -57,6 +58,13 @@ MESSAGE_ERRORS: Final = error_responses(
     HTTPStatus.FORBIDDEN,
     HTTPStatus.NOT_FOUND,
     HTTPStatus.UNPROCESSABLE_ENTITY,
+)
+SEND_MESSAGE_ERRORS: Final = error_responses(
+    HTTPStatus.UNAUTHORIZED,
+    HTTPStatus.FORBIDDEN,
+    HTTPStatus.NOT_FOUND,
+    HTTPStatus.UNPROCESSABLE_ENTITY,
+    HTTPStatus.TOO_MANY_REQUESTS,
 )
 FOLLOW_UP_WRITE_ERRORS: Final = error_responses(
     HTTPStatus.UNAUTHORIZED,
@@ -126,13 +134,13 @@ class MessagingRouter:
 
         def send_message(
             body: SendMessageRequest, actor: Annotated[Actor, guard]
-        ) -> MessageResponse:
-            message = self._send_message.execute(
+        ) -> SentMessageResponse:
+            sent = self._send_message.execute(
                 SendMessageInput(
                     actor=actor, patient_id=body.patient_id, body=body.body
                 )
             )
-            return MessageResponse.of(message, simulated=actor.clinic_is_demo)
+            return SentMessageResponse.of_sent(sent, simulated=actor.clinic_is_demo)
 
         def list_follow_ups(
             actor: Annotated[Actor, guard],
@@ -209,9 +217,13 @@ class MessagingRouter:
             description=(
                 "Agrega un mensaje de texto plano al hilo. El remitente es la sesión "
                 "y su rol; el paciente no envía `patient_id`. Avisa al otro lado "
-                "dentro de la app, sin el texto. No es un canal de emergencias."
+                "dentro de la app, sin el texto. No es un canal de emergencias. Si el "
+                "paciente escribe palabras de alarma, `alarm_keywords_detected` las "
+                "lista y el equipo recibe un aviso sin el texto. "
+                "Hay un límite de envíos por minuto y usuario; el exceso responde "
+                "`429` con `Retry-After`."
             ),
-            responses=MESSAGE_ERRORS,
+            responses=SEND_MESSAGE_ERRORS,
             openapi_extra=own,
         )
         add(

@@ -126,6 +126,7 @@ class IdentityApi:
         self.reminders = FakeReminders()
         self.notification_store = InMemoryNotificationStore()
         self.in_app = InMemoryChannel(external=False)
+        self.web_push = InMemoryChannel(external=True)
         self.preferences = InMemoryPreferences()
         self.push_subscriptions = InMemoryPushSubscriptions()
         self.clinic_admins = FakeClinicAdminProvisioning()
@@ -201,6 +202,7 @@ class IdentityApi:
                 preferences=self.preferences,
                 subscriptions=self.push_subscriptions,
                 in_app=self.in_app,
+                web_push=self.web_push,
             ),
             clinic_admin_adapters=ClinicAdminAdapters(provisioning=self.clinic_admins),
             patient_adapters=PatientAdapters(

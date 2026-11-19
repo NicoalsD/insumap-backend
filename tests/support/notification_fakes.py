@@ -8,7 +8,10 @@ from typing import override
 from uuid import UUID
 
 from insumap.application.common.pagination import Page, PageRequest, build_page
-from insumap.application.notifications.notification import InAppEntry
+from insumap.application.notifications.notification import (
+    InAppEntry,
+    NotificationChannel,
+)
 from insumap.application.notifications.ports import (
     InAppStorePort,
     NotificationPreferencesPort,
@@ -131,8 +134,9 @@ def notification_adapters(
     preferences: InMemoryPreferences | None = None,
     subscriptions: InMemoryPushSubscriptions | None = None,
     in_app: InMemoryChannel | None = None,
+    web_push: NotificationChannel | None = None,
 ) -> NotificationAdapters:
-    """The notification ports as doubles; the Web Push sender only logs."""
+    """The notification ports as doubles; the Web Push sender only logs by default."""
     store = store or InMemoryNotificationStore()
     return NotificationAdapters(
         notifications=store,
@@ -140,5 +144,5 @@ def notification_adapters(
         preferences=preferences or InMemoryPreferences(),
         push_subscriptions=subscriptions or InMemoryPushSubscriptions(),
         in_app=in_app or InMemoryChannel(external=False),
-        web_push=LoggingWebPushChannel(),
+        web_push=web_push or LoggingWebPushChannel(),
     )

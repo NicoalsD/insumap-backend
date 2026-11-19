@@ -1,5 +1,6 @@
 """Messages and their reads (RF-84, RF-85, P11, P07, P17) over in-memory doubles."""
 
+from datetime import timedelta
 from uuid import UUID
 
 import pytest
@@ -15,16 +16,27 @@ from insumap.application.messaging.list_messages import (
     ListMessagesInput,
     ListMessagesUseCase,
 )
-from insumap.application.messaging.message_notifications import MESSAGE_RECEIVED_KEY
+from insumap.application.messaging.message_notifications import (
+    MESSAGE_ALARM_KEY,
+    MESSAGE_RECEIVED_KEY,
+    MessageNotifier,
+)
 from insumap.application.messaging.send_message import (
     SendMessageInput,
     SendMessageUseCase,
 )
 from insumap.application.monitoring.gate import AssignedPatientGate, OwnPatientGate
+from insumap.application.security.rate_limit import (
+    RateLimitCheck,
+    RateLimitedError,
+    RateLimitRule,
+)
 from insumap.domain.common.errors import ResourceNotFoundError
 from insumap.domain.identity.errors import PermissionDeniedError
+from insumap.domain.messaging.alarm_keywords import AlarmKeywordDetector
 from insumap.domain.messaging.events import MessageSent
 from insumap.domain.messaging.message import SenderRole
+from insumap.infrastructure.security.rate_limiter import InMemoryRateLimiter
 from insumap.shared.errors import ErrorCode, InsumapError
 from insumap.shared.i18n import MessageCatalog
 from tests.support.care_team_fakes import FakeCareTeams
@@ -64,6 +76,7 @@ class World:
         self.teams = FakeCareTeams(assignment(DOCTOR))
         self.patients = FakePatients()
         self.channel = InMemoryChannel(external=False)
+        self.web_push = InMemoryChannel(external=True)
         self.clock = FixedClock(NOW)
         self.ids = FakeIds()
         self.catalog = MessageCatalog.load_spanish()
@@ -83,8 +96,18 @@ class World:
             patients=self.patients,
             ids=self.ids,
             clock=self.clock,
-            in_app=self.channel,
-            catalog=self.catalog,
+            notifier=MessageNotifier(
+                in_app=self.channel, web_push=self.web_push, catalog=self.catalog
+            ),
+            alarm=AlarmKeywordDetector(),
+            rate_limit=RateLimitCheck(
+                InMemoryRateLimiter(self.clock),
+                RateLimitRule(
+                    family="messages_user_minute",
+                    limit=MESSAGES_PER_MINUTE,
+                    window=timedelta(minutes=1),
+                ),
+            ),
         )
 
     def reader(self) -> ListMessagesUseCase:
@@ -104,6 +127,9 @@ def world() -> World:
     return World()
 
 
+MESSAGES_PER_MINUTE = 30
+
+
 def _first_page() -> PageRequest:
     return PageRequest(limit=20)
 
@@ -111,8 +137,12 @@ def _first_page() -> PageRequest:
 def test_patient_message_is_stored_with_session_role_and_normalized_text(
     world: World,
 ) -> None:
-    message = world.sender().execute(
-        SendMessageInput(actor=patient_actor(), patient_id=None, body="  Hola  ")
+    message = (
+        world.sender()
+        .execute(
+            SendMessageInput(actor=patient_actor(), patient_id=None, body="  Hola  ")
+        )
+        .message
     )
 
     assert message.sender_role is SenderRole.PATIENT
@@ -143,10 +173,14 @@ def test_patient_message_notifies_each_open_doctor_in_app_without_text(
 def test_doctor_message_names_an_assigned_patient_and_notifies_the_patient(
     world: World,
 ) -> None:
-    message = world.sender().execute(
-        SendMessageInput(
-            actor=doctor_actor(), patient_id=PATIENT, body="Revisa tus datos"
+    message = (
+        world.sender()
+        .execute(
+            SendMessageInput(
+                actor=doctor_actor(), patient_id=PATIENT, body="Revisa tus datos"
+            )
         )
+        .message
     )
 
     assert message.sender_role is SenderRole.DOCTOR
@@ -219,10 +253,10 @@ def test_patient_reads_own_thread_newest_first_with_the_notice(world: World) -> 
     sender = world.sender()
     first = sender.execute(
         SendMessageInput(actor=patient_actor(), patient_id=None, body="Primero")
-    )
+    ).message
     second = sender.execute(
         SendMessageInput(actor=doctor_actor(), patient_id=PATIENT, body="Segundo")
-    )
+    ).message
 
     listing = world.reader().execute(
         ListMessagesInput(actor=patient_actor(), patient_id=None, page=_first_page())
@@ -318,3 +352,119 @@ def test_cursor_round_trip_matches_the_encoder() -> None:
     key = UUID(int=42)
 
     assert _decode(encode_cursor(key)) == key
+
+
+def test_messages_are_limited_per_user_per_minute_with_retry_after(
+    world: World,
+) -> None:
+    sender = world.sender()
+    for _ in range(MESSAGES_PER_MINUTE):
+        sender.execute(
+            SendMessageInput(actor=patient_actor(), patient_id=None, body="Hola")
+        )
+
+    with pytest.raises(RateLimitedError) as error:
+        sender.execute(
+            SendMessageInput(actor=patient_actor(), patient_id=None, body="Hola")
+        )
+
+    assert error.value.code is ErrorCode.RATE_LIMITED
+    assert int(error.value.headers["Retry-After"]) >= 1
+    assert len(world.messages.rows) == MESSAGES_PER_MINUTE
+
+
+def test_the_limit_is_per_user_not_per_thread(world: World) -> None:
+    sender = world.sender()
+    for _ in range(MESSAGES_PER_MINUTE):
+        sender.execute(
+            SendMessageInput(actor=patient_actor(), patient_id=None, body="Hola")
+        )
+
+    # The doctor of the same thread has a bucket of their own.
+    message = sender.execute(
+        SendMessageInput(actor=doctor_actor(), patient_id=PATIENT, body="Hola")
+    ).message
+
+    assert message.sender_role is SenderRole.DOCTOR
+
+
+ALARM_TEXT = "Tuve una convulsión esta noche"
+
+
+def test_a_patient_message_reports_its_alarm_words_and_keeps_the_text(
+    world: World,
+) -> None:
+    sent = world.sender().execute(
+        SendMessageInput(actor=patient_actor(), patient_id=None, body=ALARM_TEXT)
+    )
+
+    assert sent.alarm_keywords == ("convulsión",)
+    assert sent.message.body == ALARM_TEXT
+    assert world.messages.rows == [sent.message]
+
+
+def test_a_message_without_alarm_words_reports_none_and_no_team_notice(
+    world: World,
+) -> None:
+    sent = world.sender().execute(
+        SendMessageInput(actor=patient_actor(), patient_id=None, body="Hola, bien")
+    )
+
+    assert sent.alarm_keywords == ()
+    assert world.web_push.delivered == []
+    assert all(
+        d.entry is None or d.entry.message_key != MESSAGE_ALARM_KEY
+        for d in world.channel.delivered
+    )
+
+
+def test_the_team_gets_an_alarm_notice_in_app_and_by_web_push_without_text(
+    world: World,
+) -> None:
+    world.teams = FakeCareTeams(assignment(DOCTOR), assignment(OTHER_DOCTOR))
+    world.sender().execute(
+        SendMessageInput(actor=patient_actor(), patient_id=None, body=ALARM_TEXT)
+    )
+
+    in_app = [
+        d
+        for d in world.channel.delivered
+        if d.entry is not None and d.entry.message_key == MESSAGE_ALARM_KEY
+    ]
+    assert sorted(d.recipient.user_id.int for d in in_app) == [
+        DOCTOR.int,
+        OTHER_DOCTOR.int,
+    ]
+    thread = world.threads.by_patient[PATIENT]
+    for delivered in in_app:
+        assert delivered.entry is not None
+        assert delivered.entry.notification_type == "MESSAGE"
+        assert delivered.entry.entity_id == thread.thread_id
+        assert delivered.recipient.clinic_id == CLINIC
+
+    pushed = sorted(d.recipient.user_id.int for d in world.web_push.delivered)
+    assert pushed == [DOCTOR.int, OTHER_DOCTOR.int]
+    for delivered in [*in_app, *world.web_push.delivered]:
+        for leaked in ("convulsión", "convulsion", "esta noche", "Tuve"):
+            assert leaked not in delivered.body
+            assert leaked not in delivered.subject
+        assert PATIENT_USER.hex not in delivered.body
+
+
+def test_a_doctor_message_with_alarm_words_does_not_page_the_team(
+    world: World,
+) -> None:
+    sent = world.sender().execute(
+        SendMessageInput(
+            actor=doctor_actor(),
+            patient_id=PATIENT,
+            body="Si tienes convulsión, llama al 123",
+        )
+    )
+
+    assert sent.alarm_keywords == ("convulsión",)
+    assert world.web_push.delivered == []
+    assert all(
+        d.entry is None or d.entry.message_key != MESSAGE_ALARM_KEY
+        for d in world.channel.delivered
+    )

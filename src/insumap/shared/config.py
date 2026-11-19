@@ -109,6 +109,8 @@ class Settings(BaseSettings):
     # Patient records and exports (docs/API.md, section 5).
     rate_limit_records_per_user_per_minute: int = Field(default=120, ge=1)
     rate_limit_exports_per_user_per_hour: int = Field(default=20, ge=1)
+    # Messages: POST /messages, per user (API.md 5 and 8.12; Seguridad 2.3).
+    rate_limit_messages_per_user_per_minute: int = Field(default=30, ge=1)
     # Reports: smaller counts are not shown, so no patient is singled out (API.md 8.11).
     report_small_count_threshold: int = Field(default=5, ge=1)
     # Password reset, email verification and staff invitations (Seguridad.md 3.6).
