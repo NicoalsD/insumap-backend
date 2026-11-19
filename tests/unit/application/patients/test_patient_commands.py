@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Never, cast, override
+from typing import Any, Never, override
 from uuid import UUID
 
 import pytest
@@ -138,9 +138,9 @@ class World:
         self.directory = FakeDirectory()
         self.current = CurrentUnitOfWork()
 
-    def guard(
-        self, handler: CommandHandler[Command[Never], object]
-    ) -> CommandHandler[Command[Never], object]:
+    def guard[C: Command[Never], R](
+        self, handler: CommandHandler[C, R]
+    ) -> CommandHandler[C, R]:
         """The order the container uses: transaction around audit around handler."""
         audited = AuditingCommandHandler(handler, self.audit, self.clock)
         return TransactionalCommandHandler(audited, self.uow, self.current)
@@ -170,8 +170,9 @@ class World:
         )
 
 
-def run[R](handler: CommandHandler[Command[Never], R], command: Command[R]) -> R:
-    return cast("R", handler.handle(cast("Command[Never]", command)))
+def run[C: Command[Any], R](handler: CommandHandler[C, R], command: C) -> R:
+    """Dispatch the command to its handler, typed by the command it accepts."""
+    return handler.handle(command)
 
 
 def test_suspend_moves_the_account_revokes_sessions_and_audits() -> None:
@@ -195,9 +196,7 @@ def test_suspend_moves_the_account_revokes_sessions_and_audits() -> None:
 
 def test_suspend_goes_through_the_audit_decorator_with_the_reason() -> None:
     world = World()
-    guarded = world.guard(
-        cast("CommandHandler[Command[Never], object]", world.suspend())
-    )
+    guarded = world.guard(world.suspend())
 
     run(
         guarded,

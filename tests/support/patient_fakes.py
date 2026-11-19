@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime
 from typing import override
 from uuid import UUID
 
 from insumap.application.common.pagination import Page, PageRequest, build_page
+from insumap.application.identity.ports import UserRepositoryPort
 from insumap.application.patients.ports import (
     PatientAdministrativeView,
     PatientRosterFilter,
@@ -16,26 +19,49 @@ from insumap.application.patients.ports import (
 
 
 class FakePatientRoster(PatientRosterPort):
-    """Views keyed by patient; the clinic scope is applied as the repository does."""
+    """Views keyed by patient; the clinic scope is applied as the repository does.
 
-    def __init__(self, *views: PatientAdministrativeView) -> None:
+    With ``users`` and ``user_of``, the account status is read from the user
+    double, as the query reads ``iam.users``: a change made by a command shows up.
+    """
+
+    def __init__(
+        self,
+        *views: PatientAdministrativeView,
+        users: UserRepositoryPort | None = None,
+        user_of: Mapping[UUID, UUID] | None = None,
+    ) -> None:
         self.views: dict[UUID, PatientAdministrativeView] = {
             view.patient_id: view for view in views
         }
+        self._users = users
+        self._user_of = dict(user_of or {})
+
+    def _current(self, view: PatientAdministrativeView) -> PatientAdministrativeView:
+        if self._users is None or view.patient_id not in self._user_of:
+            return view
+        account = self._users.get(self._user_of[view.patient_id])
+        return view if account is None else replace(view, account_status=account.status)
 
     @override
     def get(
         self, clinic_id: UUID, patient_id: UUID
     ) -> PatientAdministrativeView | None:
         view = self.views.get(patient_id)
-        return view if view is not None and view.clinic_id == clinic_id else None
+        if view is None or view.clinic_id != clinic_id:
+            return None
+        return self._current(view)
 
     @override
     def list(
         self, clinic_id: UUID, filters: PatientRosterFilter, page: PageRequest
     ) -> Page[PatientAdministrativeView]:
         rows = sorted(
-            (view for view in self.views.values() if view.clinic_id == clinic_id),
+            (
+                self._current(view)
+                for view in self.views.values()
+                if view.clinic_id == clinic_id
+            ),
             key=lambda view: view.patient_id,
         )
         rows = [
