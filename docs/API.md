@@ -1353,15 +1353,16 @@ La IA solo apoya al médico: nunca aplica un cambio ni da una dosis al paciente.
 
 #### `GET /patients/{patient_id}/pattern-findings`
 - Operación: `list_pattern_findings` · Permiso: `ai.risk.read_assigned` · Ruta: P · Trazabilidad: HU-38, RF-68 · Patrón: P11, P09 · Éxito: 200
-- Solicitud: `status` (nuevo o descartado; valores por definir), `limit`, `cursor`.
-- Respuesta: hallazgos con `id`, `pattern_type` (`NOCTURNAL_HYPOGLYCEMIA`, `DAWN_PHENOMENON`, `POSTPRANDIAL_SPIKE`, `MISSED_DOSE`, `DUPLICATE_DOSE`, `ADHERENCE_DROP`, `IMPLAUSIBLE_READING`), ventana de fechas, `confidence`, evidencia, `is_fallback`.
+- Solicitud: `limit`, `cursor`. (Un filtro por `status` queda por definir.)
+- Respuesta: hallazgos con `id`, `pattern_type` (`NOCTURNAL_HYPOGLYCEMIA`, `DAWN_PHENOMENON`, `POSTPRANDIAL_SPIKE`, `MISSED_DOSE`, `DUPLICATE_DOSE`, `ADHERENCE_DROP`, `IMPLAUSIBLE_READING`), ventana de fechas, `confidence`, evidencia, `is_fallback`, `status` (`NEW` o `DISMISSED`), `dismissed_at` y `dismissed_by` (nulos si es nuevo).
 - Errores: C1, C2, C4, C5.
 
 #### `POST /patients/{patient_id}/pattern-findings/{finding_id}/dismiss`
 - Operación: `dismiss_pattern_finding` · Permiso: `ai.risk.read_assigned` · Ruta: P · Trazabilidad: HU-38, RF-68 · Patrón: P11, P09 · Éxito: 200
-- Solicitud: `note` (obligatoria). El hallazgo queda registrado como descartado y no se vuelve a mostrar como nuevo. Ningún permiso del catálogo nombra esta acción (G15).
-- Respuesta: el hallazgo descartado.
-- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (ya descartado).
+- Solicitud: `note` (obligatoria, de 1 a 500 caracteres tras recortar espacios; `FieldLimits.PATTERN_FINDING_NOTE_*`). El hallazgo queda registrado como descartado (`ai.pattern_finding_reviews`, append-only) y no se vuelve a mostrar como nuevo. Ningún permiso del catálogo nombra esta acción (G15).
+- Respuesta: el hallazgo descartado, con el mismo esquema que el listado: `status` `DISMISSED`, `dismissed_at` y `dismissed_by`.
+- Errores: C1, C2, C4, C5; `404 NOT_FOUND` (paciente no asignado o hallazgo ajeno o inexistente, con el mismo cuerpo); `409 INVALID_STATE_TRANSITION` (ya descartado).
+- Auditoría: `PATTERN_FINDING_DISMISSED` sobre `PATTERN_FINDING`, con la nota recortada como motivo (P09).
 
 #### `POST /patients/{patient_id}/clinical-summaries`
 - Operación: `create_clinical_summary` · Permiso: `clinical_summaries.generate` · Ruta: P · Trazabilidad: HU-41, RF-72 (Post-MVP) · Patrón: P11, P09, P04 · Éxito: 201
@@ -1383,13 +1384,13 @@ La IA solo apoya al médico: nunca aplica un cambio ni da una dosis al paciente.
 
 #### `GET /dropout-risks`
 - Operación: `list_dropout_risks` · Permiso: `ai.dropout_risk.read` · Ruta: P · Trazabilidad: HU-43, RF-74 · Patrón: P19, P11, P09 · Éxito: 200
-- Solicitud: `risk_tier`, `limit`, `cursor`. El `CLINIC_ADMIN` ve la lista administrativa; el `DOCTOR`, solo sus pacientes asignados.
-- Respuesta: por paciente `patient_id`, nombre administrativo, `account_status`, `days_without_record`, `risk_tier`, `explanation` y `is_fallback` (con la IA caída se usa la regla de días sin registros). **Nunca valores clínicos.**
+- Solicitud: `risk_tier`, `limit`, `cursor`. El `CLINIC_ADMIN` ve la lista administrativa de su clínica, leída con `ai.dropout_risk_list()` (funcion definer, porque la RLS de `ai.risk_assessments` no le da filas); el `DOCTOR`, solo sus pacientes asignados. Cualquier otro rol responde `403`.
+- Respuesta: por paciente `patient_id`, nombre administrativo, `account_status`, `days_without_record`, `risk_tier`, `explanation` y `is_fallback` (con la IA caída se usa la regla de días sin registros). `account_status` y `days_without_record` vienen en la lista del administrador; en la del médico van nulos. **Nunca valores clínicos.**
 - Errores: C1, C2, C4.
 
 #### `GET /ai-evaluations`
 - Operación: `list_ai_evaluations` · Permiso: `ai_evaluations.read` · Ruta: P · Trazabilidad: HU-44, RF-77 (Post-MVP) · Patrón: P19 · Éxito: 200
-- Solicitud: `use_case` (`IA1` a `IA7`), `model_version`, `limit`, `cursor`.
+- Solicitud: `use_case` (`IA1` a `IA7`), `model_version`, `limit`, `cursor`. El `CLINIC_ADMIN` lee las de su clínica y las globales por RLS; el `PLATFORM_ADMIN` lee las de todas las clínicas con `ai.platform_ai_evaluations()` (definer), porque no tiene rama de RLS sobre `ai`.
 - Respuesta: por caso y versión, la métrica de la IA frente al respaldo (MAE, RMSE y Clarke Error Grid para el pronóstico; AUROC y calibración para el riesgo), el porcentaje servido con respaldo y la marca de que los datos son simulados. Solo métricas agregadas, nunca series de pacientes.
 - Errores: C1, C2, C4.
 
