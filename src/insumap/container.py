@@ -1966,7 +1966,9 @@ class Container:
             get_summary=GetClinicalSummaryUseCase(
                 uow=uow, assigned_gate=assigned, summaries=ai.summary_reads
             ),
-            dropout=ListDropoutRisksUseCase(uow=uow, dropout=ai.dropout),
+            dropout=ListDropoutRisksUseCase(
+                uow=uow, assigned_gate=assigned, dropout=ai.dropout
+            ),
             evaluations=ListAiEvaluationsUseCase(uow=uow, evaluations=ai.evaluations),
             messages=self.message_catalog,
             session_actor=self.full_session_actor,

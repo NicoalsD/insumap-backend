@@ -67,20 +67,33 @@ class ListDropoutRisksUseCase:
     level security would show the admin an empty list, so the admin is refused.
     """
 
-    def __init__(self, *, uow: UnitOfWorkPort, dropout: DropoutRiskReadPort) -> None:
+    def __init__(
+        self,
+        *,
+        uow: UnitOfWorkPort,
+        assigned_gate: AssignedPatientGate,
+        dropout: DropoutRiskReadPort,
+    ) -> None:
         self._uow = uow
+        self._assigned = assigned_gate
         self._dropout = dropout
 
     def execute(
         self, actor: Actor, *, tier: RiskTier | None, page: PageRequest
     ) -> Page[DropoutRiskView]:
-        """The latest dropout assessment per assigned patient, without clinical
-        values."""
-        actor.require(PermissionCode.AI_DROPOUT_RISK_READ)
+        """The latest dropout assessment of each assigned patient, audited (P09)."""
+        permission = PermissionCode.AI_DROPOUT_RISK_READ
+        actor.require(permission)
         if actor.role is not Role.DOCTOR:
             raise PermissionDeniedError
-        with self._uow.begin(TransactionContext.for_actor(actor)):
-            return self._dropout.list_for_doctor(actor.user_id, tier=tier, page=page)
+        with self._uow.begin(TransactionContext.for_actor(actor)) as unit:
+            result = self._dropout.list_for_doctor(actor.user_id, tier=tier, page=page)
+            for patient in sorted({item.patient_id for item in result.items}, key=str):
+                self._assigned.enter(
+                    actor, permission, patient, DataResource.AI_OUTPUTS
+                )
+            unit.commit()  # keeps the audit rows of the reads (P09)
+        return result
 
 
 @final

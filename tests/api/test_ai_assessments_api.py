@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 
+from insumap.application.access.ports import AccessPurpose
 from insumap.application.ai.assessments import AiExplanation, SummarySection
 from insumap.application.ai.ports import RemoteRisk, RemoteSummary
 from insumap.application.ai.records import (
@@ -335,6 +336,7 @@ def test_the_doctor_lists_the_dropout_risk_of_assigned_patients_only(
     theirs = api.client.get(DROPOUT, headers=api.bearer(other)).json()
 
     assert [item["patient_id"] for item in mine["items"]] == [str(PATIENT_ID)]
+    assert (DOCTOR, PATIENT_ID, AccessPurpose.CARE) in api.records.patients.reads
     assert mine["items"][0]["label"] == LABEL_SUGGESTION
     assert [item["patient_id"] for item in high["items"]] == [str(PATIENT_ID)]
     assert theirs["items"] == []
