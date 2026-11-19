@@ -1,4 +1,4 @@
-"""The session's own account (``GET /auth/me``)."""
+"""The session's own account (``GET /auth/current-user``)."""
 
 from __future__ import annotations
 
