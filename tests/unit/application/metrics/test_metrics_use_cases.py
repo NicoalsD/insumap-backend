@@ -183,6 +183,7 @@ def test_a_doctor_reads_an_assigned_patient(world: RecordsWorld) -> None:
 
     assert result.metrics.tir_pct == Decimal("100.00")
     assert world.patients.reads[0][1] == PATIENT_ID
+    assert world.uow.commits == 1  # the audit row of the read is kept
 
 
 def test_an_unassigned_patient_is_not_found_and_a_missing_permission_forbidden(
