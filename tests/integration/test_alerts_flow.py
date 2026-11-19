@@ -173,3 +173,11 @@ def test_low_reading_opens_one_alert_visible_to_the_assigned_doctor(
     assert alert.status.value == "OPEN"
     assert alert.next_escalation_at is not None and alert.next_escalation_at > now
     assert list(hidden.items) == []
+    with uow.begin(
+        TransactionContext(user_id=admin, clinic_id=clinic, role=Role.CLINIC_ADMIN)
+    ):
+        summary = alerts.summary.summary()
+    assert summary.open_count == 1
+    assert [(d.doctor_id, d.unattended_count) for d in summary.by_care_team] == [
+        (doctor, 1)
+    ]
