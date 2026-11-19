@@ -1,22 +1,16 @@
 """Glucose forecast of a patient (IA1): the port to the AI and the safe fallback.
 
-The AI client is built by another branch. This module only fixes what the API
-promises (docs/API.md 8.8): reading a forecast never fails because the AI does.
-If the service is down, slow or not configured, the answer is ``200`` with
-``is_fallback: true`` and the reason; with too little data the AI is not even
-called. The result never contains an insulin dose.
-
-TODO(AI client): build ``GlucoseForecastPort`` over ``AiServicePort`` and wrap it
-with ``RemoteAiServiceProxy`` (3 s timeout, circuit breaker, linear fallback),
-save every output in ``ai.glucose_forecasts`` and replace the placeholder
-``UnconfiguredGlucoseForecastAdapter`` in ``container.py``.
+Reading a forecast never fails because the AI does: the answer is ``200`` with
+``is_fallback: true`` and the reason (docs/API.md 8.8). The client that answers
+(``RemoteAiServiceProxy``, P11) decides between the service and the rules; with
+too little data the AI is not even called, and this use case answers alone.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time
 from decimal import Decimal
 from enum import StrEnum
 from typing import final
@@ -36,8 +30,11 @@ from insumap.application.metrics.metrics import (
 )
 from insumap.application.metrics.ports import GlucoseSeriesPort, TargetProfilePort
 from insumap.application.monitoring.gate import AssignedPatientGate, OwnPatientGate
+from insumap.domain.ai.linear_fallback import Trend
+from insumap.domain.identity.errors import PermissionDeniedError
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.metrics.glycemic_metrics import Signal
+from insumap.domain.metrics.window import GlucosePoint
 from insumap.shared.errors import ErrorCode, InsumapError
 from insumap.shared.time import Clock
 
@@ -52,12 +49,6 @@ class FallbackReason(StrEnum):
     CIRCUIT_OPEN = "CIRCUIT_OPEN"
     AI_ERROR = "AI_ERROR"
     INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
-
-
-class Trend(StrEnum):
-    FALLING = "FALLING"
-    STABLE = "STABLE"
-    RISING = "RISING"
 
 
 @final
@@ -114,14 +105,30 @@ class AiUnavailableError(Exception):
         self.reason = reason
 
 
+@final
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ForecastRequest:
+    """Everything the AI needs for one patient, read inside the use case."""
+
+    patient_id: UUID
+    clinic_id: UUID
+    target_profile_id: UUID
+    mode: ForecastMode
+    now: datetime
+    timezone: str
+    night_start: time
+    night_end: time
+    low_mg_dl: Decimal
+    high_mg_dl: Decimal
+    series: tuple[GlucosePoint, ...]
+
+
 class GlucoseForecastPort(ABC):
-    """Asks the AI for a forecast of a patient (IA1) with a pseudonym only."""
+    """Asks the AI for a forecast of a patient (IA1), or answers with the fallback."""
 
     @abstractmethod
-    def forecast(
-        self, patient_id: UUID, mode: ForecastMode, now: datetime, zone: ZoneInfo
-    ) -> GlucoseForecast:
-        """The forecast, or raise ``AiUnavailableError`` with the fallback reason."""
+    def forecast(self, request: ForecastRequest) -> GlucoseForecast:
+        """The forecast of the service, or the rule-based fallback with its reason."""
 
 
 @final
@@ -181,8 +188,24 @@ class GetForecastUseCase:
             uow.commit()  # keeps the audit row of the read (P09)
         if recent.signal is not Signal.CGM or not recent.is_sufficient:
             return self._fallback(input.mode, FallbackReason.INSUFFICIENT_DATA)
+        clinic_id = actor.clinic_id
+        if clinic_id is None:
+            raise PermissionDeniedError
+        request = ForecastRequest(
+            patient_id=patient_id,
+            clinic_id=clinic_id,
+            target_profile_id=found.profile.id,
+            mode=input.mode,
+            now=now,
+            timezone=found.timezone,
+            night_start=found.profile.night_start,
+            night_end=found.profile.night_end,
+            low_mg_dl=found.profile.range_low_mg_dl,
+            high_mg_dl=found.profile.range_high_mg_dl,
+            series=tuple(points),
+        )
         try:
-            return self._forecasts.forecast(patient_id, input.mode, now, zone)
+            return self._forecasts.forecast(request)
         except AiUnavailableError as error:
             return self._fallback(input.mode, error.reason)
 

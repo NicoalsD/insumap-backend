@@ -1,16 +1,18 @@
-"""Placeholder of the forecast port until the AI client branch is merged."""
+"""Forecast port that is always unavailable: a test double, not production wiring.
+
+Production builds ``RemoteAiServiceProxy``, which answers with the rule-based
+fallback when no service is configured. This class stays for tests that need an
+AI that never answers.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import final, override
-from uuid import UUID
-from zoneinfo import ZoneInfo
 
 from insumap.application.metrics.forecast import (
     AiUnavailableError,
     FallbackReason,
-    ForecastMode,
+    ForecastRequest,
     GlucoseForecast,
     GlucoseForecastPort,
 )
@@ -18,14 +20,9 @@ from insumap.application.metrics.forecast import (
 
 @final
 class UnconfiguredGlucoseForecastAdapter(GlucoseForecastPort):
-    """Always unavailable, so every forecast answers the fallback ``AI_ERROR``.
-
-    TODO(AI client): replace in ``container.py`` with the adapter over
-    ``AiServicePort`` wrapped by ``RemoteAiServiceProxy``.
-    """
+    """Always unavailable, so every forecast answers the fallback ``AI_ERROR``."""
 
     @override
-    def forecast(
-        self, patient_id: UUID, mode: ForecastMode, now: datetime, zone: ZoneInfo
-    ) -> GlucoseForecast:
+    def forecast(self, request: ForecastRequest) -> GlucoseForecast:
+        del request
         raise AiUnavailableError(FallbackReason.AI_ERROR)

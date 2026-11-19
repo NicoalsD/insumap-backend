@@ -19,6 +19,7 @@ class Subkey(StrEnum):
 
     RATE_LIMIT = "rate-limit"
     PATIENT_DOCUMENT = "patient-document"
+    SUBJECT_REF = "subject-ref"
 
 
 @final
