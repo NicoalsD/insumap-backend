@@ -47,19 +47,22 @@ class DataResource(StrEnum):
     PATIENT_DOCUMENT = "PATIENT_DOCUMENT"
 
 
-class DataAccessAction(StrEnum):
-    """What was done with the data (``audit.data_access_log.action``)."""
-
-    READ = "READ"
-    EXPORT = "EXPORT"
-    DECRYPT = "DECRYPT"
-
-
 class DataAccessOutcome(StrEnum):
     """Whether the read was allowed (``audit.data_access_log.outcome``)."""
 
     GRANTED = "GRANTED"
     DENIED = "DENIED"
+
+
+class DataAccessAction(StrEnum):
+    """What was done with the data (``audit.data_access_log.action``).
+
+    A report or an export is an ``EXPORT`` even when it only reads.
+    """
+
+    READ = "READ"
+    EXPORT = "EXPORT"
+    DECRYPT = "DECRYPT"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -88,6 +91,7 @@ class PatientRecordPort(ABC):
         patient_id: UUID,
         purpose: AccessPurpose,
         resource: DataResource,
+        action: DataAccessAction = DataAccessAction.READ,
     ) -> PatientRecord:
         """Return the record, or raise a ``NOT_FOUND`` or ``FORBIDDEN`` error."""
 

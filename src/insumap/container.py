@@ -25,6 +25,7 @@ from insumap.api.routers.patients import PatientRouter
 from insumap.api.routers.recommendations import RecommendationRouter
 from insumap.api.routers.records import RecordsRouter
 from insumap.api.routers.reminders import ReminderRouter
+from insumap.api.routers.reports import ReportRouter
 from insumap.api.routers.sites import SiteRouter
 from insumap.api.routers.targets import TargetProfileRouter
 from insumap.api.routers.treatment import TreatmentRouter
@@ -291,6 +292,12 @@ from insumap.application.reminders.queries import (
     ListOwnRemindersUseCase,
     ListPatientRemindersUseCase,
 )
+from insumap.application.reports.generate import (
+    GenerateClinicReportUseCase,
+    GenerateOwnReportUseCase,
+    GeneratePatientReportUseCase,
+    PatientReadSources,
+)
 from insumap.application.security.rate_limit import RateLimitCheck, RateLimitRule
 from insumap.application.sites.commands import (
     CreateSiteCommand,
@@ -423,6 +430,7 @@ from insumap.infrastructure.platform_adapters import (
     PlatformAdapters,
     build_platform_adapters,
 )
+from insumap.infrastructure.reports.adapter import ReportRenderingAdapter
 from insumap.infrastructure.security.keys import KeyRing
 from insumap.infrastructure.targets_adapters import (
     TargetsAdapters,
@@ -766,6 +774,9 @@ class Container:
         self.treatment_router = self._build_treatment_router(
             adapters, monitoring, treatment
         )
+        self.reports_router = self._build_reports_router(
+            adapters, monitoring, treatment, alerts, patient_ports, platform
+        )
         self.audit_router = self._build_audit_router(adapters, audit)
         self.messaging_router = self._build_messaging_router(
             adapters, monitoring, messaging, notifications
@@ -895,6 +906,103 @@ class Container:
                 uow=uow, gate=own, plans=treatment.plans
             ),
             staff_actor=self.full_session_actor,
+        )
+
+    def _build_reports_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        treatment: TreatmentAdapters,
+        alerts: AlertsAdapters,
+        patients: PatientAdapters,
+        platform: PlatformAdapters,
+    ) -> ReportRouter:
+        """Wire the report endpoints (API.md 8.11) over the existing read use cases.
+
+        The clinical sections are read through the same use cases as the metrics,
+        timeline and plan endpoints, so the report audits each read it makes. The
+        rate limit shares the export counter of the user (API.md 5).
+        """
+        uow, clock = adapters.unit_of_work, self.clock
+        own = OwnPatientGate(adapters.consents)
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        sources = PatientReadSources(
+            metrics=ComputeGlycemicMetricsUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                strategies=GlycemicTargetStrategyRegistry(),
+                clock=clock,
+            ),
+            agp=GetAgpUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                clock=clock,
+            ),
+            timeline=GetTimelineUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                timeline=monitoring.timeline,
+            ),
+        )
+        export_limit = RateLimitCheck(
+            adapters.rate_limiter,
+            RateLimitRule(
+                family="exports_user_hour",
+                limit=self.settings.rate_limit_exports_per_user_per_hour,
+                window=timedelta(hours=1),
+            ),
+        )
+        renderer = ReportRenderingAdapter(self.message_catalog)
+        return ReportRouter(
+            patient=GeneratePatientReportUseCase(
+                uow=uow,
+                gate=assigned,
+                clinics=platform.clinics,
+                sources=sources,
+                plans=ListTreatmentPlansUseCase(
+                    uow=uow, gate=assigned, plans=treatment.plans
+                ),
+                rate_limit=export_limit,
+                renderer=renderer,
+                clock=clock,
+            ),
+            own=GenerateOwnReportUseCase(
+                uow=uow,
+                gate=own,
+                clinics=platform.clinics,
+                log=patients.access_log,
+                sources=sources,
+                own_plan=GetOwnTreatmentPlanUseCase(
+                    uow=uow, gate=own, plans=treatment.plans
+                ),
+                rate_limit=export_limit,
+                renderer=renderer,
+                clock=clock,
+            ),
+            clinic=GenerateClinicReportUseCase(
+                uow=uow,
+                clinics=platform.clinics,
+                log=patients.access_log,
+                patients=ListPatientsUseCase(
+                    uow=uow,
+                    roster=patients.roster,
+                    access_log=patients.access_log,
+                    clock=clock,
+                ),
+                alerts=GetAlertSummaryUseCase(uow=uow, summary=alerts.summary),
+                rate_limit=export_limit,
+                renderer=renderer,
+                clock=clock,
+                small_count_threshold=self.settings.report_small_count_threshold,
+            ),
+            session_actor=self.full_session_actor,
         )
 
     def _build_identity_services(

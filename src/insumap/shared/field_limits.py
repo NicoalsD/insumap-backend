@@ -317,6 +317,10 @@ class FieldLimits:
     PUSH_KEY_PATTERN: ClassVar[str] = r"^[A-Za-z0-9_-]+$"
     """Subscription keys are base64url without padding (use fullmatch)."""
 
+    # Reportes (API.md 8.11).
+    REPORT_EVENTS_MAX: ClassVar[int] = 200
+    """Most timeline events a report lists; later events of the period are left out."""
+
     # AI service (docs/Contrato-IA.md, 3.3 and 8).
 
     AI_MAX_FORECAST_POINTS: ClassVar[int] = 2048

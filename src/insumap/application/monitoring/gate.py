@@ -8,6 +8,7 @@ from uuid import UUID
 
 from insumap.application.access.ports import (
     AccessPurpose,
+    DataAccessAction,
     DataResource,
     PatientRecordPort,
 )
@@ -70,7 +71,10 @@ class AssignedPatientGate:
         permission: PermissionCode,
         patient_id: UUID,
         resource: DataResource,
+        action: DataAccessAction = DataAccessAction.READ,
     ) -> UUID:
         actor.require(permission)
-        self._patients.read_record(actor, patient_id, AccessPurpose.CARE, resource)
+        self._patients.read_record(
+            actor, patient_id, AccessPurpose.CARE, resource, action
+        )
         return patient_id
