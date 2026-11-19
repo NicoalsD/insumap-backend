@@ -140,7 +140,7 @@ class ListRecordsUseCase:
         """One page of records, newest first, with their lifecycle."""
         query = input.request.to_query()
         actor = input.actor
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+        with self._uow.begin(TransactionContext.for_actor(actor)) as uow:
             if input.patient_id is None:
                 permission = (
                     PermissionCode.GLUCOSE_READ_OWN
@@ -162,6 +162,7 @@ class ListRecordsUseCase:
                 rows = self._records.list(
                     ClinicalRecordKind(input.kind.value), patient_id, query
                 )
+            uow.commit()  # keeps the audit row of the read (P09)
         items, next_cursor = paginate(rows, input.request.limit, _record_key)
         return Page(items=items, next_cursor=next_cursor)
 
@@ -196,7 +197,7 @@ class GetTimelineUseCase:
         """Events of the five kinds ordered by time, newest first."""
         query = input.request.to_query()
         actor = input.actor
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+        with self._uow.begin(TransactionContext.for_actor(actor)) as uow:
             if input.patient_id is None:
                 patient_id = self._own_gate.enter(
                     actor, PermissionCode.RECORDS_READ_OWN
@@ -209,6 +210,7 @@ class GetTimelineUseCase:
                     DataResource.PATIENT_TIMELINE,
                 )
             events = self._timeline.events(patient_id, query, input.event_types)
+            uow.commit()  # keeps the audit row of the read (P09)
         page, next_cursor = paginate(events, input.request.limit, _event_key)
         return Page(items=build_timeline(page), next_cursor=next_cursor)
 
@@ -276,7 +278,7 @@ class ExportTimelineUseCase:
         )
         query = request.to_query()
         actor = input.actor
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+        with self._uow.begin(TransactionContext.for_actor(actor)) as uow:
             if input.patient_id is None:
                 patient_id = self._own_gate.enter(
                     actor, PermissionCode.RECORDS_READ_OWN
@@ -289,6 +291,7 @@ class ExportTimelineUseCase:
                     DataResource.PATIENT_TIMELINE,
                 )
             events = self._timeline.effective_events(patient_id, query)
+            uow.commit()  # keeps the audit row of the read (P09)
         if len(events) > FieldLimits.EXPORT_MAX_EVENTS:
             raise InsumapError(
                 ErrorCode.VALIDATION_ERROR,

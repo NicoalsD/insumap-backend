@@ -21,14 +21,35 @@ DEMO_MARK_KEY: Final = "demo.mark"
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Recipient:
-    """Who receives a notification and where (``address`` is an email)."""
+    """Who receives a notification and where (``address`` is an email).
+
+    ``clinic_id`` is the clinic of the recipient: the in-app row and its
+    delivery belong to it under row level security. ``None`` for a platform
+    administrator, who cannot receive in-app notifications.
+    """
 
     user_id: UUID
     address: str = ""
+    clinic_id: UUID | None = None
 
     def __repr__(self) -> str:
         """Identifier only: an address is personal data and never reaches a log."""
         return f"Recipient(user_id={self.user_id})"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InAppEntry:
+    """What the in-app store keeps: a type, a message key and references.
+
+    The table holds no text and no clinical value: the text is rendered from
+    ``message_key`` when the notification is read (``alerts.notifications``).
+    """
+
+    notification_type: str
+    message_key: str
+    entity_type: str | None = None
+    entity_id: UUID | None = None
+    alert_id: UUID | None = None
 
 
 @final
@@ -45,8 +66,19 @@ class NotificationChannel(ABC):
         """``True`` for channels that leave the app (email, push)."""
 
     @abstractmethod
-    def deliver(self, *, recipient: Recipient, subject: str, body: str) -> None:
-        """Hand the message to the recipient."""
+    def deliver(
+        self,
+        *,
+        recipient: Recipient,
+        subject: str,
+        body: str,
+        entry: InAppEntry | None = None,
+    ) -> None:
+        """Hand the message to the recipient.
+
+        ``entry`` is the structured reference of an in-app notification; the
+        external channels ignore it.
+        """
 
 
 class Notification(ABC):
@@ -62,17 +94,25 @@ class Notification(ABC):
     @final
     def send(self, recipient: Recipient, *, is_demo: bool = False) -> None:
         """Compose for the kind of channel and deliver; demo clinics get the mark."""
+        entry: InAppEntry | None = None
         if self._channel.is_external:
             subject, body = self.compose_external()
         else:
             subject, body = self.compose_in_app()
+            entry = self.in_app_entry()
         if is_demo:
             body = f"{self._messages.render(DEMO_MARK_KEY)} {body}"
-        self._channel.deliver(recipient=recipient, subject=subject, body=body)
+        self._channel.deliver(
+            recipient=recipient, subject=subject, body=body, entry=entry
+        )
 
     @abstractmethod
     def compose_in_app(self) -> tuple[str, str]:
         """Subject and body shown inside the application."""
+
+    def in_app_entry(self) -> InAppEntry | None:
+        """The structured reference the in-app store keeps; ``None`` if it has none."""
+        return None
 
     @abstractmethod
     def compose_external(self) -> tuple[str, str]:

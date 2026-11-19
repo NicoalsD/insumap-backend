@@ -49,12 +49,13 @@ class GetOwnPatientProfileUseCase:
 
     def execute(self, actor: Actor) -> OwnPatientProfile:
         """The profile of the patient of the token."""
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+        with self._uow.begin(TransactionContext.for_actor(actor)) as uow:
             scope = self._gate.enter(actor, PermissionCode.PATIENTS_READ_OWN)
             account = self._users.get(actor.user_id)
             if account is None or account.clinic is None:
                 raise SessionRevokedError
             found = self._targets.for_patient(scope.patient_id)
+            uow.commit()  # keeps the audit row of the read (P09)
         return OwnPatientProfile(
             patient_id=scope.patient_id,
             account_status=account.status,

@@ -31,6 +31,15 @@
   "unsupported.media_type": "El tipo de contenido no es compatible con este endpoint.",
   "notification.staff_activation.subject": "Activa tu cuenta del personal de Insumap",
   "notification.staff_activation.external": "Tu clínica te dio de alta en Insumap. Usa este código de activación en los próximos {days} días: {code} Es de un solo uso. Si no esperabas este mensaje, comunícate con tu clínica.",
+  "notification.patient_activation.subject": "Activa tu cuenta de paciente de Insumap",
+  "notification.patient_activation.external": "Tu clínica te invitó a activar tu cuenta de Insumap. Abre este enlace en los próximos {days} días para crear tu contraseña: {link} El enlace es de un solo uso. Si no esperabas este mensaje, comunícate con tu clínica.",
   "notification.mfa_reset.subject": "Se restableció el segundo factor de tu cuenta de Insumap",
-  "notification.mfa_reset.external": "Se restableció el segundo factor (MFA) de tu cuenta de Insumap. Al volver a iniciar sesión deberás configurarlo de nuevo. Si no fuiste tú, comunícate con tu clínica."
+  "notification.mfa_reset.external": "Se restableció el segundo factor (MFA) de tu cuenta de Insumap. Al volver a iniciar sesión deberás configurarlo de nuevo. Si no fuiste tú, comunícate con tu clínica.",
+  "notification.alert_raised.title": "Nueva alerta en Insumap",
+  "notification.alert_raised.body": "Tienes una alerta nueva en Insumap. Ábrela para ver el detalle.",
+  "notification.alert_raised.external": "Tienes una alerta nueva en Insumap. Inicia sesión para ver el detalle.",
+  "reminder.measurement": "Es hora de medir tu glucosa.",
+  "reminder.insulin_dose": "Es hora de registrar tu dosis de insulina.",
+  "reminder.control": "Es hora de tu control con el equipo de salud.",
+  "reminder.registration": "Es hora de registrar tus datos del día."
 }

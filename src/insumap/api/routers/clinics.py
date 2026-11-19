@@ -1,7 +1,8 @@
 """Clinic endpoints (API.md 8.3): create, read, update, suspend and reactivate.
 
-The admin endpoints of the clinic (first ``CLINIC_ADMIN`` and access reset) are
-not here yet: they need database functions that are not in ``db-v0.2.0``.
+The first ``CLINIC_ADMIN`` of a clinic is created here too (``/admins``). The
+access reset of a clinic administrator is still pending: its database function
+does not return the e-mail of the holder, so the code cannot be sent.
 """
 
 from collections.abc import Callable
@@ -10,8 +11,8 @@ from http import HTTPStatus
 from typing import Annotated, Final, Self, final
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Query, Response
+from pydantic import BaseModel, Field, field_validator
 
 from insumap.api.paths import API_V1_PREFIX
 from insumap.api.routers.common import (
@@ -25,6 +26,10 @@ from insumap.api.routers.common import (
     page_request,
 )
 from insumap.api.tags import ApiTag
+from insumap.application.clinic_admins.commands import (
+    CreateClinicAdminCommand,
+    CreatedClinicAdmin,
+)
 from insumap.application.clinics.commands import (
     CreateClinicCommand,
     ReactivateClinicCommand,
@@ -43,9 +48,13 @@ from insumap.application.commands.base import CommandBus
 from insumap.application.common.actor import Actor
 from insumap.domain.clinic.clinic import DEFAULT_TIMEZONE, Clinic, ClinicStatus
 from insumap.domain.identity.permissions import PermissionCode
+from insumap.domain.identity.roles import Role
 from insumap.shared.field_limits import FieldLimits
 
 CLINICS_PREFIX: Final = f"{API_V1_PREFIX}/clinics"
+LOCATION_HEADER: Final = "Location"
+USERS_LOCATION: Final = f"{API_V1_PREFIX}/users"
+"""The created administrator is a staff member: ``Location`` points at ``/users``."""
 
 CLINIC_ERRORS: Final = error_responses(
     HTTPStatus.UNAUTHORIZED,
@@ -104,6 +113,30 @@ class UpdateClinicRequest(StrictRequest):
     timezone: str | None = Field(
         default=None, max_length=FieldLimits.TIMEZONE_MAX_LENGTH
     )
+
+
+class CreateClinicAdminRequest(StrictRequest):
+    """The first administrator of a clinic; its activation code goes by email only."""
+
+    email: str = Field(
+        max_length=FieldLimits.EMAIL_MAX_LENGTH,
+        pattern=FieldLimits.EMAIL_PATTERN,
+        description="Correo de la cuenta. Se normaliza (NFKC, recorte y minúsculas).",
+    )
+    full_name: str = Field(
+        min_length=1,
+        max_length=FieldLimits.STAFF_FULL_NAME_MAX_LENGTH,
+        description="Nombre completo del administrador.",
+    )
+
+    @field_validator("full_name")
+    @classmethod
+    def name_is_not_blank(cls, value: str) -> str:
+        """Trimmed, and never blank (a blank name is a ``422``)."""
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("el nombre completo no puede estar vacío")
+        return stripped
 
 
 class SuspendClinicRequest(StrictRequest):
@@ -182,6 +215,24 @@ class CurrentClinicResponse(BaseModel):
             is_demo=clinic.is_demo,
             simulated=clinic.is_demo,
             timezone=clinic.timezone,
+        )
+
+
+class CreatedClinicAdminResponse(BaseModel):
+    """The new administrator; the activation code is never shown here."""
+
+    user_id: UUID
+    email: str
+    role: Role
+    invitation_expires_at: datetime
+
+    @classmethod
+    def of(cls, created: CreatedClinicAdmin) -> Self:
+        return cls(
+            user_id=created.user_id,
+            email=created.email,
+            role=created.role,
+            invitation_expires_at=created.invitation_expires_at,
         )
 
 
@@ -298,7 +349,25 @@ class ClinicRouter:
                 )
             )
 
+        def create_clinic_admin(
+            clinic_id: UUID,
+            body: CreateClinicAdminRequest,
+            actor: Annotated[Actor, staff],
+            response: Response,
+        ) -> CreatedClinicAdminResponse:
+            created = self._commands.dispatch(
+                CreateClinicAdminCommand(
+                    actor=actor,
+                    clinic_id=clinic_id,
+                    email=body.email,
+                    full_name=body.full_name,
+                )
+            )
+            response.headers[LOCATION_HEADER] = f"{USERS_LOCATION}/{created.user_id}"
+            return CreatedClinicAdminResponse.of(created)
+
         manage = {ACCESS_EXTENSION: access(PermissionCode.CLINICS_MANAGE)}
+        manage_admins = {ACCESS_EXTENSION: access(PermissionCode.CLINIC_ADMINS_MANAGE)}
         read_own = {ACCESS_EXTENSION: access(PermissionCode.CLINICS_READ)}
         add(
             "",
@@ -393,4 +462,22 @@ class ClinicRouter:
             ),
             responses=STATE_CHANGE_ERRORS,
             openapi_extra=manage,
+        )
+        add(
+            "/{clinic_id}/admins",
+            create_clinic_admin,
+            methods=["POST"],
+            status_code=HTTPStatus.CREATED,
+            operation_id="create_clinic_admin",
+            summary="Crear el primer administrador de una clínica",
+            description=(
+                "Crea el primer `CLINIC_ADMIN` de la clínica. Solo el administrador "
+                "de la plataforma. La cuenta nace `INVITED` y su código de activación "
+                "de un solo uso viaja solo por correo: la respuesta no lo muestra. El "
+                "administrador debe activar la cuenta y enrolar MFA en su primer "
+                "ingreso. Un correo ya registrado responde `409`, igual que una "
+                "clínica suspendida."
+            ),
+            responses=CLINIC_CHANGE_ERRORS,
+            openapi_extra=manage_admins,
         )
