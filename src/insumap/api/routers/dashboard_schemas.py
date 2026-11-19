@@ -14,6 +14,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from insumap.api.routers.auth_schemas import StrictRequest
+from insumap.api.routers.metrics_schemas import TargetThresholds
 from insumap.application.clinic_kpis.queries import ClinicKpis
 from insumap.application.metrics.metrics import MetricWindow
 from insumap.application.overview.patient_overview_facade import PatientOverview
@@ -124,12 +125,10 @@ class RecentReadingResponse(BaseModel):
         )
 
 
-class TargetRangeResponse(BaseModel):
+class TargetRangeResponse(TargetThresholds):
     profile_id: UUID
     profile_code: str
     profile_version: int
-    range_low_mg_dl: float
-    range_high_mg_dl: float
     strategy_code: str
 
 
@@ -254,9 +253,8 @@ class PatientOverviewResponse(BaseModel):
                 profile_id=profile.id,
                 profile_code=profile.code,
                 profile_version=profile.version,
-                range_low_mg_dl=float(profile.range_low_mg_dl),
-                range_high_mg_dl=float(profile.range_high_mg_dl),
                 strategy_code=overview.strategy_code,
+                **TargetThresholds.values_of(profile),  # type: ignore[arg-type]
             ),
             on_target=overview.on_target,
             metrics=MetricsSummaryResponse.of(overview.metrics),

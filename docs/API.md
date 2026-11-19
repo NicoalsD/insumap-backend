@@ -1026,7 +1026,7 @@ Las rutas de registro (`/readings`, `/insulin-doses`, `/meals`, `/activities`, `
 #### `GET /patients/own/overview`
 - Operación: `get_own_overview` · Permiso: `patients.read_own` · Ruta: P · Trazabilidad: HU-22, HU-29, RF-42 · Patrón: P10, P11 · Éxito: 200
 - Solicitud: `window` (`24h`, `7d`, `14d` o `30d`, por defecto `14d`).
-- Respuesta: el inicio del paciente: lecturas recientes con su rango objetivo, métricas propias de la ventana en lenguaje simple, plan activo y alertas abiertas propias, más `sex`, `bmi` (nulo si no se conoce) y `pregnancy_status` (`NONE`, `PREGNANT` o `UNKNOWN`). No llama a la IA.
+- Respuesta: el inicio del paciente: lecturas recientes con su perfil objetivo (`target` con los mismos umbrales y metas que `target_profile` de las métricas, para que el paciente dibuje sus rangos sin leer `/target-profiles`), métricas propias de la ventana en lenguaje simple, plan activo y alertas abiertas propias, más `sex`, `bmi` (nulo si no se conoce) y `pregnancy_status` (`NONE`, `PREGNANT` o `UNKNOWN`). No llama a la IA.
 - Errores: C1, C3, C4.
 
 #### `GET /patients/{patient_id}/overview`
@@ -1190,7 +1190,7 @@ Las métricas y los pronósticos se calculan con el perfil de metas asignado al 
 #### `GET /patients/{patient_id}/metrics`
 - Operación: `get_patient_metrics` · Permiso: `metrics.read_assigned` · Ruta: F · Trazabilidad: HU-29, RF-51, RF-52, RF-54, RF-55 · Patrón: P14, P19, P11, P09 · Éxito: 200
 - Solicitud: `window` (por defecto `14d`), `compare_previous` (booleano, por defecto `true`).
-- Respuesta: `window`, `period_from`, `period_to`, `timezone`, `target_profile` (`id`, `code`, `version`), `data_sufficiency_pct`, `is_sufficient` y `confidence` (`NORMAL` o `LOW_CONFIDENCE`); `metrics` con `tir_pct`, `tbr_l1_pct`, `tbr_l2_pct`, `tbr_pct`, `tar_l1_pct`, `tar_l2_pct`, `tar_pct`, `mean_glucose_mg_dl`, `gmi_pct`, `cv_pct` y `hypo_events_count`; y, si se pide, `previous` (mismas métricas de la ventana anterior del mismo tamaño) y `tir_delta_pct` (puntos porcentuales, con signo). Para un paciente con SMBG no hay AGP, CV ni GMI: se devuelven las métricas de glucometría (nombres por definir). Escribe una fila `GLYCEMIC_METRICS` en `audit.data_access_log`.
+- Respuesta: `window`, `period_from`, `period_to`, `timezone`, `target_profile` (`id`, `code`, `version` y los umbrales y metas del perfil: `population`, `range_low_mg_dl`, `range_high_mg_dl`, `very_low_mg_dl`, `very_high_mg_dl`, `tir_min_pct`, `tbr_l1_max_pct`, `tbr_l2_max_pct`, `tar_l1_max_pct`, `tar_l2_max_pct`, `cv_max_pct`, `min_data_sufficiency_pct`, `min_days`, `night_start` y `night_end`), `data_sufficiency_pct`, `is_sufficient` y `confidence` (`NORMAL` o `LOW_CONFIDENCE`); `metrics` con `tir_pct`, `tbr_l1_pct`, `tbr_l2_pct`, `tbr_pct`, `tar_l1_pct`, `tar_l2_pct`, `tar_pct`, `mean_glucose_mg_dl`, `gmi_pct`, `cv_pct` y `hypo_events_count`; y, si se pide, `previous` (mismas métricas de la ventana anterior del mismo tamaño) y `tir_delta_pct` (puntos porcentuales, con signo). Para un paciente con SMBG no hay AGP, CV ni GMI: se devuelven las métricas de glucometría (nombres por definir). Escribe una fila `GLYCEMIC_METRICS` en `audit.data_access_log`.
 - Errores: C1, C2, C4, C5.
 
 #### `GET /patients/{patient_id}/metrics/agp`
