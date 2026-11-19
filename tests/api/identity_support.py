@@ -38,6 +38,7 @@ from tests.support.identity_world import (
     IdentityWorld,
     make_account,
 )
+from tests.support.messaging_fakes import MessagingWorld
 from tests.support.monitoring_fakes import RecordsWorld, records_adapters
 from tests.support.notification_fakes import (
     InMemoryNotificationStore,
@@ -81,6 +82,12 @@ class IdentityApi:
         self.audit_log = InMemoryAuditLog()
         self.mail = InMemoryChannel()
         self.care_teams = FakeCareTeams()
+        self.messaging = MessagingWorld(
+            care_teams=self.care_teams,
+            patient_id=PATIENT_ID,
+            patient_user=PATIENT_USER,
+            clinic_id=CLINIC.clinic_id,
+        )
         self.patients = FakeDirectory()
         self.staff = FakeStaff()
         self.clinics = FakeClinics()
@@ -101,6 +108,7 @@ class IdentityApi:
         self.target_assignments = FakeTargetAssignments()
         self.reminders = FakeReminders()
         self.notification_store = InMemoryNotificationStore()
+        self.in_app = InMemoryChannel(external=False)
         self.preferences = InMemoryPreferences()
         self.push_subscriptions = InMemoryPushSubscriptions()
         self.clinic_admins = FakeClinicAdminProvisioning()
@@ -131,6 +139,7 @@ class IdentityApi:
                 activation_codes=DistinctActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
+            messaging_adapters=self.messaging.adapters(),
             onboarding_adapters=self.onboarding.adapters(),
             alert_adapters=self.alerts.adapters(),
             treatment_adapters=TreatmentAdapters(
@@ -148,6 +157,7 @@ class IdentityApi:
                 store=self.notification_store,
                 preferences=self.preferences,
                 subscriptions=self.push_subscriptions,
+                in_app=self.in_app,
             ),
             clinic_admin_adapters=ClinicAdminAdapters(provisioning=self.clinic_admins),
             patient_adapters=PatientAdapters(
