@@ -13,6 +13,7 @@ from insumap.domain.identity.roles import Role
 from insumap.infrastructure.platform_adapters import PlatformAdapters
 from insumap.main import create_app
 from tests.support.access_fakes import FakeDirectory
+from tests.support.alerts_fakes import AlertsWorld
 from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
 from tests.support.clinic_fakes import FakeClinics
 from tests.support.commands import InMemoryAuditLog
@@ -57,6 +58,7 @@ class IdentityApi:
         )
         self.staff_directory = FakeStaffDirectory(self.world.users, self.world.factors)
         self.staff_invitations = FakeStaffInvitations()
+        self.alerts = AlertsWorld()
         self.login_lockouts = FakeLoginLockouts()
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
@@ -78,6 +80,7 @@ class IdentityApi:
                 activation_codes=FakeActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
+            alert_adapters=self.alerts.adapters(),
         )
         self.app = create_app(container)
         self.client = TestClient(

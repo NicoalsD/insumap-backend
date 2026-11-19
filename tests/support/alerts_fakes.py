@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import override
 from uuid import UUID
@@ -52,7 +52,9 @@ class FakeAlertRules(AlertRuleRepositoryPort):
             reverse=True,
         )
         rows = [r for r in rows if page.after is None or r.rule_id < page.after]
-        return build_page(rows[: page.limit + 1], limit=page.limit, key=lambda r: r.rule_id)
+        return build_page(
+            rows[: page.limit + 1], limit=page.limit, key=lambda r: r.rule_id
+        )
 
     @override
     def active_for_evaluation(self, clinic_id: UUID) -> Sequence[AlertRuleVersion]:
@@ -69,7 +71,11 @@ class FakeAlertRules(AlertRuleRepositoryPort):
         self, clinic_id: UUID, code: str
     ) -> AlertRuleVersion | None:
         for r in self.rows.values():
-            if r.clinic_id == clinic_id and r.code == code and r.status is RuleStatus.ACTIVE:
+            if (
+                r.clinic_id == clinic_id
+                and r.code == code
+                and r.status is RuleStatus.ACTIVE
+            ):
                 return r
         return None
 
@@ -77,7 +83,9 @@ class FakeAlertRules(AlertRuleRepositoryPort):
     def versions_of(
         self, clinic_id: UUID | None, code: str
     ) -> Sequence[AlertRuleVersion]:
-        found = [r for r in self.rows.values() if r.clinic_id == clinic_id and r.code == code]
+        found = [
+            r for r in self.rows.values() if r.clinic_id == clinic_id and r.code == code
+        ]
         return sorted(found, key=lambda r: r.version)
 
     @override
@@ -91,14 +99,12 @@ class FakeAlertRules(AlertRuleRepositoryPort):
 
 
 def _replace_status(rule: AlertRuleVersion, status: RuleStatus) -> AlertRuleVersion:
-    from dataclasses import replace
-
     return replace(rule, status=status)
 
 
 @dataclass
 class FakeAlerts(AlertRepositoryPort):
-    """Alerts, their history and the (doctor, patient) assignments of the list filter."""
+    """Alerts, their history and the (doctor, patient) pairs of the list filter."""
 
     rows: dict[UUID, Alert] = field(default_factory=dict)
     history_rows: list[AlertStatusChange] = field(default_factory=list)
@@ -117,17 +123,29 @@ class FakeAlerts(AlertRepositoryPort):
                 continue
             if filters.status is not None and alert.status is not filters.status:
                 continue
-            if filters.alert_type is not None and alert.alert_type is not filters.alert_type:
+            if (
+                filters.alert_type is not None
+                and alert.alert_type is not filters.alert_type
+            ):
                 continue
-            if filters.patient_id is not None and alert.patient_id != filters.patient_id:
+            if (
+                filters.patient_id is not None
+                and alert.patient_id != filters.patient_id
+            ):
                 continue
-            if filters.assigned_to is not None and (
-                filters.assigned_to,
-                alert.patient_id,
-            ) not in self.assignments:
+            if (
+                filters.assigned_to is not None
+                and (
+                    filters.assigned_to,
+                    alert.patient_id,
+                )
+                not in self.assignments
+            ):
                 continue
             out.append(alert)
-        return build_page(out[: page.limit + 1], limit=page.limit, key=lambda a: a.alert_id)
+        return build_page(
+            out[: page.limit + 1], limit=page.limit, key=lambda a: a.alert_id
+        )
 
     @override
     def has_open_for_rule(self, patient_id: UUID, rule_id: UUID) -> bool:
@@ -178,7 +196,11 @@ class FakeGlucoseHistory(GlucoseHistoryPort):
         self, patient_id: UUID, since: datetime, until: datetime
     ) -> Sequence[GlucosePoint]:
         points = sorted(
-            (p for pid, p in self.readings.values() if pid == patient_id and p.at <= until),
+            (
+                p
+                for pid, p in self.readings.values()
+                if pid == patient_id and p.at <= until
+            ),
             key=lambda p: p.at,
         )
         before = [p for p in points if p.at <= since]
