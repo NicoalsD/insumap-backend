@@ -59,6 +59,47 @@ def test_cors_allows_configured_origins_and_exposes_the_request_id() -> None:
     assert "x-request-id" in response.headers["access-control-expose-headers"].lower()
 
 
+def test_cors_preflight_allows_the_policy_headers_and_caches_for_600_seconds() -> None:
+    settings = make_settings(cors_origins=FRONTEND_ORIGIN)
+    client = TestClient(create_app(Container(settings)))
+
+    preflight = client.options(
+        "/health",
+        headers={
+            "Origin": FRONTEND_ORIGIN,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": (
+                "Authorization, Content-Type, X-Requested-With, X-Request-ID, "
+                "Idempotency-Key"
+            ),
+        },
+    )
+    response = client.get("/health", headers={"Origin": FRONTEND_ORIGIN})
+
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-max-age"] == "600"
+    assert preflight.headers["access-control-allow-credentials"] == "true"
+    exposed = response.headers["access-control-expose-headers"].lower()
+    assert "x-request-id" in exposed
+    assert "retry-after" in exposed
+
+
+def test_cors_rejects_a_header_outside_the_policy() -> None:
+    settings = make_settings(cors_origins=FRONTEND_ORIGIN)
+    client = TestClient(create_app(Container(settings)))
+
+    preflight = client.options(
+        "/health",
+        headers={
+            "Origin": FRONTEND_ORIGIN,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "X-Custom",
+        },
+    )
+
+    assert preflight.status_code == 400
+
+
 def test_cors_ignores_unknown_origins() -> None:
     settings = make_settings(cors_origins=FRONTEND_ORIGIN)
     client = TestClient(create_app(Container(settings)))

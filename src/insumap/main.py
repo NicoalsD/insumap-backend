@@ -10,6 +10,8 @@ from insumap.api.middleware import (
     BodySizeLimitMiddleware,
     NoStoreCacheMiddleware,
     RequestIdMiddleware,
+    SecurityHeadersMiddleware,
+    TrustedHostMiddleware,
 )
 from insumap.api.openapi import InsumapApi
 from insumap.api.paths import API_V1_PREFIX
@@ -18,14 +20,17 @@ from insumap.shared.field_limits import FieldLimits
 
 CORS_ALLOWED_METHODS: Final = ["GET", "POST", "PUT", "PATCH", "DELETE"]
 REQUESTED_WITH_HEADER: Final = "X-Requested-With"
+IDEMPOTENCY_KEY_HEADER: Final = "Idempotency-Key"
 RETRY_AFTER_HEADER: Final = "Retry-After"
 CORS_ALLOWED_HEADERS: Final = [
     "Authorization",
     "Content-Type",
     REQUESTED_WITH_HEADER,
     REQUEST_ID_HEADER,
+    IDEMPOTENCY_KEY_HEADER,
 ]
 CORS_EXPOSED_HEADERS: Final = [REQUEST_ID_HEADER, RETRY_AFTER_HEADER]
+CORS_MAX_AGE_SECONDS: Final = 600
 
 
 IMPORT_BODY_LIMITS: Final = {
@@ -46,8 +51,9 @@ def create_app(container: Container | None = None) -> FastAPI:
     app = InsumapApi.create(docs_enabled=settings.api_docs_enabled)
     container.exception_handlers.install(app)
     # The last middleware added is the outermost. The request id wraps the size
-    # limit, so a 413 carries X-Request-ID, and CORS wraps both, so browsers can
-    # read every error.
+    # limit, so a 413 carries X-Request-ID, CORS wraps both, so browsers can
+    # read every error, the host check rejects a foreign Host before any work,
+    # and the security headers wrap everything, errors included.
     app.add_middleware(NoStoreCacheMiddleware)
     app.add_middleware(
         BodySizeLimitMiddleware,
@@ -64,7 +70,14 @@ def create_app(container: Container | None = None) -> FastAPI:
             allow_methods=CORS_ALLOWED_METHODS,
             allow_headers=CORS_ALLOWED_HEADERS,
             expose_headers=CORS_EXPOSED_HEADERS,
+            max_age=CORS_MAX_AGE_SECONDS,
         )
+    app.add_middleware(
+        TrustedHostMiddleware,
+        responses=container.error_responses,
+        allowed_hosts=settings.allowed_hosts,
+    )
+    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.app_env == "production")
     app.include_router(container.health_router.router)
     app.include_router(container.meta_router.router)
     app.include_router(container.auth_router.router)
