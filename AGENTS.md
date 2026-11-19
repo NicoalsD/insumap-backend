@@ -259,7 +259,7 @@ src/insumap/
 | [ ] | `.agents/configuration.md` | Dónde va cada tipo de valor |
 | [ ] | `.agents/api-documentation.md` | Reglas de Swagger y OpenAPI |
 | [ ] | `.agents/testing-plan.md` | Estrategia y matriz de pruebas |
-| [ ] | `.agents/deployment.md` | Docker, Render y Neon |
+| [ ] | `.agents/deployment.md` | Docker y AWS (CloudFront, S3, EC2, ECR, Secrets Manager) |
 
 ### 8.2 Documentación canónica (`docs/`, Fase 0)
 

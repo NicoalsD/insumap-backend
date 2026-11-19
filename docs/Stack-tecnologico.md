@@ -154,32 +154,31 @@ Reglas:
 
 - Toda action se fija a un **SHA de commit** con la versión en un comentario. Dependabot (`github-actions`) propone las actualizaciones.
 - Dependabot soporta el ecosistema `uv`, pero su tabla de ecosistemas lista uv v0.11 y el proyecto usa 0.13.8. Que sus PR regeneren bien `uv.lock` queda a confirmar en la Fase 1.
-- Los secretos de CI (deploy hooks de Render) viven en los secretos de GitHub Actions, nunca en el repo.
+- GitHub Actions entra a AWS con OIDC (roles por repo y rama); no hay llaves de AWS ni secretos de despliegue en GitHub.
 - Las pruebas de CI nunca llaman al LLM ni descargan pesos de modelos.
 
 ## 8. Hosting e infraestructura
 
-| Plataforma | Qué aloja | Plan | Límites verificados el 2026-11-15 | Alternativa descartada y motivo |
-|---|---|---|---|---|
-| **Render** (Web Service con Docker) | API `insumap-backend` y servicio `insumap-ai` | Free (Hobby workspace) | 512 MB de RAM. Se suspende tras **15 minutos** sin tráfico y tarda **cerca de 1 minuto** en volver. **750 horas Free por workspace al mes, compartidas** entre todos los servicios Free. Una sola instancia. Sin disco persistente, sin jobs puntuales y sin SSH. Los servicios Cron y Background Worker no admiten el plan Free. **Bloquea el tráfico saliente a los puertos 25, 465 y 587 (SMTP).** La instancia de pago más pequeña cuesta USD 7 al mes (0,5 CPU, 512 MB) | **Railway o Fly.io:** válidos; Render ya está definido en [`.agents/deployment.md`](../.agents/deployment.md). **Hugging Face Spaces** para la IA: queda como opción si el modelo no cabe en 512 MB. |
-| **Vercel** | Build estático de `insumap-frontend` | Hobby | 100 GB de Fast Data Transfer, 100 despliegues por día y sin funciones de colaboración en equipo. Node 26.x por defecto | **Netlify:** equivalente; se elige Vercel por las vistas previas por PR. |
-| **Neon** | PostgreSQL 18 | Free | 1 GB de almacenamiento por proyecto. 100 CU-horas por proyecto al mes. Se suspende tras **5 minutos** sin actividad, sin opción de desactivarlo en Free. Ventana de restauración (PITR) de **6 horas**. El plan de pago más barato (Launch) cobra USD 0,106 por CU-hora y USD 0,35 por GB-mes | **Render Postgres Free:** expira a los 30 días y no tiene respaldos. **Supabase:** agrega autenticación y almacenamiento que el diseño ya resuelve. |
-| **GitHub** | Código, Actions, CodeQL, Dependabot, secret scanning | Free, repos públicos | Los rulesets gratuitos exigen repos públicos | **CI propio:** operación adicional para el equipo. |
+Plan vigente desde el 2026-11-19: todo en una cuenta de AWS (us-east-1), con unos USD 72 de crédito y una vida de una semana. Detalle y pasos en [`.agents/deployment.md`](../.agents/deployment.md); plantilla en [`infra/aws/insumap.yaml`](../infra/aws/insumap.yaml).
 
-Los despliegues viejos (Render `insumap-backend`, Vercel `insumap-frontend` y Neon `raspy-sea-39960827`) no se tocan. En la Fase 12 se usan nombres de servicio nuevos si esos siguen ocupados.
+| Servicio de AWS | Qué aloja | Costo aproximado por semana | Alternativa descartada y motivo |
+|---|---|---|---|
+| **EC2 `t3.small`** (Amazon Linux 2023, Docker Compose) con IP elástica y EBS gp3 de 20 GB | API `insumap-backend` y PostgreSQL 18 en el mismo host | Unos USD 4,5 (instancia, IPv4 pública y disco) | **RDS + ECS Fargate:** más de USD 25 por semana con el balanceador, sin ganancia para una demo. **App Runner:** no aloja PostgreSQL. |
+| **CloudFront + S3** (OAC, CloudFront Function para la SPA) | Build de `insumap-frontend` y proxy `/api/*` hacia el host | Centavos con el tráfico de una demo | **Amplify Hosting:** no sirve la API en el mismo origen sin un proxy extra. |
+| **ECR** | Imágenes de la API (5 últimas) | Centavos | **Construir en el host:** gasta la memoria que necesitan la API y la base. |
+| **Secrets Manager + KMS** | Llaves de la API y contraseñas de la base | Unos USD 0,35 | **Variables de GitHub o archivos en el host:** sin cifrado con llave propia ni auditoría. |
+| **SSM Run Command** + **IAM OIDC** | Despliegue desde GitHub Actions sin SSH ni llaves de larga duración | Sin costo | **SSH con llave en GitHub:** puerto 22 abierto y un secreto que rotar. |
+| **GitHub** | Código, Actions, CodeQL, Dependabot, secret scanning | Free, repos públicos | **CI propio:** operación adicional para el equipo. |
 
-### 8.1 Consecuencias de los planes gratuitos (decisiones pendientes)
+Total estimado: menos de USD 10 por semana. Los despliegues viejos (Render, Vercel y Neon) no se usan.
 
-1. **Correo:** Render Free bloquea SMTP y el blueprint de [`.agents/deployment.md`](../.agents/deployment.md) usa `SMTP_PORT=587`. Las invitaciones y recordatorios por correo necesitan una de dos salidas: un proveedor de correo con API HTTPS, detrás del canal de correo del Bridge (P07), o una instancia de pago. Se decide en la Fase 4, antes de emitir credenciales por correo.
-2. **Scheduler:** un APScheduler dentro de la API no dispara mientras el servicio está suspendido, y Render Free no admite servicios Cron. Hay dos opciones:
-   - un workflow programado de GitHub Actions que llame a un endpoint protegido con token de servicio (eso también despierta el servicio);
-   - una instancia de pago siempre encendida.
+### 8.1 Consecuencias del plan (decisiones pendientes)
 
-   Se decide en la Fase 8, junto con la evaluación de alertas.
-3. **Horas compartidas:** la API y la IA en Free consumen de las mismas 750 horas. Dos servicios despiertos todo el mes necesitarían unas 1.460 horas, así que la suspensión por inactividad es la que los mantiene dentro del límite. Si se agotan, Render suspende todos los servicios Free hasta el mes siguiente. La demo se planea con esto en mente.
-4. **Memoria de la IA:** PyTorch con Chronos-Bolt y scikit-learn puede acercarse a 512 MB. La prueba de memoria de la Fase 9 decide entre `tiny`, otro plan u otro proveedor ([Modulo-IA.md](Modulo-IA.md), sección 9).
-5. **Datos fuera de Colombia:** Render, Vercel y Neon alojan los datos en el exterior. Eso es una transmisión internacional de datos personales que exige contrato. Ver [Cumplimiento-y-privacidad.md](Cumplimiento-y-privacidad.md), sección 11. Las regiones de Render y de Neon quedan a confirmar.
-6. **Vercel Hobby:** no se pudo verificar en esta revisión si sus términos limitan el uso no comercial. Insumap es académico y no factura; se confirma en la Fase 12.
+1. **Una sola instancia.** No hay alta disponibilidad ni respaldos automáticos: la base solo tiene datos simulados y se regenera con la semilla.
+2. **Correo:** sigue pendiente un proveedor (SES o uno con API HTTPS) para invitaciones y recordatorios.
+3. **Scheduler:** cuando exista en el código, corre como otro servicio del mismo `compose.yaml`; al haber un solo host no hay riesgo de duplicar alertas.
+4. **Memoria:** API, PostgreSQL y la IA futura comparten 2 GB más 2 GB de swap. Si no alcanza, se sube a `t3.medium`.
+5. **Datos fuera de Colombia:** us-east-1 aloja los datos en el exterior. Con datos simulados no aplica; con datos reales es una transmisión internacional que exige contrato. Ver [Cumplimiento-y-privacidad.md](Cumplimiento-y-privacidad.md), sección 11.
 
 ## 9. Compatibilidades verificadas que cambian una decisión
 

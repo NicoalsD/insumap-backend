@@ -114,9 +114,9 @@ Reglas:
 |---|---|---|---|
 | `APP_ENV` | Entorno de ejecución: `local` (desarrollo), `test` o `production` | No | `local` |
 | `LOG_LEVEL` | Nivel de logs | No | `INFO` |
-| `DATABASE_URL` | URL de la app en Neon, con el pooler y el usuario `insumap_app`. Driver `postgresql+psycopg://` | Sí | `postgresql+psycopg://insumap_app:cambia-esto-password@localhost:5432/insumap` |
-| `DATABASE_URL_UNPOOLED` | Conexión directa de Neon, sin pooler. Es la conexión que necesitan las migraciones, que ejecuta `insumap-database`. La API no la usa en el tráfico normal. Con el rol `insumap_app`, nunca con `insumap_migrator` | Sí | `cambia-esto-url-directa-app` |
-| `FORWARDED_ALLOW_IPS` | Lista de IP del proxy de confianza para `X-Forwarded-For`. La lee uvicorn, no `Settings`; es una excepción documentada | No | `127.0.0.1` (valor por defecto de uvicorn); en Render, el valor que confirme la documentación de Render |
+| `DATABASE_URL` | URL de la app con el usuario `insumap_app` (en AWS, el PostgreSQL del host: `@db:5432/insumap`). Driver `postgresql+psycopg://` | Sí | `postgresql+psycopg://insumap_app:cambia-esto-password@localhost:5432/insumap` |
+| `DATABASE_URL_UNPOOLED` | Conexión directa sin pooler (plan anterior con Neon; en AWS no se usa). Es la conexión que necesitan las migraciones, que ejecuta `insumap-database`. La API no la usa en el tráfico normal. Con el rol `insumap_app`, nunca con `insumap_migrator` | Sí | `cambia-esto-url-directa-app` |
+| `FORWARDED_ALLOW_IPS` | Lista de IP del proxy de confianza para `X-Forwarded-For`. La lee uvicorn, no `Settings`; es una excepción documentada | No | `127.0.0.1` (valor por defecto de uvicorn); en AWS, `*` (solo CloudFront llega al host) |
 | `INSUMAP_DATABASE_DIR` | Ruta al checkout de `insumap-database` en la etiqueta de `db-schema.lock`. Solo pruebas de integración | No | `../insumap-database` |
 | `JWT_SECRET` | Firma de los access tokens | Sí | `cambia-esto-jwt-secret` |
 | `JWT_ACCESS_MINUTES` | Vida del access token | No | `15` |
@@ -165,7 +165,7 @@ SCHEDULER_ENABLED=false
 1. Agregar el campo a `Settings`. Si es secreto, sin valor por defecto y como `SecretStr`.
 2. Agregar la variable a `.env.example` con marcador (`cambia-esto-...`) o con un valor de desarrollo que no sea real.
 3. Agregar una fila a la tabla de la sección 6.1: nombre, para qué, si es secreta y el valor por defecto o ejemplo.
-4. Si es secreta, cargarla en Render (con `sync: false` en `render.yaml`) y verificar que no aparece en logs.
+4. Si es secreta, agregarla al secreto `insumap/app` de Secrets Manager y a `infra/aws/host/deploy.sh`, y verificar que no aparece en logs. Si no es secreta y difiere en AWS, agregarla a `deploy.sh`.
 5. Prueba: `tests/unit/shared/test_settings.py` debe cubrir el caso en que falta el secreto.
 
 ## 7. Textos para el usuario: `messages_es.json`
