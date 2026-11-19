@@ -19,6 +19,7 @@ from insumap.infrastructure.treatment_adapters import TreatmentAdapters
 from insumap.main import create_app
 from tests.support.access_fakes import FakeDirectory, InMemoryDataAccessLog
 from tests.support.alerts_fakes import AlertsWorld
+from tests.support.audit_fakes import AuditFakes
 from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
 from tests.support.clinic_admin_fakes import FakeClinicAdminProvisioning
 from tests.support.clinic_fakes import FakeClinics
@@ -111,6 +112,7 @@ class IdentityApi:
         self.patient_log = InMemoryDataAccessLog()
         self.credential_contacts = FakePatientContacts()
         self.credential_invitations = FakeCredentialInvitations()
+        self.audit = AuditFakes()
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -159,6 +161,7 @@ class IdentityApi:
                 patient_contacts=self.credential_contacts,
                 invitations=self.credential_invitations,
             ),
+            audit_adapters=self.audit.adapters(),
         )
         self.app = create_app(container)
         self.client = TestClient(
