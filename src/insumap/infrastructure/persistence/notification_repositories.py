@@ -118,9 +118,15 @@ class NotificationRepository(NotificationRepositoryPort, InAppStorePort):
                 entity_type=entry.entity_type,
                 entity_id=entry.entity_id,
                 alert_id=entry.alert_id,
+                # Explicit so the insert has no RETURNING: the SYSTEM context may not
+                # read its own notification back (the select policy is per recipient).
+                params={},
                 created_at=at,
             )
         )
+        # The ORM declares no relationship between the two rows, so the notification
+        # is flushed before its delivery references it (foreign key order).
+        session.flush()
         session.add(
             NotificationDeliveryOrm(
                 id=delivery_id,
