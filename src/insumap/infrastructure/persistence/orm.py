@@ -632,7 +632,7 @@ class AssistantMessageOrm(Base):
     model_name: Mapped[str | None] = mapped_column(String(80))
     model_version: Mapped[str | None] = mapped_column(String(80))
     input_hash: Mapped[str | None] = mapped_column(CHAR(64))
-    explanation: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    explanation: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     is_fallback: Mapped[bool] = mapped_column(Boolean)
     fallback_reason: Mapped[str | None] = mapped_column(String(17))
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
