@@ -34,6 +34,7 @@ class SecurityEventType(StrEnum):
     ACCOUNT_UNLOCKED = "ACCOUNT_UNLOCKED"
     MFA_RESET = "MFA_RESET"
     PUSH_ENDPOINT_REJECTED = "PUSH_ENDPOINT_REJECTED"
+    AUDIT_CHAIN_BROKEN = "AUDIT_CHAIN_BROKEN"
 
     @property
     def severity(self) -> SecuritySeverity:
@@ -56,6 +57,7 @@ _SEVERITY = {
     SecurityEventType.PASSWORD_RESET_REQUESTED: SecuritySeverity.LOW,
     SecurityEventType.ACCOUNT_UNLOCKED: SecuritySeverity.LOW,
     SecurityEventType.MFA_RESET: SecuritySeverity.HIGH,
+    SecurityEventType.AUDIT_CHAIN_BROKEN: SecuritySeverity.CRITICAL,
 }
 
 

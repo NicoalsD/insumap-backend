@@ -317,6 +317,14 @@ class FieldLimits:
     PUSH_KEY_PATTERN: ClassVar[str] = r"^[A-Za-z0-9_-]+$"
     """Subscription keys are base64url without padding (use fullmatch)."""
 
+    # Audit (audit.audit_log and audit.data_access_log, API.md 8.13).
+
+    AUDIT_ACTION_MAX_LENGTH: ClassVar[int] = 60
+    """Longest action name of ``audit.audit_log.action`` (``varchar(60)``)."""
+
+    AUDIT_ACTION_PATTERN: ClassVar[str] = r"^[A-Z][A-Z0-9_]*$"
+    """Action names are UPPER_SNAKE_CASE (``ck_audit_log_action``; use fullmatch)."""
+
     # Messaging (M11).
 
     MESSAGE_BODY_MAX_LENGTH: ClassVar[int] = 1000
