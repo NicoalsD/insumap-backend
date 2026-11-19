@@ -217,7 +217,9 @@ class MessagingRouter:
             description=(
                 "Agrega un mensaje de texto plano al hilo. El remitente es la sesión "
                 "y su rol; el paciente no envía `patient_id`. Avisa al otro lado "
-                "dentro de la app, sin el texto. No es un canal de emergencias. "
+                "dentro de la app, sin el texto. No es un canal de emergencias. Si el "
+                "paciente escribe palabras de alarma, `alarm_keywords_detected` las "
+                "lista y el equipo recibe un aviso sin el texto. "
                 "Hay un límite de envíos por minuto y usuario; el exceso responde "
                 "`429` con `Retry-After`."
             ),
