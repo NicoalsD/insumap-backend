@@ -33,7 +33,7 @@ class DecisionRecord:
     """One row of ``ai.recommendation_decisions``: an append only transition."""
 
     decision: RecommendationStatus
-    decided_by: UUID
+    decided_by: UUID | None
     decided_at: datetime
     reason: str | None
     original_suggestion: Mapping[str, Any] | None

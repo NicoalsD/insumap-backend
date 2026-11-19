@@ -327,3 +327,8 @@ class FieldLimits:
 
     AI_HASH_LENGTH: ClassVar[int] = 64
     """SHA-256 in hexadecimal (``ai.*.input_hash`` is ``char(64)``)."""
+
+    # Recommendations (ai.recommendations.suggestion, a doctor's modified proposal).
+
+    INSULIN_UNITS_MAX: ClassVar[int] = 500
+    """Largest dose a doctor may write in a modified proposal, in units (technical)."""

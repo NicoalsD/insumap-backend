@@ -39,7 +39,10 @@ class RecommendationDecision:
 @final
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ApproveRecommendationCommand(Command[RecommendationDecision]):
-    """The doctor accepts the proposal as it is."""
+    """The doctor accepts the proposal as it is.
+
+    Pattern: P13 Command
+    """
 
     audit_action: ClassVar[str] = "RECOMMENDATION_APPROVED"
     audit_entity_type: ClassVar[str] = RECOMMENDATION_ENTITY
@@ -58,7 +61,10 @@ class ApproveRecommendationCommand(Command[RecommendationDecision]):
 @final
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ModifyRecommendationCommand(Command[RecommendationDecision]):
-    """The doctor changes the proposal; the reason is mandatory."""
+    """The doctor changes the proposal; the reason is mandatory.
+
+    Pattern: P13 Command
+    """
 
     audit_action: ClassVar[str] = "RECOMMENDATION_MODIFIED"
     audit_entity_type: ClassVar[str] = RECOMMENDATION_ENTITY
@@ -80,7 +86,10 @@ class ModifyRecommendationCommand(Command[RecommendationDecision]):
 @final
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RejectRecommendationCommand(Command[RecommendationDecision]):
-    """The doctor refuses the proposal; the reason is mandatory."""
+    """The doctor refuses the proposal; the reason is mandatory.
+
+    Pattern: P13 Command
+    """
 
     audit_action: ClassVar[str] = "RECOMMENDATION_REJECTED"
     audit_entity_type: ClassVar[str] = RECOMMENDATION_ENTITY

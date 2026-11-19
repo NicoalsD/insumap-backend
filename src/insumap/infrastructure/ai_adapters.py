@@ -11,16 +11,27 @@ from datetime import timedelta
 
 import httpx
 
+from insumap.application.ai.recommendations import (
+    OpenPlanDraftPort,
+    RecommendationRepositoryPort,
+)
 from insumap.application.common.ids import IdGenerator
 from insumap.application.common.unit_of_work import TransactionFactory
 from insumap.application.metrics.forecast import GlucoseForecastPort
 from insumap.domain.ai.circuit_breaker import CircuitBreaker, CircuitPolicy
 from insumap.infrastructure.ai.client_adapter import AiServiceClientAdapter
 from insumap.infrastructure.ai.output_store import SqlAiOutputStore
+from insumap.infrastructure.ai.plan_draft import TreatmentPlanDraftOpener
 from insumap.infrastructure.ai.proxy import SHORT_TERM_HORIZONS, RemoteAiServiceProxy
 from insumap.infrastructure.ai.pseudonymizer import HmacPseudonymizer
 from insumap.infrastructure.ai.service_token_auth import ServiceTokenAuth
+from insumap.infrastructure.persistence.recommendation_repository import (
+    RecommendationRepository,
+)
 from insumap.infrastructure.persistence.transactions import CurrentSession
+from insumap.infrastructure.persistence.treatment_repositories import (
+    TreatmentPlanRepository,
+)
 from insumap.infrastructure.security.subkey_hasher import Subkey, SubkeyHasher
 from insumap.shared.config import Settings
 from insumap.shared.time import Clock
@@ -31,6 +42,8 @@ class AiAdapters:
     """Ports of the AI client, wired by ``Container``."""
 
     forecasts: GlucoseForecastPort
+    recommendations: RecommendationRepositoryPort
+    drafts: OpenPlanDraftPort
 
 
 def build_ai_adapters(
@@ -74,4 +87,8 @@ def build_ai_adapters(
         clock=clock,
         horizons_minutes=SHORT_TERM_HORIZONS,
     )
-    return AiAdapters(forecasts=proxy)
+    return AiAdapters(
+        forecasts=proxy,
+        recommendations=RecommendationRepository(current, ids),
+        drafts=TreatmentPlanDraftOpener(TreatmentPlanRepository(current), ids),
+    )

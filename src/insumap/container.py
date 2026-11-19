@@ -19,6 +19,7 @@ from insumap.api.routers.meta import MetaRouter
 from insumap.api.routers.metrics import MetricsRouter
 from insumap.api.routers.notifications import NotificationRouter
 from insumap.api.routers.patients import PatientRouter
+from insumap.api.routers.recommendations import RecommendationRouter
 from insumap.api.routers.records import RecordsRouter
 from insumap.api.routers.reminders import ReminderRouter
 from insumap.api.routers.sites import SiteRouter
@@ -26,6 +27,18 @@ from insumap.api.routers.targets import TargetProfileRouter
 from insumap.api.routers.treatment import TreatmentRouter
 from insumap.api.routers.users import UserRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
+from insumap.application.ai.commands import (
+    ApproveRecommendationCommand,
+    ApproveRecommendationCommandHandler,
+    ModifyRecommendationCommand,
+    ModifyRecommendationCommandHandler,
+    RejectRecommendationCommand,
+    RejectRecommendationCommandHandler,
+)
+from insumap.application.ai.queries import (
+    GetRecommendationUseCase,
+    ListRecommendationsUseCase,
+)
 from insumap.application.alerts.commands import (
     AcknowledgeAlertCommand,
     AcknowledgeAlertCommandHandler,
@@ -416,6 +429,9 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     UpdatePatientReminderCommand,
     UpdateOwnReminderCommand,
     CreateClinicAdminCommand,
+    ApproveRecommendationCommand,
+    ModifyRecommendationCommand,
+    RejectRecommendationCommand,
     SuspendPatientCommand,
     ReactivatePatientCommand,
     DeactivatePatientCommand,
@@ -593,6 +609,7 @@ class Container:
             *self._users_commands(adapters, platform, unit_of_work),
             *self._onboarding_commands(adapters, onboarding, unit_of_work),
             *self._alert_commands(adapters, monitoring, alerts),
+            *self._recommendation_commands(adapters, monitoring, ai, unit_of_work),
             *self._treatment_commands(adapters, treatment, monitoring),
             *self._targets_commands(adapters, monitoring, targets),
             *self._clinic_admin_commands(
@@ -660,6 +677,9 @@ class Container:
         self.import_router = self._build_import_router(adapters, onboarding)
         self._subscribe_alert_evaluation(adapters, alerts)
         self.alerts_router = self._build_alerts_router(adapters, monitoring, alerts)
+        self.recommendation_router = self._build_recommendation_router(
+            adapters, monitoring, ai
+        )
         self.target_profile_router = self._build_target_profile_router(
             adapters, targets
         )
@@ -1579,6 +1599,58 @@ class Container:
             ),
         ]
 
+    def _recommendation_commands(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        ai: AiAdapters,
+        unit_of_work: CurrentUnitOfWork,
+    ) -> list[Registration]:
+        """The doctor's decisions on recommendations (P13), audited (P09)."""
+        guard, clock, ids = self._command_guard, self.clock, adapters.ids
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        recommendations = ai.recommendations
+        return [
+            bind(
+                ApproveRecommendationCommand,
+                guard.wrap(
+                    ApproveRecommendationCommandHandler(
+                        recommendations=recommendations,
+                        assigned_gate=assigned,
+                        drafts=ai.drafts,
+                        clock=clock,
+                        current=unit_of_work,
+                        ids=ids,
+                    )
+                ),
+            ),
+            bind(
+                ModifyRecommendationCommand,
+                guard.wrap(
+                    ModifyRecommendationCommandHandler(
+                        recommendations=recommendations,
+                        assigned_gate=assigned,
+                        drafts=ai.drafts,
+                        clock=clock,
+                        current=unit_of_work,
+                        ids=ids,
+                    )
+                ),
+            ),
+            bind(
+                RejectRecommendationCommand,
+                guard.wrap(
+                    RejectRecommendationCommandHandler(
+                        recommendations=recommendations,
+                        assigned_gate=assigned,
+                        clock=clock,
+                        current=unit_of_work,
+                        ids=ids,
+                    )
+                ),
+            ),
+        ]
+
     def _subscribe_alert_evaluation(
         self, adapters: IdentityAdapters, alerts: AlertsAdapters
     ) -> None:
@@ -1618,6 +1690,26 @@ class Container:
             get_summary=GetAlertSummaryUseCase(uow=uow, summary=alerts.summary),
             get_alert=GetAlertUseCase(
                 uow=uow, own_gate=own, assigned_gate=assigned, alerts=alerts.alerts
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_recommendation_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        ai: AiAdapters,
+    ) -> RecommendationRouter:
+        """Wire the recommendation reads (API.md 8.10) over the assigned gate."""
+        uow = adapters.unit_of_work
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        return RecommendationRouter(
+            commands=self.command_bus,
+            list_recommendations=ListRecommendationsUseCase(
+                uow=uow, assigned_gate=assigned, recommendations=ai.recommendations
+            ),
+            get_recommendation=GetRecommendationUseCase(
+                uow=uow, assigned_gate=assigned, recommendations=ai.recommendations
             ),
             session_actor=self.full_session_actor,
         )
