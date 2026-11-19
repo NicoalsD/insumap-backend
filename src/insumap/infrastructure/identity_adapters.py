@@ -131,9 +131,14 @@ def build_identity_adapters(
     clock: Clock,
     publisher: DomainEventPublisher,
     engine: Engine,
+    current: CurrentSession | None = None,
 ) -> IdentityAdapters:
-    """Build the production adapters: PostgreSQL, Argon2id, JWT and TOTP."""
-    current = CurrentSession()
+    """Build the production adapters: PostgreSQL, Argon2id, JWT and TOTP.
+
+    ``current`` is the session holder every repository of the process shares, so
+    the repositories of other modules join the same transaction.
+    """
+    current = current or CurrentSession()
     unit_of_work = TransactionalUnitOfWorkPort(
         SqlTransactionFactory(engine, current), publisher
     )
