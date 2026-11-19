@@ -9,18 +9,16 @@ from sqlalchemy import text
 from insumap.application.commands.auditing import AuditEntry, AuditLogPort
 from insumap.infrastructure.persistence.transactions import CurrentSession
 
-ACTOR_TYPE_USER = "USER"
 APPEND_AUDIT_LOG = text(
     "SELECT audit.append_audit_log("
-    "p_clinic_id => :clinic_id, p_actor_user_id => :actor_user_id, "
-    "p_actor_role => :actor_role, p_actor_type => :actor_type, "
     "p_action => :action, p_entity_type => :entity_type, "
     "p_entity_id => :entity_id, p_reason => :reason, "
     "p_changed_fields => CAST(:changed_fields AS varchar[]), "
-    "p_request_id => :request_id)"
+    "p_request_id => :request_id, p_clinic_id => :clinic_id)"
 )
-"""Parameterized call. The argument names follow ``Diccionario-de-datos.md``
-(``audit.audit_log``); ``insumap-database`` fixes the final signature."""
+"""Call of the signature in ``insumap-database`` (db-v0.2.0). The function takes
+the actor from the transaction context (``app.user_id``, ``app.role``), which
+``apply_context`` set from the same actor, so the call does not repeat it."""
 
 
 @final
@@ -41,9 +39,6 @@ class SqlAuditLog(AuditLogPort):
             APPEND_AUDIT_LOG,
             {
                 "clinic_id": entry.clinic_id,
-                "actor_user_id": entry.actor_user_id,
-                "actor_role": entry.actor_role.value,
-                "actor_type": ACTOR_TYPE_USER,
                 "action": entry.action,
                 "entity_type": entry.entity_type,
                 "entity_id": entry.entity_id,
