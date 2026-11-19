@@ -41,5 +41,10 @@
   "reminder.measurement": "Es hora de medir tu glucosa.",
   "reminder.insulin_dose": "Es hora de registrar tu dosis de insulina.",
   "reminder.control": "Es hora de tu control con el equipo de salud.",
-  "reminder.registration": "Es hora de registrar tus datos del día."
+  "reminder.registration": "Es hora de registrar tus datos del día.",
+  "messaging.emergency_notice": "Esta conversación no es un canal de emergencias ni sirve para dosis urgentes. Si tienes una urgencia, llama a los servicios de emergencia de tu zona.",
+  "notification.message_received.title": "Nuevo mensaje en Insumap",
+  "notification.message_received.body": "Tienes un mensaje nuevo en Insumap. Ábrelo para leerlo.",
+  "notification.message_received.external": "Tienes un mensaje nuevo en Insumap. Inicia sesión para leerlo.",
+  "follow_up.control_title": "Control de seguimiento"
 }
