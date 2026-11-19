@@ -523,9 +523,9 @@ def _number(value: object) -> float:
 
 1. Lee `Authorization: Bearer`, rechaza la cabecera larga y llama a `JwtTokenService.decode()`.
 2. Llama a `AuthenticateActorUseCase.execute(claims)`, que **dentro de la transacción de la petición** compara con la BD: `iam.users.status = 'ACTIVE'` (o `is_active` para el personal), `token_version == tv` y clínica activa. Falla con `401 SESSION_REVOKED` o `403 CLINIC_SUSPENDED`. Carga los permisos del rol (sección 10) y arma el `Actor`.
-3. Si el rol es de personal y `"otp"` no está en `amr`, solo deja pasar a las rutas de enrolamiento, `GET /auth/me` y `/auth/logout`: `403 MFA_REQUIRED` en el resto.
+3. Si el rol es de personal y `"otp"` no está en `amr`, solo deja pasar a las rutas de enrolamiento, `GET /auth/current-user` y `/auth/logout`: `403 MFA_REQUIRED` en el resto.
 
-El paso 3 se resuelve con **tres** dependencias de actor, no con una lista de rutas dentro del middleware: `CurrentActor` (sesión completa; rechaza `MFA_REQUIRED`), `EnrollmentActor` (acepta el token de enrolamiento) y `AnySessionActor` (`/auth/me` y logout). Una ruta nueva usa `CurrentActor` por defecto, así que la denegación también es el valor por defecto del MFA.
+El paso 3 se resuelve con **tres** dependencias de actor, no con una lista de rutas dentro del middleware: `CurrentActor` (sesión completa; rechaza `MFA_REQUIRED`), `EnrollmentActor` (acepta el token de enrolamiento) y `AnySessionActor` (`/auth/current-user` y logout). Una ruta nueva usa `CurrentActor` por defecto, así que la denegación también es el valor por defecto del MFA.
 
 `api` no importa `infrastructure` (`ARCH-05`): `CurrentActor` recibe un puerto de `application` (`ActorAuthenticator`) que el contenedor arma con `JwtTokenService` y `AuthenticateActorUseCase`.
 
@@ -1443,7 +1443,7 @@ OTP_FACTOR = "otp"
 class SessionScope(StrEnum):
     FULL = "FULL"  # every route that is not the enrollment or the session basics
     ENROLLMENT = "ENROLLMENT"  # /auth/mfa/enrollment*
-    ANY = "ANY"  # GET /auth/me and /auth/logout
+    ANY = "ANY"  # GET /auth/current-user and /auth/logout
 
 
 class ActorAuthenticator(ABC):
@@ -1558,7 +1558,7 @@ def requires(permission: PermissionCode) -> dict[str, object]:
 
 
 def authenticated_only() -> dict[str, object]:
-    """Actions on the own account (change password, logout, /auth/me): no permission."""
+    """Actions on the own account (change password, logout, /auth/current-user): no permission."""
     return {X_SECURITY: {"authenticated_only": True}}
 
 

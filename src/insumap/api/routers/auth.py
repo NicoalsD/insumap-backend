@@ -284,7 +284,7 @@ class AuthRouter:
             openapi_extra={ACCESS_EXTENSION: ENROLLMENT_SELF},
         )
         add(
-            "/me",
+            "/current-user",
             get_current_user,
             methods=["GET"],
             response_model=CurrentUserResponse,

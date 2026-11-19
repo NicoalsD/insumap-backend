@@ -213,7 +213,7 @@ def test_me_returns_the_documented_shape() -> None:
     api = IdentityApi()
     token = patient_login(api)["access_token"]
 
-    response = api.client.get("/api/v1/auth/me", headers=api.bearer(token))
+    response = api.client.get("/api/v1/auth/current-user", headers=api.bearer(token))
 
     assert response.status_code == 200
     body = response.json()
@@ -232,7 +232,7 @@ def test_me_works_with_the_enrollment_session() -> None:
         "access_token"
     ]
 
-    response = api.client.get("/api/v1/auth/me", headers=api.bearer(token))
+    response = api.client.get("/api/v1/auth/current-user", headers=api.bearer(token))
 
     assert response.status_code == 200
     assert response.json()["role"] == "DOCTOR"
@@ -248,7 +248,7 @@ def test_me_works_with_the_enrollment_session() -> None:
     ],
 )
 def test_me_without_a_valid_bearer_is_401(headers: dict[str, str]) -> None:
-    response = IdentityApi().client.get("/api/v1/auth/me", headers=headers)
+    response = IdentityApi().client.get("/api/v1/auth/current-user", headers=headers)
 
     assert response.status_code == 401
     assert error_code(response) == "UNAUTHENTICATED"
@@ -371,7 +371,7 @@ def test_logout_all_kills_the_access_token_of_the_same_session() -> None:
     done = api.client.post(
         "/api/v1/auth/logout-all", headers={**api.bearer(token), **CSRF_HEADERS}
     )
-    after = api.client.get("/api/v1/auth/me", headers=api.bearer(token))
+    after = api.client.get("/api/v1/auth/current-user", headers=api.bearer(token))
 
     assert done.status_code == 204
     assert after.status_code == 401
@@ -417,7 +417,7 @@ def test_activation_flow_activates_the_patient_and_sets_the_cookie() -> None:
     assert done.json()["status"] == "AUTHENTICATED"
     assert "__Secure-insumap_rt" in done.headers["set-cookie"]
     me = api.client.get(
-        "/api/v1/auth/me", headers=api.bearer(done.json()["access_token"])
+        "/api/v1/auth/current-user", headers=api.bearer(done.json()["access_token"])
     )
     assert me.json()["user"]["email"] == "ana@example.test"
     assert me.json()["consent_required"] is True or me.status_code == 200

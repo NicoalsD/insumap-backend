@@ -30,7 +30,7 @@ class SessionScope(StrEnum):
     """``/auth/mfa/enrollment*``: also the enrollment session of the staff."""
 
     ANY = "ANY"
-    """``GET /auth/me`` and ``/auth/logout``: any valid session."""
+    """``GET /auth/current-user`` and ``/auth/logout``: any valid session."""
 
 
 @final

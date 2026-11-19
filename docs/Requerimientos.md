@@ -47,7 +47,7 @@ Este documento lista los requisitos funcionales (RF) y no funcionales (RNF) de I
 | RF-05 | El sistema bloquea el login tras intentos fallidos repetidos con bloqueo escalonado y limita los intentos por IP y por cuenta. | MVP | Superar el límite devuelve `429 RATE_LIMITED` con `Retry-After`; los intentos quedan en `iam.login_attempts`. | HU-01 | B, D |
 | RF-06 | El usuario recupera su contraseña con un enlace de un solo uso con expiración; el cambio revoca todas las sesiones. | MVP | Un enlace usado o vencido se rechaza; tras el cambio los refresh tokens previos dejan de funcionar. | HU-03 | B, F |
 | RF-07 | Toda operación se autoriza por permiso leído de la base de datos (`iam.role_permissions`) con denegación por defecto. | MVP | Un rol sin el permiso recibe `403 FORBIDDEN`; no existe ninguna comparación de nombre de rol en el código de negocio. | HU-01 | B, D |
-| RF-08 | `GET /auth/me` devuelve el usuario, su rol, su clínica, sus permisos, el estado de MFA y el consentimiento vigente. | MVP | La respuesta incluye la lista de permisos y las banderas `mfa_enabled` y `consent_required`. | HU-01 | B, F |
+| RF-08 | `GET /auth/current-user` devuelve el usuario, su rol, su clínica, sus permisos, el estado de MFA y el consentimiento vigente. | MVP | La respuesta incluye la lista de permisos y las banderas `mfa_enabled` y `consent_required`. | HU-01 | B, F |
 
 ### M2 Clínicas y usuarios
 

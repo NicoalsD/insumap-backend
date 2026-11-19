@@ -39,7 +39,7 @@ def test_patient_login_me_refresh_and_logout(api: TestClient) -> None:
     assert login.json()["status"] == "AUTHENTICATED"
     token = login.json()["access_token"]
 
-    me = api.get("/api/v1/auth/me", headers=_bearer(token))
+    me = api.get("/api/v1/auth/current-user", headers=_bearer(token))
     assert me.status_code == 200, me.text
     body = me.json()
     assert body["role"] == "PATIENT"
@@ -106,7 +106,9 @@ def test_doctor_enrolls_mfa_then_logs_in_with_a_challenge(api: TestClient) -> No
         json={"challenge_token": second.json()["challenge_token"], "code": recovery[0]},
     )
     assert verified.status_code == 200, verified.text
-    me = api.get("/api/v1/auth/me", headers=_bearer(verified.json()["access_token"]))
+    me = api.get(
+        "/api/v1/auth/current-user", headers=_bearer(verified.json()["access_token"])
+    )
     assert me.json()["role"] == "DOCTOR"
     assert me.json()["mfa_enabled"] is True
 

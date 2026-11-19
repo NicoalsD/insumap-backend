@@ -24,7 +24,7 @@ Referencia de la API REST del backend (`/api/v1`): convenciones, formato de erro
 - Prefijo `/api/v1` en cada `APIRouter`. Un cambio incompatible crea `/api/v2`; un campo opcional nuevo se queda en `v1`. Un endpoint que se retira se marca `deprecated=True` durante al menos una versión (`.agents/api-documentation.md`, sección 8).
 - `GET /health` y `GET /ready` viven **fuera** de `/api/v1`. `GET /docs` (Swagger UI) y `GET /openapi.json` también, y son públicos porque solo documentan. Se pueden apagar con el campo `api_docs_enabled` de `Settings`.
 - **Casing:** los segmentos fijos de la ruta van en `kebab-case` (`/password-reset/request`, `/credential-invitations`, `/logout-all`, `/field-limits`), como los fijan los documentos de seguridad. Los parámetros de ruta, los parámetros de consulta y los campos JSON van en `snake_case` (`patient_id`, `window`, `value_mg_dl`). Los valores de enumeración van en `UPPER_SNAKE_CASE`.
-- Los identificadores son UUID (v7). Una ruta nunca lleva el `patient_id` del propio paciente: las rutas `_own` toman el `patient_id` del token (regla V3 de `Actores-y-permisos.md`). El prefijo `/patients/me` es la forma de nombrar "mi expediente".
+- Los identificadores son UUID (v7). Una ruta nunca lleva el `patient_id` del propio paciente: las rutas `_own` toman el `patient_id` del token (regla V3 de `Actores-y-permisos.md`). El prefijo `/patients/own` es la forma de nombrar "mi expediente".
 - Cada operación tiene un `operation_id` único, en inglés, `snake_case`, con verbo y sustantivo (`^[a-z][a-z0-9_]*$`). Los clientes generados usan esos nombres como métodos: cambiarlos rompe al frontend.
 - El documento OpenAPI se versiona como `docs/openapi.json`; el frontend genera sus tipos desde esa copia.
 
@@ -74,7 +74,7 @@ La dependencia de seguridad usa `HTTPBearer(auto_error=False)`: la ausencia del 
 
 | Aspecto | Valor |
 |---|---|
-| Access token | JWT HS256 de 15 minutos (`JWT_ACCESS_MINUTES`). Solo en memoria del frontend: nunca en `localStorage`, `sessionStorage`, IndexedDB ni cookies. Claims: `iss`, `aud`, `sub`, `role`, `clinic_id` (`null` solo para `PLATFORM_ADMIN`), `tv`, `sid`, `amr`, `jti`, `iat`, `nbf`, `exp`. Los permisos **no** van en el token: `GET /auth/me` los devuelve. |
+| Access token | JWT HS256 de 15 minutos (`JWT_ACCESS_MINUTES`). Solo en memoria del frontend: nunca en `localStorage`, `sessionStorage`, IndexedDB ni cookies. Claims: `iss`, `aud`, `sub`, `role`, `clinic_id` (`null` solo para `PLATFORM_ADMIN`), `tv`, `sid`, `amr`, `jti`, `iat`, `nbf`, `exp`. Los permisos **no** van en el token: `GET /auth/current-user` los devuelve. |
 | `amr` | `["pwd"]` para pacientes y para personal sin MFA verificado. `["pwd", "otp"]` para personal con MFA verificado. |
 | Refresh token | Opaco de 256 bits, guardado solo como SHA-256. Rota en cada uso. Reutilizar uno ya rotado revoca toda la familia y responde `401 SESSION_REVOKED`. |
 | Cookie | `Set-Cookie: __Secure-insumap_rt=<token>; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth; Max-Age=<segundos>`. Sin `Domain`. El refresh **no** viaja en el cuerpo. |
@@ -90,7 +90,7 @@ La dependencia de seguridad usa `HTTPBearer(auto_error=False)`: la ausencia del 
 |---|---|---|
 | `AUTHENTICATED` | Sesión completa. En el login la reciben los pacientes. El personal la recibe de `POST /auth/mfa/verify` o de `POST /auth/mfa/enrollment/confirm`, que responden con la misma forma. | `access_token` y la cookie de refresh. |
 | `MFA_CHALLENGE` | El personal tiene MFA activo y debe verificar un código. | `challenge_token` (5 minutos, 5 intentos). |
-| `MFA_ENROLLMENT_REQUIRED` | El personal no tiene MFA. | Un `access_token` de enrolamiento (`amr: ["pwd"]`, sin refresh). Solo sirve para `/auth/mfa/enrollment*`, `GET /auth/me` y `/auth/logout`. |
+| `MFA_ENROLLMENT_REQUIRED` | El personal no tiene MFA. | Un `access_token` de enrolamiento (`amr: ["pwd"]`, sin refresh). Solo sirve para `/auth/mfa/enrollment*`, `GET /auth/current-user` y `/auth/logout`. |
 
 ### 2.4 Qué responde cada capa de acceso
 
@@ -107,12 +107,12 @@ La dependencia de seguridad usa `HTTPBearer(auto_error=False)`: la ausencia del 
 
 Reglas:
 
-1. **Denegación por defecto.** Todo endpoint exige autenticación y un permiso, salvo los públicos y las acciones sobre la propia cuenta (`GET /auth/me`, cambiar contraseña, cerrar sesión, administrar MFA propio, notificaciones propias).
+1. **Denegación por defecto.** Todo endpoint exige autenticación y un permiso, salvo los públicos y las acciones sobre la propia cuenta (`GET /auth/current-user`, cambiar contraseña, cerrar sesión, administrar MFA propio, notificaciones propias).
 2. **`403` antes que `404`.** El permiso se verifica antes de buscar el recurso: un rol sin el permiso recibe `403 FORBIDDEN` aunque el id no exista. Quien tiene el permiso y pide un recurso ajeno recibe `404 NOT_FOUND`, con el mismo cuerpo, cabeceras y tiempo que un `404` real (no revela que existe).
 3. **Alcance.** `_own` usa el `patient_id` del token. `_assigned` exige una asignación vigente en `clinic.care_team_assignments` (`PatientRecordAccessProxy`, P11). Sin sufijo es la clínica del usuario.
 4. **El administrador no ve datos clínicos.** `PLATFORM_ADMIN` y `CLINIC_ADMIN` no tienen permisos de lectura clínica; sus listados devuelven solo campos administrativos.
 5. **Auditoría.** Toda lectura de datos clínicos escribe una fila en `audit.data_access_log` antes de responder (`PhiAccessAuditDecorator`, P09). Si la auditoría falla, la lectura no responde. Todo comando que cambia seguridad o decisiones clínicas escribe en `audit.audit_log` (`AuditingCommandHandler`, P09).
-6. **Ruta de la propia sesión.** `consents/*`, `GET /auth/me` y el cierre de sesión no exigen consentimiento vigente: un paciente con una versión nueva por aceptar debe poder aceptarla.
+6. **Ruta de la propia sesión.** `consents/*`, `GET /auth/current-user` y el cierre de sesión no exigen consentimiento vigente: un paciente con una versión nueva por aceptar debe poder aceptarla.
 
 ## 3. Paginación
 
@@ -260,8 +260,8 @@ Cada endpoint declara solo los errores que puede devolver. Para no repetirlos, e
 | Conjunto | Errores | Aplica a |
 |---|---|---|
 | `C1` | `401 UNAUTHENTICATED`, `401 SESSION_REVOKED`, `403 FORBIDDEN`, `403 CLINIC_SUSPENDED` (no aplica a `PLATFORM_ADMIN`), `429 RATE_LIMITED`, `500 INTERNAL_ERROR` | Todo endpoint autenticado |
-| `C2` | `403 MFA_REQUIRED` | Endpoint llamado por personal (`CLINIC_ADMIN`, `DOCTOR`, `PLATFORM_ADMIN`), salvo `/auth/mfa/enrollment*`, `GET /auth/me` y `/auth/logout` |
-| `C3` | `403 CONSENT_REQUIRED` | Endpoint llamado por `PATIENT`, salvo `consents/*`, `GET /auth/me` y `/auth/logout` |
+| `C2` | `403 MFA_REQUIRED` | Endpoint llamado por personal (`CLINIC_ADMIN`, `DOCTOR`, `PLATFORM_ADMIN`), salvo `/auth/mfa/enrollment*`, `GET /auth/current-user` y `/auth/logout` |
+| `C3` | `403 CONSENT_REQUIRED` | Endpoint llamado por `PATIENT`, salvo `consents/*`, `GET /auth/current-user` y `/auth/logout` |
 | `C4` | `422 VALIDATION_ERROR` y, si hay cuerpo, `413 PAYLOAD_TOO_LARGE` | Todo endpoint con parámetros, consulta o cuerpo |
 | `C5` | `404 NOT_FOUND` | Endpoint con un id de recurso en la ruta, o que opera sobre un recurso de otro actor |
 
@@ -345,7 +345,7 @@ Endpoints por sección. Post-MVP son los que atienden requisitos de las fases 10
 | POST | `/auth/mfa/enrollment` | `start_mfa_enrollment` | token de enrolamiento (personal sin MFA) | F | 200 |
 | POST | `/auth/mfa/enrollment/confirm` | `confirm_mfa_enrollment` | token de enrolamiento | F | 200 |
 | POST | `/auth/mfa/recovery-codes` | `regenerate_mfa_recovery_codes` | autenticado (personal con sesión completa) | F | 200 |
-| GET | `/auth/me` | `get_current_user` | autenticado | F | 200 |
+| GET | `/auth/current-user` | `get_current_user` | autenticado | F | 200 |
 | POST | `/auth/refresh` | `refresh_session` | cookie de refresh | F | 200 |
 | POST | `/auth/logout` | `logout` | autenticado (cookie y JWT) | F | 204 |
 | POST | `/auth/logout-all` | `logout_all_sessions` | autenticado (cookie y JWT) | F | 204 |
@@ -419,8 +419,8 @@ Endpoints por sección. Post-MVP son los que atienden requisitos de las fases 10
 | GET | `/patients/{patient_id}/timeline` | `get_patient_timeline` | `patients.read_assigned` | P | 200 |
 | GET | `/timeline/export` | `export_own_timeline` | `records.read_own` | P | 200 |
 | GET | `/patients/{patient_id}/timeline/export` | `export_patient_timeline` | `patients.read_assigned` | P | 200 |
-| GET | `/patients/me` | `get_own_patient_profile` | `patients.read_own` | P | 200 |
-| GET | `/patients/me/overview` | `get_own_overview` | `patients.read_own` | P | 200 |
+| GET | `/patients/own` | `get_own_patient_profile` | `patients.read_own` | P | 200 |
+| GET | `/patients/own/overview` | `get_own_overview` | `patients.read_own` | P | 200 |
 | GET | `/patients/{patient_id}/overview` | `get_patient_overview` | `patients.read_assigned` | F | 200 |
 | POST | `/protocol-templates` | `create_protocol_template` | `protocol_templates.manage` | P | 201 |
 | GET | `/protocol-templates` | `list_protocol_templates` | `protocol_templates.read` | P | 200 |
@@ -435,7 +435,7 @@ Endpoints por sección. Post-MVP son los que atienden requisitos de las fases 10
 | POST | `/treatment-plans/{plan_id}/versions` | `create_treatment_plan_version` | `treatment_plans.manage` | P | 201 |
 | GET | `/treatment-plans/{plan_id}/snapshots` | `list_treatment_plan_snapshots` | `treatment_plans.manage` | P | 200 |
 | POST | `/treatment-plans/{plan_id}/restore` | `restore_treatment_plan` | `treatment_plans.manage` | P | 201 |
-| GET | `/patients/me/treatment-plan` | `get_own_treatment_plan` | `treatment_plans.read_own` | P | 200 |
+| GET | `/patients/own/treatment-plan` | `get_own_treatment_plan` | `treatment_plans.read_own` | P | 200 |
 | POST | `/target-profiles` | `create_target_profile` | `target_profiles.manage` | P | 201 |
 | GET | `/target-profiles` | `list_target_profiles` | `target_profiles.manage` o `target_profiles.assign` | P | 200 |
 | GET | `/target-profiles/{profile_id}` | `get_target_profile` | `target_profiles.manage` o `target_profiles.assign` | P | 200 |
@@ -448,9 +448,9 @@ Endpoints por sección. Post-MVP son los que atienden requisitos de las fases 10
 | PATCH | `/reminders/{reminder_id}` | `update_own_reminder` | `reminders.manage_own` | P | 200 |
 | GET | `/patients/{patient_id}/metrics` | `get_patient_metrics` | `metrics.read_assigned` | F | 200 |
 | GET | `/patients/{patient_id}/metrics/agp` | `get_patient_agp` | `metrics.read_assigned` | P | 200 |
-| GET | `/patients/me/metrics` | `get_own_metrics` | `metrics.read_own` | P | 200 |
+| GET | `/patients/own/metrics` | `get_own_metrics` | `metrics.read_own` | P | 200 |
 | GET | `/patients/{patient_id}/forecast` | `get_patient_forecast` | `ai.forecasts.read_assigned` | F | 200 |
-| GET | `/patients/me/forecast` | `get_own_forecast` | `ai.forecasts.read_own` | P | 200 |
+| GET | `/patients/own/forecast` | `get_own_forecast` | `ai.forecasts.read_own` | P | 200 |
 | POST | `/alert-rules` | `create_alert_rule` | `alert_rules.manage` | P | 201 |
 | GET | `/alert-rules` | `list_alert_rules` | `alert_rules.read` | P | 200 |
 | GET | `/alert-rules/{rule_id}` | `get_alert_rule` | `alert_rules.read` | P | 200 |
@@ -484,7 +484,7 @@ Endpoints por sección. Post-MVP son los que atienden requisitos de las fases 10
 | POST | `/patients/{patient_id}/clinical-notes` | `create_clinical_note` | `clinical_notes.manage` | P | 201 |
 | GET | `/patients/{patient_id}/clinical-notes` | `list_clinical_notes` | `clinical_notes.manage` | P | 200 |
 | POST | `/reports/patient` | `create_patient_report` | `reports.generate_assigned` | P | 200 |
-| POST | `/reports/me` | `create_own_report` | `reports.generate_own` | P | 200 |
+| POST | `/reports/own` | `create_own_report` | `reports.generate_own` | P | 200 |
 | POST | `/reports/clinic` | `create_clinic_report` | `reports.generate_clinic` | P | 200 |
 | GET | `/clinic-kpis` | `get_clinic_kpis` | `clinic_kpis.read` | P | 200 |
 | GET | `/messages` | `list_messages` | `messages.use_own` o `messages.use_assigned` | P | 200 |
@@ -497,9 +497,9 @@ Endpoints por sección. Post-MVP son los que atienden requisitos de las fases 10
 | POST | `/audit-log/verifications` | `verify_audit_chain` | `audit.read` | P | 200 |
 | GET | `/security-events` | `list_security_events` | `audit.read` o `audit.read_platform` | P | 200 |
 | GET | `/public/privacy-notices/{privacy_notice_version_id}` | `get_privacy_notice` | público | P | 200 |
-| GET | `/consents/me` | `get_own_consent` | `consents.manage_own` | P | 200 |
-| POST | `/consents/me/acceptances` | `accept_consent` | `consents.manage_own` | P | 201 |
-| POST | `/consents/me/withdrawals` | `withdraw_consent` | `consents.manage_own` | P | 200 |
+| GET | `/consents/own` | `get_own_consent` | `consents.manage_own` | P | 200 |
+| POST | `/consents/own/acceptances` | `accept_consent` | `consents.manage_own` | P | 201 |
+| POST | `/consents/own/withdrawals` | `withdraw_consent` | `consents.manage_own` | P | 200 |
 | GET | `/consents` | `list_consent_statuses` | `consents.read_status` | P | 200 |
 | POST | `/privacy-requests` | `create_privacy_request` | `privacy_requests.create_own` | P | 201 |
 | GET | `/privacy-requests` | `list_privacy_requests` | `privacy_requests.create_own` o `privacy_requests.manage` | P | 200 |
@@ -558,7 +558,7 @@ Endpoints por sección. Post-MVP son los que atienden requisitos de las fases 10
 - Respuesta: `recovery_codes` nuevos, una sola vez. Los anteriores quedan invalidados.
 - Errores: C1, C2, C4; `401 INVALID_CREDENTIALS` (TOTP incorrecto).
 
-#### `GET /auth/me`
+#### `GET /auth/current-user`
 - Operación: `get_current_user` · Permiso: autenticado · Ruta: F · Trazabilidad: HU-01, RF-07, RF-08, HU-55 · Patrón: - · Éxito: 200
 - Solicitud: sin parámetros. También la puede llamar el personal sin MFA verificado y el paciente con consentimiento pendiente.
 - Respuesta: `user` (`id`, `email`, `full_name`), `role`, `clinic` (`id`, `name`, `is_demo`, `simulated`; `null` para `PLATFORM_ADMIN`), `permissions` (lista de códigos leída de la base de datos), `mfa_enabled`, `consent_required`.
@@ -1010,13 +1010,13 @@ Las rutas de registro (`/readings`, `/insulin-doses`, `/meals`, `/activities`, `
 - Respuesta: igual que `GET /timeline/export`. Escribe una fila con `action = EXPORT` en `audit.data_access_log`.
 - Errores: C1, C2, C4, C5.
 
-#### `GET /patients/me`
+#### `GET /patients/own`
 - Operación: `get_own_patient_profile` · Permiso: `patients.read_own` · Ruta: P · Trazabilidad: HU-22, RF-42, RF-50 · Patrón: P11 · Éxito: 200
 - Solicitud: sin parámetros. Se declara antes que `GET /patients/{patient_id}` para que `me` no se lea como un id.
 - Respuesta: `id`, `account_status`, `clinic` (`name`, `simulated`), `target_profile` (`id`, `code`, `version`) y `simulated`.
 - Errores: C1, C3.
 
-#### `GET /patients/me/overview`
+#### `GET /patients/own/overview`
 - Operación: `get_own_overview` · Permiso: `patients.read_own` · Ruta: P · Trazabilidad: HU-22, HU-29, RF-42 · Patrón: P10, P11 · Éxito: 200
 - Solicitud: `window` (`24h`, `7d`, `14d` o `30d`, por defecto `14d`).
 - Respuesta: el inicio del paciente: lecturas recientes con su rango objetivo, métricas propias de la ventana en lenguaje simple, plan activo y alertas abiertas propias. No llama a la IA.
@@ -1110,7 +1110,7 @@ Estados del plan: `DRAFT`, `ACTIVE` y `SUPERSEDED`. Un paciente tiene un solo pl
 - Respuesta: el borrador nuevo.
 - Errores: C1, C2, C4, C5 (foto de otro plan responde `404`).
 
-#### `GET /patients/me/treatment-plan`
+#### `GET /patients/own/treatment-plan`
 - Operación: `get_own_treatment_plan` · Permiso: `treatment_plans.read_own` · Ruta: P · Trazabilidad: HU-28, RF-50 · Patrón: P11 · Éxito: 200
 - Solicitud: sin parámetros.
 - Respuesta: el plan `ACTIVE` en lenguaje claro (insulinas, horarios y metas) y sus recordatorios. Sin opciones de edición. No existe plan en `DRAFT` visible para el paciente ni recomendaciones con dosis hasta que se apliquen.
@@ -1192,7 +1192,7 @@ Las métricas y los pronósticos se calculan con el perfil de metas asignado al 
 - Respuesta: `bins` (por franja del día local: `p5`, `p25`, `p50`, `p75` y `p95` en mg/dL), `target_range` (`low` y `high` del perfil), `data_sufficiency_pct` e `is_sufficient`. Con datos insuficientes `bins` va vacío y `is_sufficient` es `false` (aviso "datos insuficientes").
 - Errores: C1, C2, C4, C5.
 
-#### `GET /patients/me/metrics`
+#### `GET /patients/own/metrics`
 - Operación: `get_own_metrics` · Permiso: `metrics.read_own` · Ruta: P · Trazabilidad: HU-29, RF-51, RF-55 · Patrón: P14, P19 · Éxito: 200
 - Solicitud: `window`, `compare_previous`.
 - Respuesta: las métricas propias con la forma de `GET /patients/{patient_id}/metrics`. Solo las del paciente autenticado.
@@ -1204,7 +1204,7 @@ Las métricas y los pronósticos se calculan con el perfil de metas asignado al 
 - Respuesta: `mode`, `generated_at`, `model_name`, `model_version`, `is_fallback`, `fallback_reason`, `trend` (`FALLING`, `STABLE` o `RISING`), `points` (`horizon_minutes`, `timestamp`, `p10`, `p50`, `p90`), `risk` (`hypo_probability` y `hyper_probability` por horizonte) y `explanation` (`summary`, `factors`, `data_refs`). `RemoteAiServiceProxy` llama al servicio con un seudónimo, con tiempo máximo de 3 s; si hay timeout, error o circuito abierto responde el respaldo lineal con `is_fallback: true` (la interfaz muestra "Respaldo por reglas"). La salida se guarda en `ai.glucose_forecasts`. Con datos insuficientes (por ejemplo un paciente con SMBG): `points` vacío, `is_fallback: true` y `fallback_reason: INSUFFICIENT_DATA`. Si la IA y el respaldo fallan no hay `5xx`: la API responde `200` con el respaldo.
 - Errores: C1, C2, C4, C5. La IA caída **no** es un error (G33).
 
-#### `GET /patients/me/forecast`
+#### `GET /patients/own/forecast`
 - Operación: `get_own_forecast` · Permiso: `ai.forecasts.read_own` · Ruta: P · Trazabilidad: HU-36, RF-64, RF-66 · Patrón: P11, P18 · Éxito: 200
 - Solicitud: `mode`.
 - Respuesta: tendencia y banda `p10` a `p90` por horizonte con `is_fallback`. **Nunca contiene una dosis de insulina.**
@@ -1418,7 +1418,7 @@ La IA solo apoya al médico: nunca aplica un cambio ni da una dosis al paciente.
 - Respuesta: el documento (`application/pdf` o `text/html`) con AGP, métricas, eventos y plan, con la fecha y el periodo; ambos formatos muestran la misma información. Un paciente de la clínica demo lleva la marca "Datos simulados". Las plantillas usan autoescape y el motor de PDF no descarga recursos remotos. Cuenta para el límite de 20 reportes por hora.
 - Errores: C1, C2, C4, C5.
 
-#### `POST /reports/me`
+#### `POST /reports/own`
 - Operación: `create_own_report` · Permiso: `reports.generate_own` · Ruta: P · Trazabilidad: HU-47, RF-82 · Patrón: P02, P03, P20 · Éxito: 200
 - Solicitud: `format` y el periodo.
 - Respuesta: el reporte propio para compartir con el equipo; solo contiene datos del paciente autenticado.
@@ -1498,23 +1498,23 @@ La mensajería no es un canal de emergencias: toda respuesta del hilo lleva el a
 
 #### `GET /public/privacy-notices/{privacy_notice_version_id}`
 - Operación: `get_privacy_notice` · Permiso: público · Ruta: P · Trazabilidad: HU-10, HU-52, RF-24, RF-90 · Patrón: - · Éxito: 200
-- Solicitud: `privacy_notice_version_id` en la ruta (el que devuelve `POST /auth/activation/verify` o `GET /auth/me`).
+- Solicitud: `privacy_notice_version_id` en la ruta (el que devuelve `POST /auth/activation/verify` o `GET /auth/current-user`).
 - Respuesta: `id`, `version`, `published_at`, `text` (aviso de privacidad versionado y sin datos personales) y los alcances del consentimiento (tratamiento de datos sensibles, obligatorio; `ai_external_processing`, opcional).
 - Errores: `404 NOT_FOUND`, `429`, `422`, `500`.
 
-#### `GET /consents/me`
+#### `GET /consents/own`
 - Operación: `get_own_consent` · Permiso: `consents.manage_own` · Ruta: P · Trazabilidad: HU-52, RF-90 · Patrón: P11 · Éxito: 200
 - Solicitud: sin parámetros. No exige consentimiento vigente.
 - Respuesta: la versión aceptada, la fecha, los alcances aceptados, `current_version_id` y `consent_required`.
 - Errores: C1, C3 sin `CONSENT_REQUIRED` (esta ruta está exenta).
 
-#### `POST /consents/me/acceptances`
+#### `POST /consents/own/acceptances`
 - Operación: `accept_consent` · Permiso: `consents.manage_own` · Ruta: P · Trazabilidad: HU-52, RF-90 · Patrón: P09 · Éxito: 201
 - Solicitud: `privacy_notice_version_id`, `accepted` (debe ser `true`) y `ai_external_processing`. Se guarda con la versión, la fecha y el alcance.
 - Respuesta: el consentimiento vigente. Una versión nueva obliga al paciente a aceptarla antes de seguir registrando.
 - Errores: C1, C4; `409 CONSENT_VERSION_OUTDATED` (la versión ya no es la vigente).
 
-#### `POST /consents/me/withdrawals`
+#### `POST /consents/own/withdrawals`
 - Operación: `withdraw_consent` · Permiso: `consents.manage_own` · Ruta: P · Trazabilidad: HU-52, RF-90 · Patrón: P09, P17 · Éxito: 200
 - Solicitud: `scope` (el consentimiento de datos sensibles o solo `ai_external_processing`; valores por definir). Retirar el de datos sensibles detiene los registros nuevos (`403 CONSENT_REQUIRED` después) y la clínica recibe un aviso para tramitar la baja o la retención.
 - Respuesta: el consentimiento con su estado.
