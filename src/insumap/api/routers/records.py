@@ -1,7 +1,5 @@
 """Patient record endpoints: readings, doses, meals, activities, symptoms, labs."""
 
-from __future__ import annotations
-
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from http import HTTPStatus

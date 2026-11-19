@@ -31,6 +31,7 @@ from insumap.application.monitoring.ports import (
     TimelinePort,
     ValidationSettingsPort,
 )
+from insumap.application.monitoring.queries import ExportFormat
 from insumap.domain.identity.consent import ConsentRecord
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
@@ -59,6 +60,12 @@ from insumap.domain.monitoring.validation import (
     ValidationParams,
     build_validation_chain,
 )
+from insumap.infrastructure.integration.cgm.adapter import CgmCsvAdapter
+from insumap.infrastructure.monitoring.exporters import (
+    CsvTimelineExporter,
+    FhirTimelineExporter,
+)
+from insumap.infrastructure.monitoring_adapters import MonitoringAdapters
 from insumap.shared.errors import ErrorCode, InsumapError
 from tests.support.fixed_clock import FixedClock
 from tests.support.identity_fakes import FakeIds, FakeUnitOfWorkPort
@@ -436,6 +443,26 @@ class FakePlans(ActivePlanPort):
 
     def active_plan_id(self, patient_id: UUID) -> UUID | None:
         return self.plan_id
+
+
+def records_adapters(world: RecordsWorld) -> MonitoringAdapters:
+    """The production ports of the records slice, replaced by ``world``'s doubles."""
+    return MonitoringAdapters(
+        patient_records=world.patients,
+        readings=world.readings,
+        clinical_records=world.records,
+        sync_batches=world.batches,
+        timeline=world.timeline,
+        validation=world.settings,
+        targets=world.targets,
+        symptoms=world.catalog,
+        active_plans=world.plans,
+        cgm=CgmCsvAdapter(),
+        exporters={
+            ExportFormat.CSV: CsvTimelineExporter(),
+            ExportFormat.FHIR: FhirTimelineExporter(),
+        },
+    )
 
 
 @dataclass

@@ -17,6 +17,7 @@ from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
 from tests.support.commands import InMemoryAuditLog
 from tests.support.identity_fakes import VALID_TOTP
 from tests.support.identity_world import NOW, PASSWORD, IdentityWorld, make_account
+from tests.support.monitoring_fakes import RecordsWorld, records_adapters
 from tests.support.notifications import InMemoryChannel
 from tests.support.settings import make_settings
 
@@ -35,6 +36,9 @@ class IdentityApi:
         self.care_teams = FakeCareTeams()
         self.patients = FakeDirectory()
         self.staff = FakeStaff()
+        self.records = RecordsWorld(
+            clock=self.world.clock, uow=self.world.uow, ids=self.world.ids
+        )
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -47,6 +51,7 @@ class IdentityApi:
                 patients=self.patients,
                 staff=self.staff,
             ),
+            monitoring_adapters=records_adapters(self.records),
         )
         self.app = create_app(container)
         self.client = TestClient(
