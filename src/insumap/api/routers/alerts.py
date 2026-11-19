@@ -308,7 +308,9 @@ class AlertRouter:
                     escalation=body.escalation,
                 )
             )
-            response.headers["Location"] = f"{ALERT_RULE_PATH}/{rule.rule_id}"
+            response.headers["Location"] = (
+                f"{ALERTS_PREFIX}{ALERT_RULE_PATH}/{rule.rule_id}"
+            )
             return AlertRuleResponse.of(rule)
 
         def list_rules(
@@ -354,7 +356,9 @@ class AlertRouter:
                     change_reason=body.change_reason,
                 )
             )
-            response.headers["Location"] = f"{ALERT_RULE_PATH}/{rule.rule_id}"
+            response.headers["Location"] = (
+                f"{ALERTS_PREFIX}{ALERT_RULE_PATH}/{rule.rule_id}"
+            )
             return AlertRuleResponse.of(rule)
 
         def list_alerts(

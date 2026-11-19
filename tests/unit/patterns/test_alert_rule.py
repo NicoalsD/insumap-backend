@@ -78,7 +78,6 @@ def test_rate_of_change_compares_with_the_previous_reading_in_span() -> None:
     assert not rule.matches(evidence(point(-10, "120"), point(0, "110")))
 
 
-
 def test_all_of_needs_every_child_and_any_of_one() -> None:
     low = ThresholdRule(comparator=Comparator.LT, value_mg_dl=Decimal(70))
     falling = RateOfChangeRule(
@@ -89,8 +88,12 @@ def test_all_of_needs_every_child_and_any_of_one() -> None:
     reading = evidence(point(-10, "120"), point(0, "65"))
 
     assert AllOfRule([low, falling]).matches(reading)
-    assert AnyOfRule([low, ThresholdRule(comparator=Comparator.GT, value_mg_dl=Decimal(300))]).matches(reading)
-    assert not AllOfRule([low, ThresholdRule(comparator=Comparator.GT, value_mg_dl=Decimal(300))]).matches(reading)
+    assert AnyOfRule(
+        [low, ThresholdRule(comparator=Comparator.GT, value_mg_dl=Decimal(300))]
+    ).matches(reading)
+    assert not AllOfRule(
+        [low, ThresholdRule(comparator=Comparator.GT, value_mg_dl=Decimal(300))]
+    ).matches(reading)
 
 
 def test_parses_a_nested_definition_from_data() -> None:
@@ -101,8 +104,18 @@ def test_parses_a_nested_definition_from_data() -> None:
             {
                 "op": "ANY_OF",
                 "children": [
-                    {"kind": "DURATION", "comparator": "LT", "value_mg_dl": 80, "minutes": 15},
-                    {"kind": "RATE_OF_CHANGE", "direction": "FALLING", "mg_dl_per_min": 2, "within_minutes": 15},
+                    {
+                        "kind": "DURATION",
+                        "comparator": "LT",
+                        "value_mg_dl": 80,
+                        "minutes": 15,
+                    },
+                    {
+                        "kind": "RATE_OF_CHANGE",
+                        "direction": "FALLING",
+                        "mg_dl_per_min": 2,
+                        "within_minutes": 15,
+                    },
                 ],
             },
         ],
@@ -124,9 +137,17 @@ def test_parses_a_nested_definition_from_data() -> None:
         {"kind": "THRESHOLD", "comparator": "LT", "value_mg_dl": 70, "extra": 1},
         {"kind": "DURATION", "comparator": "LT", "value_mg_dl": 70, "minutes": 0},
         {"kind": "DURATION", "comparator": "LT", "value_mg_dl": 70, "minutes": True},
-        {"kind": "RATE_OF_CHANGE", "direction": "SIDEWAYS", "mg_dl_per_min": 2, "within_minutes": 15},
+        {
+            "kind": "RATE_OF_CHANGE",
+            "direction": "SIDEWAYS",
+            "mg_dl_per_min": 2,
+            "within_minutes": 15,
+        },
         {"op": "ALL_OF", "children": []},
-        {"op": "XOR", "children": [{"kind": "THRESHOLD", "comparator": "LT", "value_mg_dl": 70}]},
+        {
+            "op": "XOR",
+            "children": [{"kind": "THRESHOLD", "comparator": "LT", "value_mg_dl": 70}],
+        },
         {"kind": "THRESHOLD", "comparator": "LT", "value_mg_dl": "NaN"},
     ],
 )
@@ -136,7 +157,11 @@ def test_refuses_malformed_definitions(definition: dict[str, object]) -> None:
 
 
 def test_refuses_a_tree_deeper_than_the_limit() -> None:
-    node: dict[str, object] = {"kind": "THRESHOLD", "comparator": "LT", "value_mg_dl": 70}
+    node: dict[str, object] = {
+        "kind": "THRESHOLD",
+        "comparator": "LT",
+        "value_mg_dl": 70,
+    }
     for _ in range(6):
         node = {"op": "ALL_OF", "children": [node]}
 

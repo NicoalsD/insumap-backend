@@ -4,7 +4,10 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from insumap.application.alerts.evaluation import EvaluateAlertRulesOnReading, effective_rules
+from insumap.application.alerts.evaluation import (
+    EvaluateAlertRulesOnReading,
+    effective_rules,
+)
 from insumap.domain.alerts.alert import (
     AlertPriority,
     AlertRuleVersion,

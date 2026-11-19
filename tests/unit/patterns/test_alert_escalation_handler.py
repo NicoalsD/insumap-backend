@@ -42,7 +42,7 @@ def test_a_level_without_recipients_passes_to_the_next_one() -> None:
     )
 
     assert outcome is not None
-    assert outcome.level == 2  # noqa: PLR2004 - the care team link
+    assert outcome.level == 2
     assert outcome.recipients == (TEAM,)
 
 
