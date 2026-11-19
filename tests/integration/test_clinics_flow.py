@@ -230,3 +230,25 @@ def test_rls_shows_a_clinic_admin_only_its_own_clinic(
         ]
 
     assert visible == [demo_world.clinic_id]
+
+
+def test_patch_writes_the_fields_and_bumps_the_lock_version(
+    api: TestClient,
+    platform: dict[str, str],
+    demo_world: DemoWorld,
+    migrated_url: str,
+) -> None:
+    response = api.patch(
+        f"{BASE}/{demo_world.clinic_id}",
+        headers=platform,
+        json={"name": "Clínica Renovada", "timezone": "America/Lima", "is_demo": False},
+    )
+
+    assert response.status_code == 200, response.text
+    with psycopg.connect(migrated_url) as conn:
+        row = conn.execute(
+            "SELECT name, timezone, is_demo, lock_version, updated_at > created_at"
+            " FROM clinic.clinics WHERE id = %s",
+            (demo_world.clinic_id,),
+        ).fetchone()
+    assert row == ("Clínica Renovada", "America/Lima", False, 1, True)
