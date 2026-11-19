@@ -7,6 +7,7 @@ leaves its ``audit.data_access_log`` row inside that transaction (P09 over P11).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import final
 from uuid import UUID
@@ -26,6 +27,19 @@ from insumap.domain.common.errors import ResourceNotFoundError
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.treatment.plan import PlanStatus, TreatmentPlan
 from insumap.domain.treatment.template import ProtocolTemplate, TemplateStatus
+
+
+def _committed[T](uow: UnitOfWorkPort, actor: Actor, read: Callable[[], T]) -> T:
+    """Run a read and commit it.
+
+    A transaction that is not committed is rolled back, and so is the audit row
+    of a granted read (P09 writes it in the same transaction). Committing after
+    the read keeps the audit row, and it is written before the response.
+    """
+    with uow.begin(TransactionContext.for_actor(actor)) as unit:
+        result = read()
+        unit.commit()
+    return result
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -50,8 +64,9 @@ class ListProtocolTemplatesUseCase:
         self, actor: Actor, status: TemplateStatus | None, page: PageRequest
     ) -> Page[ProtocolTemplate]:
         actor.require(PermissionCode.PROTOCOL_TEMPLATES_READ)
-        with self._uow.begin(TransactionContext.for_actor(actor)):
-            return self._templates.list_latest(status, page)
+        return _committed(
+            self._uow, actor, lambda: self._templates.list_latest(status, page)
+        )
 
 
 @final
@@ -66,12 +81,15 @@ class GetProtocolTemplateUseCase:
 
     def execute(self, actor: Actor, template_id: UUID) -> ProtocolTemplateView:
         actor.require(PermissionCode.PROTOCOL_TEMPLATES_READ)
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+
+        def read() -> ProtocolTemplateView:
             template = self._templates.get(template_id)
             if template is None:
                 raise ResourceNotFoundError
             family = self._templates.family(template.clinic_id, template.code)
             return ProtocolTemplateView(template=template, versions=family)
+
+        return _committed(self._uow, actor, read)
 
 
 @final
@@ -97,7 +115,8 @@ class ListTreatmentPlansUseCase:
         page: PageRequest,
     ) -> Page[TreatmentPlan]:
         actor.require(PermissionCode.TREATMENT_PLANS_MANAGE)
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+
+        def read() -> Page[TreatmentPlan]:
             patient = self._gate.enter(
                 actor,
                 PermissionCode.TREATMENT_PLANS_MANAGE,
@@ -105,6 +124,8 @@ class ListTreatmentPlansUseCase:
                 DataResource.TREATMENT_PLAN,
             )
             return self._plans.list_for_patient(patient, status, page)
+
+        return _committed(self._uow, actor, read)
 
 
 @final
@@ -124,7 +145,8 @@ class GetTreatmentPlanUseCase:
 
     def execute(self, actor: Actor, plan_id: UUID) -> TreatmentPlan:
         actor.require(PermissionCode.TREATMENT_PLANS_MANAGE)
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+
+        def read() -> TreatmentPlan:
             plan = self._plans.get(plan_id)
             if plan is None:
                 raise ResourceNotFoundError
@@ -135,6 +157,8 @@ class GetTreatmentPlanUseCase:
                 DataResource.TREATMENT_PLAN,
             )
             return plan
+
+        return _committed(self._uow, actor, read)
 
 
 @final
@@ -158,7 +182,8 @@ class ListTreatmentPlanSnapshotsUseCase:
         self, actor: Actor, plan_id: UUID, page: PageRequest
     ) -> Page[StoredSnapshot]:
         actor.require(PermissionCode.TREATMENT_PLANS_MANAGE)
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+
+        def read() -> Page[StoredSnapshot]:
             plan = self._plans.get(plan_id)
             if plan is None:
                 raise ResourceNotFoundError
@@ -169,6 +194,8 @@ class ListTreatmentPlanSnapshotsUseCase:
                 DataResource.TREATMENT_PLAN,
             )
             return self._snapshots.list_for_plan(plan.plan_id, page)
+
+        return _committed(self._uow, actor, read)
 
 
 @final
@@ -190,9 +217,11 @@ class GetOwnTreatmentPlanUseCase:
         self._plans = plans
 
     def execute(self, actor: Actor) -> TreatmentPlan:
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+        def read() -> TreatmentPlan:
             scope = self._gate.enter(actor, PermissionCode.TREATMENT_PLANS_READ_OWN)
             plan = self._plans.active_for(scope.patient_id)
             if plan is None:
                 raise ResourceNotFoundError
             return plan
+
+        return _committed(self._uow, actor, read)
