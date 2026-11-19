@@ -422,7 +422,9 @@ Paciente de una clínica: identidad (clase C), documento cifrado y con hash para
 | `mrn` | `varchar(40)` | No |  | FieldLimits.MRN_MAX_LENGTH (propuesta) | Número de historia de la clínica. Clave de deduplicación (RF-19). |
 | `full_name` | `varchar(120)` | No |  | FieldLimits.PATIENT_FULL_NAME_MAX_LENGTH (propuesta; ejemplo de `configuration.md`) | Nombre completo (clase C). |
 | `birth_date` | `date` | No |  |  | Fecha de nacimiento. Obligatoria en la importación: es el segundo dato de la activación. |
-| `sex` | `varchar(7)` | No | `'UNKNOWN'` | CHECK IN ('FEMALE','MALE','OTHER','UNKNOWN') | Sexo administrativo (FHIR `Patient.gender`). |
+| `sex` | `varchar(7)` | No | `'UNKNOWN'` | CHECK IN ('FEMALE','MALE','OTHER','UNKNOWN') | Sexo administrativo (FHIR `Patient.gender`). También entra en la sugerencia de sitio de inyección (RF-101). |
+| `bmi` | `numeric(4,1)` | Sí |  | CHECK BETWEEN 10 AND 80 | Índice de masa corporal más reciente (de `Observation` FHIR o del CSV). Entra en la sugerencia de sitio de inyección (RF-101). |
+| `pregnancy_status` | `varchar(8)` | No | `'UNKNOWN'` | CHECK IN ('NONE','PREGNANT','UNKNOWN') | Embarazo vigente; la clínica lo actualiza. Excluye el centro del abdomen de la sugerencia de sitio (RF-101). |
 | `diabetes_type` | `varchar(5)` | No | `'OTHER'` | CHECK IN ('T1D','T2D','GDM','OTHER') | Tipo de diabetes (de `Condition` FHIR o del CSV). Selecciona la población del perfil de metas por defecto. |
 | `diagnosis_date` | `date` | Sí |  |  | Fecha de diagnóstico, si se conoce. |
 | `contact_email` | `varchar(254)` | Sí |  | FieldLimits.EMAIL_MAX_LENGTH | Correo de contacto traído de la importación (sin verificar, no único). El correo de login se fija al activar en `iam.users.email`. |
@@ -938,6 +940,8 @@ Dosis de insulina registradas por el paciente (nunca sugeridas por la app). Appe
 | `product_name` | `varchar(80)` | No |  | FieldLimits.INSULIN_PRODUCT_NAME_MAX_LENGTH (propuesta) | Producto. |
 | `units` | `numeric(6,2)` | No |  | CHECK > 0 | Unidades de insulina. El límite técnico lo valida `FieldLimits`. |
 | `plan_id` | `uuid` | Sí |  | FK care.treatment_plans(id) | Plan activo al registrar, si existe. |
+| `injection_site` | `varchar(14)` | Sí |  | CHECK IN ('ABDOMEN_RIGHT','ABDOMEN_LEFT','THIGH_RIGHT','THIGH_LEFT','ARM_RIGHT','ARM_LEFT','BUTTOCK_RIGHT','BUTTOCK_LEFT') | Sitio de inyección elegido por el paciente (RF-101). Derecha e izquierda del paciente. |
+| `injection_spot` | `smallint` | Sí |  | CHECK BETWEEN 1 AND 4; NULL si `injection_site` es nulo | Punto dentro del sitio, para rotarlo. |
 | `source` | `varchar(6)` | No | `'MANUAL'` | CHECK IN ('MANUAL','IMPORT') | Origen. |
 | `note` | `varchar(500)` | Sí |  | FieldLimits.RECORD_NOTE_MAX_LENGTH (propuesta) | Nota breve. |
 | `recorded_by` | `uuid` | No |  | FK iam.users(id) | Cuenta que registró. |
@@ -1009,6 +1013,7 @@ Síntomas registrados desde el catálogo. Append-only con correcciones.
 | `occurred_at` | `timestamptz` | No |  |  | Momento del síntoma (UTC). |
 | `symptom_id` | `uuid` | No |  | FK care.symptom_catalog(id) | Síntoma del catálogo. Un evento de hipoglucemia nivel 3 reportado usa su entrada de catálogo. |
 | `note` | `varchar(500)` | Sí |  | FieldLimits.RECORD_NOTE_MAX_LENGTH (propuesta) | Texto libre acotado. |
+| `injection_site` | `varchar(14)` | Sí |  | Mismo CHECK que `monitoring.insulin_doses.injection_site`; obligatorio si el síntoma es `LIPOHYPERTROPHY` | Sitio afectado por la lipohipertrofia; la sugerencia lo excluye 90 días (RF-101). |
 | `recorded_by` | `uuid` | No |  | FK iam.users(id) | Cuenta que registró. |
 | `sync_batch_id` | `uuid` | Sí |  | FK monitoring.sync_batches(id) DEFERRABLE INITIALLY DEFERRED | Lote de origen. |
 | `received_at` | `timestamptz` | No | `now()` |  | Recepción. |

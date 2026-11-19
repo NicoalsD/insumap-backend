@@ -25,7 +25,7 @@ Este documento lista los requisitos funcionales (RF) y no funcionales (RNF) de I
 | M2 Clínicas y usuarios | RF-09 a RF-15 | 7 |
 | M3 Onboarding y credenciales | RF-16 a RF-26 | 11 |
 | M4 Equipo de atención | RF-27 a RF-30 | 4 |
-| M5 Registros del paciente | RF-31 a RF-42 | 12 |
+| M5 Registros del paciente | RF-31 a RF-42 y RF-101 | 13 |
 | M6 Plan de tratamiento | RF-43 a RF-50 | 8 |
 | M7 Métricas glucémicas | RF-51 a RF-55 | 5 |
 | M8 Alertas y notificaciones | RF-56 a RF-65 | 10 |
@@ -34,7 +34,7 @@ Este documento lista los requisitos funcionales (RF) y no funcionales (RNF) de I
 | M11 Mensajería y seguimiento | RF-84 a RF-87 | 4 |
 | M12 Auditoría y cumplimiento | RF-88 a RF-95 | 8 |
 | M13 Datos simulados | RF-96 a RF-100 | 5 |
-| **Total** | **RF-01 a RF-100** | **100** |
+| **Total** | **RF-01 a RF-101** | **101** |
 
 ### M1 Identidad y acceso
 
@@ -102,6 +102,7 @@ Este documento lista los requisitos funcionales (RF) y no funcionales (RNF) de I
 | RF-40 | El sistema ofrece una línea de tiempo unificada de glucosa, dosis, comidas, actividad y síntomas ordenada por hora. | MVP | La misma colección se exporta a vista de línea de tiempo, CSV y FHIR sin duplicar lógica. | HU-22 | B, F |
 | RF-41 | El paciente importa lecturas de un CGM mediante un CSV de exportación del fabricante. | MVP | El adaptador reconoce los formatos soportados y rechaza los desconocidos con la lista de formatos admitidos. | HU-23 | B, F |
 | RF-42 | El paciente ve sus gráficas de glucosa por día, semana y quincena con su rango objetivo. | MVP | La gráfica usa las metas del perfil asignado, es legible en escritorio (1280 a 1920 px) y, como criterio secundario, en pantallas de 360 px de ancho. | HU-22 | F, B |
+| RF-101 | La app le indica al paciente en qué sitio inyectarse y lo muestra sobre un cuerpo 3D. La sugerencia es una regla determinista (no una IA) que usa el plan activo (sitios permitidos por ítem), el tipo de insulina, el sexo, la edad, el IMC, el embarazo, los sitios usados recientemente y los síntomas de lipohipertrofia. Rota el sitio y el punto dentro del sitio. Nunca calcula ni sugiere unidades. | MVP | Un bolo sugiere abdomen y una basal muslo o glúteo; el sitio usado en las últimas 24 h (rápida) o 72 h (basal) no se repite; una paciente embarazada no recibe el centro del abdomen; un sitio con lipohipertrofia reportada en 90 días queda excluido; un plan que restringe sitios se respeta; la respuesta trae el motivo de cada sitio. | HU-17, HU-57 | B, F |
 
 ### M6 Plan de tratamiento
 
