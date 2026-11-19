@@ -108,8 +108,8 @@ class FieldLimits:
 
     # Requests and pagination.
 
-    MAX_REQUEST_BODY_BYTES: ClassVar[int] = 1024 * 1024
-    """Maximum size of a request body, in bytes (1 MiB)."""
+    MAX_REQUEST_BODY_BYTES: ClassVar[int] = 64 * 1024
+    """General maximum size of a request body, in bytes (64 KiB; Seguridad 13.3)."""
 
     PAGE_SIZE_DEFAULT: ClassVar[int] = 20
     """Page size used when the client does not ask for one."""

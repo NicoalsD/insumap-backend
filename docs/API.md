@@ -157,7 +157,7 @@ Al excederlos: `429 RATE_LIMITED` con `Retry-After`, o `413 PAYLOAD_TOO_LARGE`. 
 
 | Límite de tamaño | Valor |
 |---|---|
-| Cuerpo JSON general | `FieldLimits.MAX_REQUEST_BODY_BYTES` (1 MiB en el código; la política pide 64 KiB, G5) |
+| Cuerpo JSON general | `FieldLimits.MAX_REQUEST_BODY_BYTES` (64 KiB) |
 | Lote de lecturas offline | 512 KiB y 500 elementos |
 | Bundle FHIR R4 | 10 MiB, 5.000 entradas y 32 niveles de profundidad |
 | CSV de pacientes | 2 MiB, 5.000 filas, 40 columnas y 1.000 caracteres por celda |
@@ -1595,7 +1595,7 @@ Cada fila es algo que falta o que no coincide. Esta tabla es la lista de trabajo
 | G2 | Estado de `VALIDATION_ERROR` | Las historias de usuario dicen `400`. `Seguridad.md`, `Arquitectura.md`, `AGENTS.md` y el código dicen `422`. | `422` | Documentación de historias |
 | G3 | Forma del cuerpo de error | Las historias (convenciones) dicen `{"error": {"code", "message", "details", "request_id"}}`. `AGENTS.md`, `Arquitectura.md` y el código dicen `detail` y el `request_id` solo en la cabecera `X-Request-ID`. | `detail` y cabecera | Documentación de historias |
 | G4 | Elemento de `detail.errors` | El código emite `field` y `type`. `api-documentation.md` propone `field` y `message`. `Seguridad.md` (decisión 17) propone agregar `code`. | Se documenta lo que emite el código | Drako Salazar (cambio en `api.errors` y en la guía) |
-| G5 | Tamaño del cuerpo | `Seguridad.md` dice 64 KiB (`BODY_MAX_BYTES`), `Arquitectura.md` usa `MAX_JSON_BODY_BYTES` y el código usa `MAX_REQUEST_BODY_BYTES` de 1 MiB. Los límites de importación (hasta 10 MiB) y de lotes superan el global, y `BodySizeLimitMiddleware` hoy los bloquearía. | 1 MiB global y excepción por ruta para importaciones y lotes | Drako Salazar |
+| G5 | Tamaño del cuerpo | `Seguridad.md` dice 64 KiB (`BODY_MAX_BYTES`), `Arquitectura.md` usa `MAX_JSON_BODY_BYTES` y el código usa `MAX_REQUEST_BODY_BYTES`, ya en 64 KiB. Los límites de importación (hasta 10 MiB) y de lotes superan el global, y `BodySizeLimitMiddleware` hoy los bloquearía. | 64 KiB global y tope propio por ruta (`path_limits`) para importaciones, `readings/batch` y `readings/cgm-import` | Drako Salazar |
 | G6 | Marca de datos simulados | `RF-96` y `HU-55`: `simulated: true`. `Arquitectura.md`: `data_source = "SIMULATED"`. `Datos-simulados.md`: `is_demo` y el texto "Datos simulados". | `simulated` en toda respuesta; `is_demo` en la clínica; `data_source` solo se menciona en el expediente. Elegir uno. | Nicolas Diaz |
 | G7 | Campos de una lectura de glucosa | `Arquitectura.md` (paso 4) usa `value` y `unit`. El ejemplo de `api-documentation.md` usa `value_mg_dl`. HU-15 exige aceptar mmol/L. | Entrada `value` y `unit`; salida `value_mg_dl` | Nicolas Mora |
 | G8 | Enumeraciones sin definir | Contexto de la glucosa (RF-31 lista valores sueltos), tipo de comida, tipo e intensidad de la actividad y tipo de recordatorio. Solo `FASTING` y `POST_MEAL` aparecen en `Metricas-clinicas.md`. | "Por definir" | Nicolas Mora |

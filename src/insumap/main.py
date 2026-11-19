@@ -31,8 +31,10 @@ CORS_EXPOSED_HEADERS: Final = [REQUEST_ID_HEADER, RETRY_AFTER_HEADER]
 IMPORT_BODY_LIMITS: Final = {
     f"{API_V1_PREFIX}/imports/fhir": FieldLimits.FHIR_BUNDLE_MAX_BYTES,
     f"{API_V1_PREFIX}/imports/csv": FieldLimits.PATIENT_CSV_MAX_BYTES,
+    f"{API_V1_PREFIX}/readings/batch": FieldLimits.READINGS_BATCH_MAX_BYTES,
+    f"{API_V1_PREFIX}/readings/cgm-import": FieldLimits.CGM_CSV_MAX_BYTES,
 }
-"""Body size of the import routes, which read raw bodies (API.md 5)."""
+"""Own body size of the routes that exceed the general limit (API.md 5)."""
 
 
 def create_app(container: Container | None = None) -> FastAPI:
