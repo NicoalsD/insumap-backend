@@ -46,5 +46,16 @@
   "notification.message_received.title": "Nuevo mensaje en Insumap",
   "notification.message_received.body": "Tienes un mensaje nuevo en Insumap. Ábrelo para leerlo.",
   "notification.message_received.external": "Tienes un mensaje nuevo en Insumap. Inicia sesión para leerlo.",
-  "follow_up.control_title": "Control de seguimiento"
+  "follow_up.control_title": "Control de seguimiento",
+  "ai.suggestion.label": "Sugerencia de la IA: el médico decide si la usa.",
+  "ai.summary.label": "Generado con IA como apoyo; verifica con los datos.",
+  "ai.summary.template.label": "Resumen generado con la plantilla fija; verifica con los datos.",
+  "ai.summary.period.title": "Resumen del periodo",
+  "ai.summary.period.text": "TIR {tir_pct} % (meta {target_pct} %). GMI {gmi_pct} %. Episodios de hipoglucemia: {hypo_events}.",
+  "ai.summary.adherence.title": "Registro",
+  "ai.summary.adherence.text": "Promedio de {readings_per_day} lecturas por día.",
+  "ai.summary.insufficient": "Datos insuficientes para resumir el periodo.",
+  "ai.risk.rules_summary": "{breaches} de {evaluated} indicadores fuera de meta en los últimos {days} días.",
+  "ai.risk.insufficient": "Datos insuficientes para calcular el riesgo en esta ventana.",
+  "ai.assistant.fallback_reply": "No tengo información aprobada sobre eso. Consulta a tu equipo de atención. Si tienes síntomas de alarma, como confusión, desmayo o convulsión, llama a emergencias de inmediato."
 }

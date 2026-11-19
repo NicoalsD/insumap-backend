@@ -123,6 +123,15 @@ class Settings(BaseSettings):
     """API.md 8.8 says 3 s and Contrato-IA.md 3.2 says 5 s; the lower one is used."""
     ai_circuit_failure_threshold: int = Field(default=5, ge=1)
     ai_circuit_open_seconds: float = Field(default=30.0, gt=0)
+    ai_timeout_risk_seconds: float = Field(default=3.0, gt=0)
+    ai_timeout_summary_seconds: float = Field(default=30.0, gt=0)
+    ai_timeout_assistant_seconds: float = Field(default=20.0, gt=0)
+    """Contrato-IA.md 3.2: the summary and the assistant wait longer (LLM)."""
+    llm_real_data_allowed: bool = False
+    """``LLM_REAL_DATA_ALLOWED``: a non demo clinic gets the template unless true."""
+    rate_limit_assistant_per_patient_per_hour: int = Field(default=20, ge=1)
+    rate_limit_assistant_per_patient_per_day: int = Field(default=100, ge=1)
+    rate_limit_summary_per_doctor_per_hour: int = Field(default=30, ge=1)
 
     # Web Push endpoints the browser may register (Seguridad.md 13.4). Hosts
     # only, no scheme; ``*.`` matches any subdomain. Not a secret.
