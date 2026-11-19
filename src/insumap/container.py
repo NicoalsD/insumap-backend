@@ -15,7 +15,9 @@ from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.meta import MetaRouter
 from insumap.api.routers.metrics import MetricsRouter
 from insumap.api.routers.records import RecordsRouter
+from insumap.api.routers.reminders import ReminderRouter
 from insumap.api.routers.sites import SiteRouter
+from insumap.api.routers.targets import TargetProfileRouter
 from insumap.api.routers.users import UserRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
 from insumap.application.care_team.commands import (
@@ -146,6 +148,18 @@ from insumap.application.readiness import (
     CheckReadinessUseCase,
     ReadinessProbe,
 )
+from insumap.application.reminders.commands import (
+    CreateReminderCommand,
+    CreateReminderCommandHandler,
+    UpdateOwnReminderCommand,
+    UpdateOwnReminderCommandHandler,
+    UpdatePatientReminderCommand,
+    UpdatePatientReminderCommandHandler,
+)
+from insumap.application.reminders.queries import (
+    ListOwnRemindersUseCase,
+    ListPatientRemindersUseCase,
+)
 from insumap.application.security.rate_limit import RateLimitCheck, RateLimitRule
 from insumap.application.sites.commands import (
     CreateSiteCommand,
@@ -156,6 +170,18 @@ from insumap.application.sites.commands import (
     UpdateSiteCommandHandler,
 )
 from insumap.application.sites.list_sites import ListSitesUseCase
+from insumap.application.targets.commands import (
+    AssignTargetProfileCommand,
+    AssignTargetProfileCommandHandler,
+    CreateTargetProfileCommand,
+    CreateTargetProfileCommandHandler,
+    CreateTargetProfileVersionCommand,
+    CreateTargetProfileVersionCommandHandler,
+)
+from insumap.application.targets.queries import (
+    GetTargetProfileUseCase,
+    ListTargetProfilesUseCase,
+)
 from insumap.application.users.commands import (
     CreateStaffUserCommand,
     CreateStaffUserCommandHandler,
@@ -192,6 +218,10 @@ from insumap.infrastructure.platform_adapters import (
     PlatformAdapters,
     build_platform_adapters,
 )
+from insumap.infrastructure.targets_adapters import (
+    TargetsAdapters,
+    build_targets_adapters,
+)
 from insumap.shared.config import Settings, get_settings
 from insumap.shared.field_limits import FieldLimits
 from insumap.shared.i18n import MessageCatalog
@@ -221,6 +251,12 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     DeactivateStaffUserCommand,
     UnlockStaffUserCommand,
     ResetStaffMfaCommand,
+    CreateTargetProfileCommand,
+    CreateTargetProfileVersionCommand,
+    AssignTargetProfileCommand,
+    CreateReminderCommand,
+    UpdatePatientReminderCommand,
+    UpdateOwnReminderCommand,
 )
 """Every command of the API: a missing handler fails when the container is built."""
 
@@ -292,6 +328,7 @@ class Container:
         event_publisher: DomainEventPublisher | None = None,
         platform_adapters: PlatformAdapters | None = None,
         monitoring_adapters: MonitoringAdapters | None = None,
+        targets_adapters: TargetsAdapters | None = None,
         email_channel: NotificationChannel | None = None,
     ) -> None:
         self.settings: Settings = settings or get_settings()
@@ -323,6 +360,7 @@ class Container:
             current=current,
             app_hmac_key=decode_key(self.settings.app_hmac_key.get_secret_value()),
         )
+        targets = targets_adapters or build_targets_adapters(current=current)
         monitoring = monitoring_adapters or build_monitoring_adapters(
             current=current,
             clock=self.clock,
@@ -344,6 +382,7 @@ class Container:
             *self._clinic_commands(adapters, platform),
             *self._site_commands(adapters, platform),
             *self._users_commands(adapters, platform, unit_of_work),
+            *self._targets_commands(adapters, monitoring, targets),
         ]
         self.command_bus: CommandBus = InMemoryCommandBus(
             registrations, required=ALL_COMMAND_TYPES
@@ -388,6 +427,12 @@ class Container:
         )
         self.records_router = self._build_records_router(adapters, monitoring)
         self.metrics_router = self._build_metrics_router(adapters, monitoring)
+        self.target_profile_router = self._build_target_profile_router(
+            adapters, targets
+        )
+        self.reminder_router = self._build_reminder_router(
+            adapters, monitoring, targets
+        )
 
     def _build_identity_services(
         self, adapters: IdentityAdapters, platform: PlatformAdapters
@@ -1071,6 +1116,107 @@ class Container:
                 series=monitoring.series,
                 forecasts=monitoring.forecasts,
                 clock=clock,
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _targets_commands(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        targets: TargetsAdapters,
+    ) -> list[Registration]:
+        """Goals and reminders decisions (P13), each behind transaction and audit."""
+        guard, clock, ids = self._command_guard, self.clock, adapters.ids
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        own = OwnPatientGate(adapters.consents)
+        catalog, reminders = targets.catalog, targets.reminders
+        return [
+            bind(
+                CreateTargetProfileCommand,
+                guard.wrap(
+                    CreateTargetProfileCommandHandler(
+                        catalog=catalog, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                CreateTargetProfileVersionCommand,
+                guard.wrap(
+                    CreateTargetProfileVersionCommandHandler(
+                        catalog=catalog, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                AssignTargetProfileCommand,
+                guard.wrap(
+                    AssignTargetProfileCommandHandler(
+                        gate=assigned,
+                        catalog=catalog,
+                        assignments=targets.assignments,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                CreateReminderCommand,
+                guard.wrap(
+                    CreateReminderCommandHandler(
+                        gate=assigned, reminders=reminders, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                UpdatePatientReminderCommand,
+                guard.wrap(
+                    UpdatePatientReminderCommandHandler(
+                        gate=assigned, reminders=reminders, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                UpdateOwnReminderCommand,
+                guard.wrap(
+                    UpdateOwnReminderCommandHandler(
+                        gate=own, reminders=reminders, clock=clock
+                    )
+                ),
+            ),
+        ]
+
+    def _build_target_profile_router(
+        self, adapters: IdentityAdapters, targets: TargetsAdapters
+    ) -> TargetProfileRouter:
+        """Wire the goals catalog, the versions and the assignment (API.md 8.7)."""
+        uow = adapters.unit_of_work
+        return TargetProfileRouter(
+            commands=self.command_bus,
+            list_profiles=ListTargetProfilesUseCase(uow=uow, catalog=targets.catalog),
+            get_profile=GetTargetProfileUseCase(uow=uow, catalog=targets.catalog),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_reminder_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        targets: TargetsAdapters,
+    ) -> ReminderRouter:
+        """Wire the reminders of the doctor (assigned) and of the patient (own)."""
+        uow = adapters.unit_of_work
+        return ReminderRouter(
+            commands=self.command_bus,
+            list_patient=ListPatientRemindersUseCase(
+                uow=uow,
+                gate=AssignedPatientGate(monitoring.patient_records),
+                reminders=targets.reminders,
+            ),
+            list_own=ListOwnRemindersUseCase(
+                uow=uow,
+                gate=OwnPatientGate(adapters.consents),
+                reminders=targets.reminders,
             ),
             session_actor=self.full_session_actor,
         )
