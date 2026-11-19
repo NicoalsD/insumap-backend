@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 from typing import override
 from uuid import UUID
 
-from insumap.application.access.ports import AccessPurpose, DataAccessOutcome, DataResource
+from insumap.application.access.ports import (
+    AccessPurpose,
+    DataAccessOutcome,
+    DataResource,
+)
 from insumap.application.audit.ports import (
     AuditChainPort,
     AuditLogFilter,
@@ -90,7 +94,9 @@ class FakeSecurityEvents(SecurityEventReadPort):
             rows[key]
             for key in _newest(list(rows), page)
             if (filters.clinic_id is None or rows[key].clinic_id == filters.clinic_id)
-            and (filters.event_type is None or rows[key].event_type == filters.event_type)
+            and (
+                filters.event_type is None or rows[key].event_type == filters.event_type
+            )
             and (filters.severity is None or rows[key].severity == filters.severity)
         ]
         return build_page(selected, limit=page.limit, key=lambda r: r.id)

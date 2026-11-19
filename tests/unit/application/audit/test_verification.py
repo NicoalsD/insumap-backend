@@ -63,7 +63,9 @@ def test_a_broken_chain_reports_the_row_and_records_a_critical_event(
 
     assert not result.is_valid
     assert result.first_inconsistent_row_id == BROKEN
-    assert [e.event_type for e in events.events] == [SecurityEventType.AUDIT_CHAIN_BROKEN]
+    assert [e.event_type for e in events.events] == [
+        SecurityEventType.AUDIT_CHAIN_BROKEN
+    ]
     assert events.events[0].clinic_id == CLINIC_ID
     assert events.events[0].user_id == ADMIN_ID
     assert uow.commits == 1
