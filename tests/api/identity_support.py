@@ -10,10 +10,12 @@ from insumap.application.identity.second_factor import totp_secret_binding
 from insumap.container import Container
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
+from insumap.infrastructure.clinic_admin_adapters import ClinicAdminAdapters
 from insumap.infrastructure.platform_adapters import PlatformAdapters
 from insumap.main import create_app
 from tests.support.access_fakes import FakeDirectory
 from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
+from tests.support.clinic_admin_fakes import FakeClinicAdminProvisioning
 from tests.support.clinic_fakes import FakeClinics
 from tests.support.commands import InMemoryAuditLog
 from tests.support.identity_fakes import VALID_TOTP
@@ -58,6 +60,7 @@ class IdentityApi:
         self.staff_directory = FakeStaffDirectory(self.world.users, self.world.factors)
         self.staff_invitations = FakeStaffInvitations()
         self.login_lockouts = FakeLoginLockouts()
+        self.clinic_admins = FakeClinicAdminProvisioning()
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -78,6 +81,7 @@ class IdentityApi:
                 activation_codes=FakeActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
+            clinic_admin_adapters=ClinicAdminAdapters(provisioning=self.clinic_admins),
         )
         self.app = create_app(container)
         self.client = TestClient(
