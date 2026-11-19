@@ -115,6 +115,28 @@ def _patient(
     )
 
 
+def add_imported_patient(
+    conn: psycopg.Connection,
+    clinic_id: UUID,
+    mrn: str,
+    full_name: str,
+    birth_date: date,
+    contact_email: str | None,
+) -> tuple[UUID, UUID]:
+    """An imported patient: account ``IMPORTED`` with no password.
+
+    Returns ``(user_id, patient_id)``. The caller's transaction commits it.
+    """
+    user_id = _user(conn, None, None, "IMPORTED")
+    _membership(conn, user_id, clinic_id, "PATIENT")
+    patient_id = _patient(conn, clinic_id, user_id, mrn, full_name, birth_date)
+    conn.execute(
+        "UPDATE clinic.patients SET contact_email = %s WHERE id = %s",
+        (contact_email, patient_id),
+    )
+    return user_id, patient_id
+
+
 def seed_demo_world(conn: psycopg.Connection, settings: Settings) -> DemoWorld:
     """Insert a demo clinic, three active accounts and one pending invitation."""
     hasher = Argon2PasswordHasher(
