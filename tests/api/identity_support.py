@@ -10,12 +10,14 @@ from insumap.application.identity.second_factor import totp_secret_binding
 from insumap.container import Container
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
+from insumap.infrastructure.clinic_admin_adapters import ClinicAdminAdapters
 from insumap.infrastructure.credentials_adapters import CredentialsAdapters
 from insumap.infrastructure.patient_adapters import PatientAdapters
 from insumap.infrastructure.platform_adapters import PlatformAdapters
 from insumap.main import create_app
 from tests.support.access_fakes import FakeDirectory, InMemoryDataAccessLog
 from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
+from tests.support.clinic_admin_fakes import FakeClinicAdminProvisioning
 from tests.support.clinic_fakes import FakeClinics
 from tests.support.commands import InMemoryAuditLog
 from tests.support.credentials_fakes import (
@@ -67,6 +69,7 @@ class IdentityApi:
         self.staff_directory = FakeStaffDirectory(self.world.users, self.world.factors)
         self.staff_invitations = FakeStaffInvitations()
         self.login_lockouts = FakeLoginLockouts()
+        self.clinic_admins = FakeClinicAdminProvisioning()
         self.patient_roster = FakePatientRoster(
             users=self.world.users, user_of={PATIENT_ID: PATIENT_USER}
         )
@@ -94,6 +97,7 @@ class IdentityApi:
                 activation_codes=DistinctActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
+            clinic_admin_adapters=ClinicAdminAdapters(provisioning=self.clinic_admins),
             patient_adapters=PatientAdapters(
                 roster=self.patient_roster,
                 invitations=self.patient_invitations,

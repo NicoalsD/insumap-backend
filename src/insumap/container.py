@@ -33,6 +33,10 @@ from insumap.application.care_team.commands import (
 from insumap.application.care_team.list_assignments import (
     ListCareTeamAssignmentsUseCase,
 )
+from insumap.application.clinic_admins.commands import (
+    CreateClinicAdminCommand,
+    CreateClinicAdminCommandHandler,
+)
 from insumap.application.clinics.commands import (
     CreateClinicCommand,
     CreateClinicCommandHandler,
@@ -198,6 +202,10 @@ from insumap.domain.identity.password_policy import PasswordPolicy
 from insumap.domain.identity.refresh_token import RefreshTokenLifetime
 from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistry
 from insumap.domain.monitoring.validation import build_validation_chain
+from insumap.infrastructure.clinic_admin_adapters import (
+    ClinicAdminAdapters,
+    build_clinic_admin_adapters,
+)
 from insumap.infrastructure.credentials_adapters import (
     CredentialsAdapters,
     build_credentials_adapters,
@@ -254,6 +262,7 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     DeactivateStaffUserCommand,
     UnlockStaffUserCommand,
     ResetStaffMfaCommand,
+    CreateClinicAdminCommand,
     SuspendPatientCommand,
     ReactivatePatientCommand,
     DeactivatePatientCommand,
@@ -332,6 +341,7 @@ class Container:
         monitoring_adapters: MonitoringAdapters | None = None,
         credentials_adapters: CredentialsAdapters | None = None,
         email_channel: NotificationChannel | None = None,
+        clinic_admin_adapters: ClinicAdminAdapters | None = None,
         patient_adapters: PatientAdapters | None = None,
     ) -> None:
         self.settings: Settings = settings or get_settings()
@@ -371,6 +381,9 @@ class Container:
         patient_ports = patient_adapters or build_patient_adapters(
             current=current, transactions=SqlTransactionFactory(engine, current)
         )
+        clinic_admins = clinic_admin_adapters or build_clinic_admin_adapters(
+            current=current
+        )
         if email_channel is not None:
             platform = replace(platform, email_channel=email_channel)
         credentials = credentials_adapters or build_credentials_adapters(
@@ -390,6 +403,9 @@ class Container:
             *self._clinic_commands(adapters, platform),
             *self._site_commands(adapters, platform),
             *self._users_commands(adapters, platform, unit_of_work),
+            *self._clinic_admin_commands(
+                adapters, platform, clinic_admins, unit_of_work
+            ),
             *self._patient_commands(adapters, platform, patient_ports),
             *self._credential_commands(adapters, platform, unit_of_work, credentials),
         ]
@@ -632,6 +648,36 @@ class Container:
                 ReactivateClinicCommand,
                 guard.wrap(
                     ReactivateClinicCommandHandler(clinics=clinics, clock=clock)
+                ),
+            ),
+        ]
+
+    def _clinic_admin_commands(
+        self,
+        adapters: IdentityAdapters,
+        platform: PlatformAdapters,
+        clinic_admins: ClinicAdminAdapters,
+        current: CurrentUnitOfWork,
+    ) -> list[Registration]:
+        """Clinic administrator decisions (P13), behind transaction and audit (P09)."""
+        guard, clock = self._command_guard, self.clock
+        return [
+            bind(
+                CreateClinicAdminCommand,
+                guard.wrap(
+                    CreateClinicAdminCommandHandler(
+                        clinics=platform.clinics,
+                        provisioning=clinic_admins.provisioning,
+                        codes=platform.activation_codes,
+                        code_hasher=adapters.code_hasher,
+                        channel=platform.email_channel,
+                        messages=self.message_catalog,
+                        clock=clock,
+                        current=current,
+                        invitation_ttl=timedelta(
+                            days=self.settings.staff_invitation_days
+                        ),
+                    )
                 ),
             ),
         ]
