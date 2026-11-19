@@ -51,8 +51,7 @@ from insumap.application.security.events import SecuritySeverity
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.shared.field_limits import FieldLimits
 
-AUDIT_LOG_PREFIX: Final = f"{API_V1_PREFIX}/audit-log"
-SECURITY_EVENTS_PREFIX: Final = f"{API_V1_PREFIX}/security-events"
+AUDIT_PREFIX: Final = API_V1_PREFIX
 
 
 class AuditLogResponse(BaseModel):
@@ -186,13 +185,19 @@ class AuditRouter:
         self._list_security_events = list_security_events
         self._verify_chain = verify_chain
         self._session_actor = session_actor
-        self.router = APIRouter(tags=[ApiTag.AUDIT])
+        self.router = APIRouter(prefix=AUDIT_PREFIX, tags=[ApiTag.AUDIT])
         self._add_routes()
 
     def _add_routes(self) -> None:
         add = self.router.add_api_route
         session = Depends(self._session_actor)
         read = {ACCESS_EXTENSION: access(PermissionCode.AUDIT_READ)}
+        events_read = {
+            ACCESS_EXTENSION: (
+                f"{access(PermissionCode.AUDIT_READ)}|"
+                f"{access(PermissionCode.AUDIT_READ_PLATFORM)}"
+            )
+        }
 
         def list_audit_log(
             actor: Annotated[Actor, session],
@@ -339,5 +344,5 @@ class AuditRouter:
                 "secretos ni la IP completa."
             ),
             responses=AUDIT_READ_ERRORS,
-            openapi_extra=read,
+            openapi_extra=events_read,
         )
