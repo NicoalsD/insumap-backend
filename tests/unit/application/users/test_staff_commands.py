@@ -548,3 +548,21 @@ def test_get_shows_the_mfa_state_and_hides_other_clinics_and_patients() -> None:
     for hidden in (OUTSIDE_DOCTOR, PATIENT, MISSING):
         with pytest.raises(ResourceNotFoundError):
             use_case.execute(GetStaffInput(actor=admin_actor(), user_id=hidden))
+
+
+def test_a_caller_without_a_clinic_manages_no_staff() -> None:
+    staff = Staff()
+    platform_admin = Actor(
+        user_id=ADMIN,
+        clinic_id=None,
+        role=Role.PLATFORM_ADMIN,
+        permissions=ADMIN_PERMISSIONS,
+    )
+    use_case = ListStaffUseCase(uow=staff.uow, directory=staff.directory)
+
+    with pytest.raises(PermissionDeniedError):
+        use_case.execute(
+            ListStaffInput(
+                actor=platform_admin, filters=StaffFilter(), page=PageRequest(limit=10)
+            )
+        )
