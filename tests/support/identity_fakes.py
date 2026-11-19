@@ -395,6 +395,7 @@ class FakeActivations(ActivationRepositoryPort):
         self.by_hash: dict[str, CredentialInvitation] = {}
         self.invitations: dict[UUID, CredentialInvitation] = {}
         self.profiles: dict[UUID, ActivationProfile] = {}
+        self.clinic_names: dict[UUID, str] = {}
 
     def add(self, code_hash: str, invitation: CredentialInvitation) -> None:
         self.by_hash[code_hash] = invitation
@@ -418,6 +419,9 @@ class FakeActivations(ActivationRepositoryPort):
 
     def activation_profile(self, patient_id: UUID) -> ActivationProfile | None:
         return self.profiles.get(patient_id)
+
+    def clinic_name(self, clinic_id: UUID) -> str | None:
+        return self.clinic_names.get(clinic_id)
 
 
 class FakeConsents(ConsentRepositoryPort):

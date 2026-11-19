@@ -90,6 +90,10 @@ ENROLLING_DOCTOR = UUID(int=31)
 INVITED_USER = UUID(int=40)
 INVITED_PATIENT = UUID(int=41)
 INVITATION_ID = UUID(int=50)
+STAFF_INVITED_USER = UUID(int=42)
+STAFF_INVITATION_ID = UUID(int=51)
+STAFF_CODE = "WXYZ-2345-6789-ABCD"
+STAFF_EMAIL = "nuevo.medico@example.test"
 NOTICE_ID = UUID(int=60)
 
 
@@ -189,6 +193,29 @@ class IdentityWorld:
                 failed_attempts=0,
             ),
         )
+        self.users.add(
+            make_account(
+                STAFF_INVITED_USER,
+                STAFF_EMAIL,
+                role=Role.DOCTOR,
+                status=AccountStatus.INVITED,
+                password=None,
+            )
+        )
+        self.activations.add(
+            "hmac-ACTIVATION-WXYZ23456789ABCD",
+            CredentialInvitation(
+                invitation_id=STAFF_INVITATION_ID,
+                user_id=STAFF_INVITED_USER,
+                clinic_id=CLINIC.clinic_id,
+                patient_id=None,
+                purpose=InvitationPurpose.STAFF_ACTIVATION,
+                status=InvitationStatus.PENDING,
+                expires_at=NOW + timedelta(days=7),
+                failed_attempts=0,
+            ),
+        )
+        self.activations.clinic_names[CLINIC.clinic_id] = CLINIC.name
         self.activations.profiles[INVITED_PATIENT] = ActivationProfile(
             patient_id=INVITED_PATIENT,
             clinic_name=CLINIC.name,
