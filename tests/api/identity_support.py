@@ -14,6 +14,7 @@ from insumap.infrastructure.platform_adapters import PlatformAdapters
 from insumap.main import create_app
 from tests.support.access_fakes import FakeDirectory
 from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
+from tests.support.clinic_fakes import FakeClinics
 from tests.support.commands import InMemoryAuditLog
 from tests.support.identity_fakes import VALID_TOTP
 from tests.support.identity_world import NOW, PASSWORD, IdentityWorld, make_account
@@ -35,6 +36,7 @@ class IdentityApi:
         self.care_teams = FakeCareTeams()
         self.patients = FakeDirectory()
         self.staff = FakeStaff()
+        self.clinics = FakeClinics()
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -46,6 +48,7 @@ class IdentityApi:
                 care_teams=self.care_teams,
                 patients=self.patients,
                 staff=self.staff,
+                clinics=self.clinics,
             ),
         )
         self.app = create_app(container)
