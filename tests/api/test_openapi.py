@@ -47,6 +47,8 @@ def test_tags_are_in_spanish_with_descriptions(document: dict[str, Any]) -> None
         "Salud",
         "Metadatos",
         "Autenticación",
+        "Registros del paciente",
+        "Métricas glucémicas",
     ]
     assert all(tag["description"] for tag in document["tags"])
 

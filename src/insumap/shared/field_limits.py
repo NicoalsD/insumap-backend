@@ -147,3 +147,6 @@ class FieldLimits:
 
     AGP_DAYS_MAX: ClassVar[int] = 90
     """Most days an AGP request may superimpose."""
+
+    CURSOR_MAX_LENGTH: ClassVar[int] = 512
+    """Maximum length of the opaque pagination cursor."""

@@ -9,3 +9,5 @@ class ApiTag(StrEnum):
     HEALTH = "Salud"
     META = "Metadatos"
     AUTH = "Autenticación"
+    RECORDS = "Registros del paciente"
+    METRICS = "Métricas glucémicas"

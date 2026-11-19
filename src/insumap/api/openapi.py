@@ -39,6 +39,21 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
             "sesión, y activación de cuentas con código de un solo uso."
         ),
     },
+    {
+        "name": ApiTag.RECORDS,
+        "description": (
+            "Glucosa, insulina, comidas, actividad, síntomas y laboratorio del "
+            "paciente, con correcciones que no borran, línea de tiempo y "
+            "exportación. El médico lee los de sus pacientes asignados."
+        ),
+    },
+    {
+        "name": ApiTag.METRICS,
+        "description": (
+            "TIR, TBR, TAR, GMI, CV y AGP con las metas del perfil asignado, y "
+            "pronóstico de glucosa con respaldo cuando la IA no responde."
+        ),
+    },
 ]
 
 
