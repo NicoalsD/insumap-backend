@@ -1,8 +1,7 @@
 """Clinic endpoints (API.md 8.3): create, read, update, suspend and reactivate.
 
-The first ``CLINIC_ADMIN`` of a clinic is created here too (``/admins``). The
-access reset of a clinic administrator is still pending: its database function
-does not return the e-mail of the holder, so the code cannot be sent.
+The first ``CLINIC_ADMIN`` of a clinic is created here too (``/admins``), and
+the platform resets the access of an administrator (``/admins/{user_id}/reset-access``).
 """
 
 from collections.abc import Callable
@@ -29,6 +28,7 @@ from insumap.api.tags import ApiTag
 from insumap.application.clinic_admins.commands import (
     CreateClinicAdminCommand,
     CreatedClinicAdmin,
+    ResetClinicAdminAccessCommand,
 )
 from insumap.application.clinics.commands import (
     CreateClinicCommand,
@@ -145,6 +145,15 @@ class SuspendClinicRequest(StrictRequest):
     reason: str | None = Field(
         default=None,
         description="Motivo de la suspensión, de 10 a 500 caracteres.",
+    )
+
+
+class ResetClinicAdminAccessRequest(StrictRequest):
+    """Why the access of the administrator is reset: 10 to 500 characters, audited."""
+
+    reason: str | None = Field(
+        default=None,
+        description="Motivo del restablecimiento, de 10 a 500 caracteres.",
     )
 
 
@@ -366,6 +375,22 @@ class ClinicRouter:
             response.headers[LOCATION_HEADER] = f"{USERS_LOCATION}/{created.user_id}"
             return CreatedClinicAdminResponse.of(created)
 
+        def reset_clinic_admin_access(
+            clinic_id: UUID,
+            user_id: UUID,
+            body: ResetClinicAdminAccessRequest,
+            actor: Annotated[Actor, staff],
+        ) -> Response:
+            self._commands.dispatch(
+                ResetClinicAdminAccessCommand(
+                    actor=actor,
+                    clinic_id=clinic_id,
+                    user_id=user_id,
+                    reason=body.reason,
+                )
+            )
+            return Response(status_code=HTTPStatus.NO_CONTENT)
+
         manage = {ACCESS_EXTENSION: access(PermissionCode.CLINICS_MANAGE)}
         manage_admins = {ACCESS_EXTENSION: access(PermissionCode.CLINIC_ADMINS_MANAGE)}
         read_own = {ACCESS_EXTENSION: access(PermissionCode.CLINICS_READ)}
@@ -477,6 +502,23 @@ class ClinicRouter:
                 "administrador debe activar la cuenta y enrolar MFA en su primer "
                 "ingreso. Un correo ya registrado responde `409`, igual que una "
                 "clínica suspendida."
+            ),
+            responses=CLINIC_CHANGE_ERRORS,
+            openapi_extra=manage_admins,
+        )
+        add(
+            "/{clinic_id}/admins/{user_id}/reset-access",
+            reset_clinic_admin_access,
+            methods=["POST"],
+            status_code=HTTPStatus.NO_CONTENT,
+            operation_id="reset_clinic_admin_access",
+            summary="Restablecer el acceso de un administrador de clínica",
+            description=(
+                "Cierra las sesiones y elimina el segundo factor del administrador, "
+                "y le envía una invitación nueva por correo. Exige un motivo de 10 a "
+                "500 caracteres, que queda en la auditoría. Nadie restablece su "
+                "propio acceso (`403`). Un administrador de otra clínica o inexistente "
+                "responde `404`; una cuenta suspendida o desactivada responde `409`."
             ),
             responses=CLINIC_CHANGE_ERRORS,
             openapi_extra=manage_admins,
