@@ -9,18 +9,16 @@ from sqlalchemy import text
 from insumap.application.commands.auditing import AuditEntry, AuditLogPort
 from insumap.infrastructure.persistence.transactions import CurrentSession
 
-ACTOR_TYPE_USER = "USER"
 APPEND_AUDIT_LOG = text(
     "SELECT audit.append_audit_log("
-    "p_clinic_id => :clinic_id, p_actor_user_id => :actor_user_id, "
-    "p_actor_role => :actor_role, p_actor_type => :actor_type, "
     "p_action => :action, p_entity_type => :entity_type, "
     "p_entity_id => :entity_id, p_reason => :reason, "
     "p_changed_fields => CAST(:changed_fields AS varchar[]), "
-    "p_request_id => :request_id)"
+    "p_request_id => :request_id, p_clinic_id => :clinic_id)"
 )
-"""Parameterized call. The argument names follow ``Diccionario-de-datos.md``
-(``audit.audit_log``); ``insumap-database`` fixes the final signature."""
+"""Call of the signature in ``insumap-database`` (db-v0.2.0). The function takes
+the actor from the transaction context (``app.user_id``, ``app.role``), which
+``apply_context`` set from the same actor, so the call does not repeat it."""
 
 
 @final
@@ -30,6 +28,10 @@ class SqlAuditLog(AuditLogPort):
     The trigger of the table computes the hash chain; this adapter never reads
     or writes ``chain_seq``, ``prev_hash`` or ``row_hash``. Rows carry
     identifiers and field names only.
+
+    The chain is per clinic: an action without a clinic (a platform
+    administrator acting on its own account) has no row here. Its security
+    event already goes to ``iam.security_events`` (Modelo de datos 9.8).
     """
 
     def __init__(self, current: CurrentSession) -> None:
@@ -37,13 +39,12 @@ class SqlAuditLog(AuditLogPort):
 
     @override
     def record(self, entry: AuditEntry) -> None:
+        if entry.clinic_id is None:
+            return
         self._current.get().execute(
             APPEND_AUDIT_LOG,
             {
                 "clinic_id": entry.clinic_id,
-                "actor_user_id": entry.actor_user_id,
-                "actor_role": entry.actor_role.value,
-                "actor_type": ACTOR_TYPE_USER,
                 "action": entry.action,
                 "entity_type": entry.entity_type,
                 "entity_id": entry.entity_id,

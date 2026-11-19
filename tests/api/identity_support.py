@@ -14,12 +14,20 @@ from insumap.infrastructure.platform_adapters import PlatformAdapters
 from insumap.main import create_app
 from tests.support.access_fakes import FakeDirectory
 from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
+from tests.support.clinic_fakes import FakeClinics
 from tests.support.commands import InMemoryAuditLog
 from tests.support.identity_fakes import VALID_TOTP
-from tests.support.identity_world import NOW, PASSWORD, IdentityWorld, make_account
+from tests.support.identity_world import (
+    CLINIC,
+    NOW,
+    PASSWORD,
+    IdentityWorld,
+    make_account,
+)
 from tests.support.monitoring_fakes import RecordsWorld, records_adapters
 from tests.support.notifications import InMemoryChannel
 from tests.support.settings import make_settings
+from tests.support.sites_fakes import FakeSites
 
 ORIGIN = "https://app.example.test"
 CSRF_HEADERS = {"X-Requested-With": "insumap-web"}
@@ -36,6 +44,8 @@ class IdentityApi:
         self.care_teams = FakeCareTeams()
         self.patients = FakeDirectory()
         self.staff = FakeStaff()
+        self.clinics = FakeClinics()
+        self.sites = FakeSites(clinic_id=CLINIC.clinic_id)
         self.records = RecordsWorld(
             clock=self.world.clock, uow=self.world.uow, ids=self.world.ids
         )
@@ -50,6 +60,9 @@ class IdentityApi:
                 care_teams=self.care_teams,
                 patients=self.patients,
                 staff=self.staff,
+                clinics=self.clinics,
+                sites=self.sites,
+                staff_sites=self.sites,
             ),
             monitoring_adapters=records_adapters(self.records),
         )

@@ -103,6 +103,9 @@ class FieldLimits:
     SPECIALTY_MAX_LENGTH: ClassVar[int] = 80
     """Maximum length of a medical specialty."""
 
+    STAFF_SITES_MAX_ITEMS: ClassVar[int] = 50
+    """Most sites one ``PUT /users/{user_id}/sites`` may list (a technical bound)."""
+
     # Requests and pagination.
 
     MAX_REQUEST_BODY_BYTES: ClassVar[int] = 1024 * 1024
