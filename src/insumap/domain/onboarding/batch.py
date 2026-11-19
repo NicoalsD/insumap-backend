@@ -12,11 +12,18 @@ from insumap.domain.onboarding.vocabulary import (
     BatchStatus,
     DataOrigin,
     ImportIssue,
+    RowStatus,
     RowVerdict,
     SourceFormat,
 )
 
 MACHINE_NAME: str = "import_batch"
+
+_STORED_STATUS: dict[RowVerdict, RowStatus] = {
+    RowVerdict.ERROR: RowStatus.REJECTED,
+    RowVerdict.UNSUPPORTED: RowStatus.UNSUPPORTED,
+    RowVerdict.DUPLICATE: RowStatus.SKIPPED_DUPLICATE,
+}
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -27,6 +34,14 @@ class RowOutcome:
     resource_type: str | None
     verdict: RowVerdict
     issues: tuple[ImportIssue, ...] = ()
+
+    def stored_status(self) -> RowStatus | None:
+        """The status ``clinic.import_rows`` keeps; ``None`` if only staged.
+
+        Valid and warning rows are staged and written as ``CREATED`` at
+        confirmation, so the preview never stores them.
+        """
+        return _STORED_STATUS.get(self.verdict)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

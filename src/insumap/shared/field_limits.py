@@ -224,3 +224,6 @@ class FieldLimits:
 
     PATIENT_CSV_MAX_CELL_LENGTH: ClassVar[int] = 1000
     """Characters of one cell of a patient CSV import."""
+
+    IMPORT_PREVIEW_MAX_AGE_MINUTES: ClassVar[int] = 60
+    """How long a previewed batch waits for its confirmation before it expires."""

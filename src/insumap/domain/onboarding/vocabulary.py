@@ -158,6 +158,12 @@ STORED_RESOURCE_TYPES: Final[frozenset[str]] = frozenset(
 )
 """FHIR resource types ``clinic.import_rows`` accepts; any other is stored as NULL."""
 
+
+def stored_resource_type(raw: str | None) -> str | None:
+    """The FHIR resource type if the table accepts it, otherwise ``None``."""
+    return raw if raw in STORED_RESOURCE_TYPES else None
+
+
 CSV_REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
     "mrn",
     "birth_date",
