@@ -64,7 +64,7 @@ class RefreshToken:
     replaced_by_id: UUID | None = None
 
     @classmethod
-    def open_family(  # noqa: PLR0913 - a family needs every key of its first row
+    def open_family(
         cls,
         *,
         token_id: UUID,

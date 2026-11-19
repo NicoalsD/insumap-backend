@@ -39,6 +39,10 @@ extend-exclude = ["*.md"]
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "N", "PL", "S", "SIM", "RUF"]
 
+[tool.ruff.lint.pylint]
+# Use cases and adapters receive each port explicitly through the constructor.
+max-args = 10
+
 [tool.ruff.lint.per-file-ignores]
 # Asserts and magic numbers are idiomatic in tests; PLR2004 stays active in src/.
 # Tests also hold fake passwords and token hashes on purpose (S105, S106).
