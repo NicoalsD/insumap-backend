@@ -15,6 +15,7 @@ from insumap.api.routers.credentials import CredentialRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.meta import MetaRouter
 from insumap.api.routers.metrics import MetricsRouter
+from insumap.api.routers.notifications import NotificationRouter
 from insumap.api.routers.patients import PatientRouter
 from insumap.api.routers.records import RecordsRouter
 from insumap.api.routers.sites import SiteRouter
@@ -157,7 +158,19 @@ from insumap.application.monitoring.records import (
     RecordSymptomUseCase,
     RecordWriter,
 )
+from insumap.application.notifications.list_notifications import (
+    ListNotificationsUseCase,
+)
+from insumap.application.notifications.mark_read import MarkNotificationReadUseCase
 from insumap.application.notifications.notification import NotificationChannel
+from insumap.application.notifications.preferences import (
+    GetNotificationPreferencesUseCase,
+    UpdateNotificationPreferencesUseCase,
+)
+from insumap.application.notifications.web_push import (
+    RegisterWebPushSubscriptionUseCase,
+    RemoveWebPushSubscriptionUseCase,
+)
 from insumap.application.patients.commands import (
     DeactivatePatientCommand,
     DeactivatePatientCommandHandler,
@@ -220,6 +233,10 @@ from insumap.infrastructure.logging import JsonLoggingConfigurator
 from insumap.infrastructure.monitoring_adapters import (
     MonitoringAdapters,
     build_monitoring_adapters,
+)
+from insumap.infrastructure.notification_adapters import (
+    NotificationAdapters,
+    build_notification_adapters,
 )
 from insumap.infrastructure.patient_adapters import (
     PatientAdapters,
@@ -341,6 +358,7 @@ class Container:
         monitoring_adapters: MonitoringAdapters | None = None,
         credentials_adapters: CredentialsAdapters | None = None,
         email_channel: NotificationChannel | None = None,
+        notification_adapters: NotificationAdapters | None = None,
         clinic_admin_adapters: ClinicAdminAdapters | None = None,
         patient_adapters: PatientAdapters | None = None,
     ) -> None:
@@ -386,6 +404,12 @@ class Container:
         )
         if email_channel is not None:
             platform = replace(platform, email_channel=email_channel)
+        notifications = notification_adapters or build_notification_adapters(
+            current=current,
+            unit_of_work=adapters.unit_of_work,
+            ids=adapters.ids,
+            clock=self.clock,
+        )
         credentials = credentials_adapters or build_credentials_adapters(
             current=current
         )
@@ -465,6 +489,9 @@ class Container:
         )
         self.records_router = self._build_records_router(adapters, monitoring)
         self.metrics_router = self._build_metrics_router(adapters, monitoring)
+        self.notification_router = self._build_notification_router(
+            adapters, notifications
+        )
         self.patient_router = self._build_patient_router(
             adapters, monitoring, patient_ports
         )
@@ -1292,6 +1319,57 @@ class Container:
                 series=monitoring.series,
                 forecasts=monitoring.forecasts,
                 clock=clock,
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_notification_router(
+        self, adapters: IdentityAdapters, notifications: NotificationAdapters
+    ) -> NotificationRouter:
+        """Wire the notification use cases (API.md 8.9) over ``notifications``.
+
+        The Web Push endpoints are checked against the configured allowlist; the
+        auth secret is encrypted with the identity cipher.
+        """
+        uow, consents, clock = adapters.unit_of_work, adapters.consents, self.clock
+        return NotificationRouter(
+            list_notifications=ListNotificationsUseCase(
+                uow=uow,
+                consents=consents,
+                notifications=notifications.notifications,
+                messages=self.message_catalog,
+            ),
+            mark_read=MarkNotificationReadUseCase(
+                uow=uow,
+                consents=consents,
+                notifications=notifications.notifications,
+                clock=clock,
+            ),
+            get_preferences=GetNotificationPreferencesUseCase(
+                uow=uow,
+                consents=consents,
+                store=notifications.preferences,
+            ),
+            update_preferences=UpdateNotificationPreferencesUseCase(
+                uow=uow,
+                consents=consents,
+                store=notifications.preferences,
+                clock=clock,
+            ),
+            register_push=RegisterWebPushSubscriptionUseCase(
+                uow=uow,
+                consents=consents,
+                subscriptions=notifications.push_subscriptions,
+                security_events=adapters.security_events,
+                cipher=adapters.cipher,
+                ids=adapters.ids,
+                clock=clock,
+                allowed_hosts=tuple(self.settings.push_endpoint_allowed_hosts),
+            ),
+            remove_push=RemoveWebPushSubscriptionUseCase(
+                uow=uow,
+                consents=consents,
+                subscriptions=notifications.push_subscriptions,
             ),
             session_actor=self.full_session_actor,
         )

@@ -180,3 +180,20 @@ class FieldLimits:
     CURSOR_MAX_LENGTH: ClassVar[int] = 512
     """Longest pagination cursor accepted (the records cursor carries a time and
     an id); a longer one is invalid."""
+
+    # Notifications (alerts.push_subscriptions and alerts.notification_preferences).
+
+    PUSH_ENDPOINT_MAX_LENGTH: ClassVar[int] = 2048
+    """Longest Web Push endpoint URL (``alerts.push_subscriptions.endpoint``)."""
+
+    PUSH_ENDPOINT_PATTERN: ClassVar[str] = r"^https://[^\s]+$"
+    """A Web Push endpoint is an https URL without spaces (use fullmatch)."""
+
+    PUSH_KEY_MAX_LENGTH: ClassVar[int] = 255
+    """Longest public key of a subscription (``alerts.push_subscriptions.p256dh``)."""
+
+    PUSH_AUTH_SECRET_MAX_LENGTH: ClassVar[int] = 64
+    """Longest auth secret of a subscription, before it is encrypted."""
+
+    PUSH_KEY_PATTERN: ClassVar[str] = r"^[A-Za-z0-9_-]+$"
+    """Subscription keys are base64url without padding (use fullmatch)."""

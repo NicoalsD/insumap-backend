@@ -68,5 +68,6 @@ class PatientAccessPolicy:
                     for a in assignments
                 )
                 return AccessDecision.GRANTED if assigned else AccessDecision.NOT_FOUND
-            case Role.CLINIC_ADMIN | Role.PLATFORM_ADMIN:
+            case Role.CLINIC_ADMIN | Role.PLATFORM_ADMIN | Role.SYSTEM:
+                # SYSTEM has no session in the API: denied like the administrators.
                 return AccessDecision.FORBIDDEN

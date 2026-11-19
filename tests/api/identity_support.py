@@ -36,6 +36,12 @@ from tests.support.identity_world import (
     make_account,
 )
 from tests.support.monitoring_fakes import RecordsWorld, records_adapters
+from tests.support.notification_fakes import (
+    InMemoryNotificationStore,
+    InMemoryPreferences,
+    InMemoryPushSubscriptions,
+    notification_adapters,
+)
 from tests.support.notifications import InMemoryChannel
 from tests.support.patient_fakes import FakePatientRoster, FakePendingInvitations
 from tests.support.settings import make_settings
@@ -69,6 +75,9 @@ class IdentityApi:
         self.staff_directory = FakeStaffDirectory(self.world.users, self.world.factors)
         self.staff_invitations = FakeStaffInvitations()
         self.login_lockouts = FakeLoginLockouts()
+        self.notification_store = InMemoryNotificationStore()
+        self.preferences = InMemoryPreferences()
+        self.push_subscriptions = InMemoryPushSubscriptions()
         self.clinic_admins = FakeClinicAdminProvisioning()
         self.patient_roster = FakePatientRoster(
             users=self.world.users, user_of={PATIENT_ID: PATIENT_USER}
@@ -97,6 +106,11 @@ class IdentityApi:
                 activation_codes=DistinctActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
+            notification_adapters=notification_adapters(
+                store=self.notification_store,
+                preferences=self.preferences,
+                subscriptions=self.push_subscriptions,
+            ),
             clinic_admin_adapters=ClinicAdminAdapters(provisioning=self.clinic_admins),
             patient_adapters=PatientAdapters(
                 roster=self.patient_roster,

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import override
 
 from insumap.application.notifications.notification import (
+    InAppEntry,
     NotificationChannel,
     Recipient,
 )
@@ -19,6 +20,7 @@ class Delivered:
     recipient: Recipient
     subject: str
     body: str
+    entry: InAppEntry | None = None
 
     def token(self) -> str:
         """The single-use token of the link in the body."""
@@ -39,9 +41,16 @@ class InMemoryChannel(NotificationChannel):
         return self.external
 
     @override
-    def deliver(self, *, recipient: Recipient, subject: str, body: str) -> None:
+    def deliver(
+        self,
+        *,
+        recipient: Recipient,
+        subject: str,
+        body: str,
+        entry: InAppEntry | None = None,
+    ) -> None:
         if self.fail:
             raise ConnectionError("smtp is down")
         self.delivered.append(
-            Delivered(recipient=recipient, subject=subject, body=body)
+            Delivered(recipient=recipient, subject=subject, body=body, entry=entry)
         )
