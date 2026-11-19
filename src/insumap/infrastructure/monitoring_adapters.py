@@ -6,7 +6,8 @@ from dataclasses import dataclass
 
 from insumap.application.access.ports import PatientRecordPort
 from insumap.application.common.unit_of_work import TransactionFactory
-from insumap.application.metrics.ports import TargetProfilePort
+from insumap.application.metrics.forecast import GlucoseForecastPort
+from insumap.application.metrics.ports import GlucoseSeriesPort, TargetProfilePort
 from insumap.application.monitoring.cgm import CgmReadingSource
 from insumap.application.monitoring.ports import (
     ActivePlanPort,
@@ -25,6 +26,9 @@ from insumap.infrastructure.access.patient_record_repository import (
     PatientRecordRepository,
 )
 from insumap.infrastructure.access.sql_data_access_log import SqlDataAccessLog
+from insumap.infrastructure.ai.unconfigured_forecast import (
+    UnconfiguredGlucoseForecastAdapter,
+)
 from insumap.infrastructure.integration.cgm.adapter import CgmCsvAdapter
 from insumap.infrastructure.monitoring.exporters import (
     CsvTimelineExporter,
@@ -40,6 +44,7 @@ from insumap.infrastructure.persistence.care_team_repository import (
     PatientDirectoryRepository,
 )
 from insumap.infrastructure.persistence.metrics_repositories import (
+    GlucoseSeriesRepository,
     TargetProfileRepository,
 )
 from insumap.infrastructure.persistence.monitoring_repositories import (
@@ -68,6 +73,8 @@ class MonitoringAdapters:
     timeline: TimelinePort
     validation: ValidationSettingsPort
     targets: TargetProfilePort
+    series: GlucoseSeriesPort
+    forecasts: GlucoseForecastPort
     symptoms: SymptomCatalogPort
     active_plans: ActivePlanPort
     cgm: CgmReadingSource
@@ -108,6 +115,8 @@ def build_monitoring_adapters(
         timeline=TimelineRepository(readings, records),
         validation=ValidationSettingsRepository(current),
         targets=TargetProfileRepository(current),
+        series=GlucoseSeriesRepository(current),
+        forecasts=UnconfiguredGlucoseForecastAdapter(),
         symptoms=SymptomCatalogRepository(current),
         active_plans=ActivePlanRepository(current),
         cgm=CgmCsvAdapter(),

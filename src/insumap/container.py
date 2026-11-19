@@ -12,6 +12,7 @@ from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.care_team import CareTeamRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.meta import MetaRouter
+from insumap.api.routers.metrics import MetricsRouter
 from insumap.api.routers.records import RecordsRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
 from insumap.application.care_team.commands import (
@@ -91,6 +92,11 @@ from insumap.application.identity.sessions import (
     LogoutUseCase,
     RefreshSessionUseCase,
 )
+from insumap.application.metrics.forecast import GetForecastUseCase
+from insumap.application.metrics.metrics import (
+    ComputeGlycemicMetricsUseCase,
+    GetAgpUseCase,
+)
 from insumap.application.monitoring.corrections import (
     AnnulRecordUseCase,
     CorrectRecordUseCase,
@@ -125,6 +131,7 @@ from insumap.application.readiness import (
 from insumap.application.security.rate_limit import RateLimitCheck, RateLimitRule
 from insumap.domain.identity.password_policy import PasswordPolicy
 from insumap.domain.identity.refresh_token import RefreshTokenLifetime
+from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistry
 from insumap.domain.monitoring.validation import build_validation_chain
 from insumap.infrastructure.identity_adapters import (
     IdentityAdapters,
@@ -290,6 +297,7 @@ class Container:
             staff_actor=self.full_session_actor,
         )
         self.records_router = self._build_records_router(adapters, monitoring)
+        self.metrics_router = self._build_metrics_router(adapters, monitoring)
 
     def _build_identity_services(
         self, adapters: IdentityAdapters, platform: PlatformAdapters
@@ -803,6 +811,43 @@ class Container:
                 assigned_gate=assigned,
                 timeline=monitoring.timeline,
                 exporters=monitoring.exporters,
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_metrics_router(
+        self, adapters: IdentityAdapters, monitoring: MonitoringAdapters
+    ) -> MetricsRouter:
+        """Wire the glycemic metrics, AGP and forecast use cases (API.md 8.8)."""
+        uow, clock = adapters.unit_of_work, self.clock
+        own = OwnPatientGate(adapters.consents)
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        return MetricsRouter(
+            metrics=ComputeGlycemicMetricsUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                strategies=GlycemicTargetStrategyRegistry(),
+                clock=clock,
+            ),
+            agp=GetAgpUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                clock=clock,
+            ),
+            forecast=GetForecastUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                forecasts=monitoring.forecasts,
+                clock=clock,
             ),
             session_actor=self.full_session_actor,
         )

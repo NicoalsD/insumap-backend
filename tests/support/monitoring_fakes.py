@@ -60,6 +60,9 @@ from insumap.domain.monitoring.validation import (
     ValidationParams,
     build_validation_chain,
 )
+from insumap.infrastructure.ai.unconfigured_forecast import (
+    UnconfiguredGlucoseForecastAdapter,
+)
 from insumap.infrastructure.integration.cgm.adapter import CgmCsvAdapter
 from insumap.infrastructure.monitoring.exporters import (
     CsvTimelineExporter,
@@ -446,7 +449,7 @@ class FakePlans(ActivePlanPort):
 
 
 def records_adapters(world: RecordsWorld) -> MonitoringAdapters:
-    """The production ports of the records slice, replaced by ``world``'s doubles."""
+    """The monitoring ports (records and metrics), replaced by ``world``'s doubles."""
     return MonitoringAdapters(
         patient_records=world.patients,
         readings=world.readings,
@@ -455,6 +458,8 @@ def records_adapters(world: RecordsWorld) -> MonitoringAdapters:
         timeline=world.timeline,
         validation=world.settings,
         targets=world.targets,
+        series=world.series,
+        forecasts=UnconfiguredGlucoseForecastAdapter(),
         symptoms=world.catalog,
         active_plans=world.plans,
         cgm=CgmCsvAdapter(),

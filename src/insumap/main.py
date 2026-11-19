@@ -59,6 +59,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     app.include_router(container.auth_router.router)
     app.include_router(container.care_team_router.router)
     app.include_router(container.records_router.router)
+    app.include_router(container.metrics_router.router)
     return app
 
 
