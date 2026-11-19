@@ -69,6 +69,22 @@ class UserAccount:
         """This account with ``token_version + 1``: every access token dies."""
         return replace(self, token_version=self.token_version + 1)
 
+    def suspended(self, *, reason: str) -> UserAccount:
+        """This account blocked (``ACTIVE -> SUSPENDED``), with its reason.
+
+        The state object refuses any other origin with ``409``.
+        """
+        next_state = self.state.suspend()
+        return replace(self, status=next_state.status, status_reason=reason)
+
+    def reactivated(self) -> UserAccount:
+        """This account back in use (``SUSPENDED -> ACTIVE``).
+
+        The reason of the suspension no longer applies, so it is cleared.
+        """
+        next_state = self.state.reactivate()
+        return replace(self, status=next_state.status, status_reason=None)
+
     def deactivated(self, *, reason: str) -> UserAccount:
         """This account closed for good (``-> DEACTIVATED``), with its reason.
 
