@@ -253,8 +253,8 @@ src/insumap/
 |---|---|---|
 | [x] | [`.agents/workflow.md`](.agents/workflow.md) | Cuentas, ramas, commits, PR, subagentes y versiones (idéntico en los 5 repos) |
 | [ ] | `.agents/architecture.md` | Paquetes, dónde va cada cosa, convenciones de nombres |
-| [ ] | `.agents/design-patterns.md` | Patrones del backend con esqueletos en Python |
-| [ ] | `.agents/security.md` | Implementación de los controles de seguridad |
+| [x] | `.agents/design-patterns.md` | Patrones del backend con esqueletos en Python |
+| [x] | `.agents/security.md` | Implementación de los controles de seguridad |
 | [ ] | `.agents/input-validation.md` | Tabla canónica de campos, límites y patrones |
 | [ ] | `.agents/configuration.md` | Dónde va cada tipo de valor |
 | [ ] | `.agents/api-documentation.md` | Reglas de Swagger y OpenAPI |
