@@ -2,7 +2,6 @@
 
 from uuid import UUID
 
-import pytest
 from fastapi.testclient import TestClient
 
 from tests.integration.test_notifications_flow import _bearer, _staff_headers
@@ -31,13 +30,6 @@ def test_the_seeded_patient_has_the_consent_in_force(
     assert body["current_version_id"] == str(demo_world.notice_id)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "RLS on clinic.privacy_notice_versions needs a clinic context, which the "
-        "pre-login read does not have: a SECURITY DEFINER lookup is requested"
-    ),
-)
 def test_the_public_notice_is_readable_before_login(
     api: TestClient, demo_world: DemoWorld
 ) -> None:

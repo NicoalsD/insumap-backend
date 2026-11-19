@@ -46,7 +46,6 @@ def api() -> IdentityApi:
     api.world.permissions.by_role[Role.PATIENT] = PATIENT_PERMISSIONS
     api.consents.notices.views[NOTICE_ID] = PrivacyNoticeView(
         version_id=NOTICE_ID,
-        clinic_id=CLINIC.clinic_id,
         version="2026-11-01",
         content="Aviso de privacidad de la clínica demo.",
         effective_from=NOW,

@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import final, override
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from insumap.application.common.pagination import Page, PageRequest, build_page
 from insumap.application.consents.ports import (
@@ -160,9 +160,20 @@ def _status(
     )
 
 
+NOTICE_FOR_LOGIN = text(
+    "SELECT id, version, effective_from, content"
+    " FROM clinic.privacy_notice_for_login(:notice_id)"
+)
+"""``SECURITY DEFINER`` lookup of a notice with no clinic context (insumap-database)."""
+
+
 @final
 class PrivacyNoticeQueryRepository(PrivacyNoticeQueryPort):
-    """``clinic.privacy_notice_versions`` by id. RLS hides it without a clinic."""
+    """The notice a patient reads before login, through the definer function.
+
+    ``clinic.privacy_notice_for_login`` answers without a session clinic, which
+    the row level security of ``clinic.privacy_notice_versions`` would block.
+    """
 
     def __init__(self, current: CurrentSession) -> None:
         self._current = current
@@ -171,21 +182,17 @@ class PrivacyNoticeQueryRepository(PrivacyNoticeQueryPort):
     def find(self, notice_id: UUID) -> PrivacyNoticeView | None:
         row = (
             self._current.get()
-            .execute(
-                select(PrivacyNoticeVersionOrm).where(
-                    PrivacyNoticeVersionOrm.id == notice_id
-                )
-            )
-            .scalar_one_or_none()
+            .execute(NOTICE_FOR_LOGIN, {"notice_id": notice_id})
+            .mappings()
+            .one_or_none()
         )
         if row is None:
             return None
         return PrivacyNoticeView(
-            version_id=row.id,
-            clinic_id=row.clinic_id,
-            version=row.version,
-            content=row.content,
-            effective_from=row.effective_from,
+            version_id=row["id"],
+            version=row["version"],
+            content=row["content"],
+            effective_from=row["effective_from"],
         )
 
 

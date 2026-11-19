@@ -18,7 +18,6 @@ class PrivacyNoticeView:
     """A privacy notice version, as the patient reads it before logging in."""
 
     version_id: UUID
-    clinic_id: UUID
     version: str
     content: str
     effective_from: datetime
