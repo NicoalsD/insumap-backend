@@ -55,8 +55,7 @@ SUMMARY_SQL: Final = text(
 
 The function is a SECURITY DEFINER in ``insumap-database``. A row with a null
 ``doctor_id`` carries the clinic totals; the others carry each doctor's count of
-alerts nobody has acknowledged. It is not in the schema yet: until it is, the call
-fails and the endpoint answers ``500``.
+alerts nobody has acknowledged. Available since ``db-v0.4.0``.
 """
 
 
