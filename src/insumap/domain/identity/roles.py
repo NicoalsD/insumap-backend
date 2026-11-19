@@ -10,3 +10,5 @@ class Role(StrEnum):
     CLINIC_ADMIN = "CLINIC_ADMIN"
     DOCTOR = "DOCTOR"
     PATIENT = "PATIENT"
+    SYSTEM = "SYSTEM"
+    """Scheduler and system jobs (``app.role = 'SYSTEM'``). No session carries it."""
