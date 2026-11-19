@@ -24,5 +24,9 @@
   "notification.email_verification.external": "Confirma tu correo con este enlace en las próximas {lifetime} horas: {link} Si no creaste esta cuenta, ignora este mensaje.",
   "notification.password_changed.subject": "Tu contraseña de Insumap cambió",
   "notification.password_changed.external": "La contraseña de tu cuenta de Insumap se restableció. Si no fuiste tú, comunícate con tu clínica.",
-  "reason.required": "Indica un motivo de 10 a 500 caracteres."
+  "reason.required": "Indica un motivo de 10 a 500 caracteres.",
+  "notification.staff_activation.subject": "Activa tu cuenta del personal de Insumap",
+  "notification.staff_activation.external": "Tu clínica te dio de alta en Insumap. Usa este código de activación en los próximos {days} días: {code} Es de un solo uso. Si no esperabas este mensaje, comunícate con tu clínica.",
+  "notification.mfa_reset.subject": "Se restableció el segundo factor de tu cuenta de Insumap",
+  "notification.mfa_reset.external": "Se restableció el segundo factor (MFA) de tu cuenta de Insumap. Al volver a iniciar sesión deberás configurarlo de nuevo. Si no fuiste tú, comunícate con tu clínica."
 }
