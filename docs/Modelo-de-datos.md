@@ -51,12 +51,12 @@ Reglas de lectura del modelo:
 | Enumeraciones | `varchar(n)` con `CHECK ... IN (...)`, no tipos `ENUM` de PostgreSQL: un valor nuevo es una migración simple y la longitud queda visible en `information_schema`. |
 | Límites de longitud | Toda columna cuyo límite coincide con `FieldLimits` es `varchar(n)`: la prueba de deriva compara `information_schema.columns.character_maximum_length`. Hashes SHA-256 y HMAC: `char(64)`. Huellas de llave (`*_key_id`): `char(16)`. Hoy solo `EMAIL_MAX_LENGTH` (254) y `REQUEST_ID_MAX_LENGTH` (64) existen en `FieldLimits`; el resto son constantes propuestas (ver el diccionario). |
 | `CHECK` | Solo técnicos: `> 0`, listas de enumeración, coherencia entre columnas, formatos. Ningún valor clínico. |
-| Claves foráneas | `ON DELETE RESTRICT` en todas. No hay borrado en cascada y los datos clínicos nunca se borran. |
+| Claves foráneas | `ON DELETE RESTRICT` en todas. No hay borrado en cascada y los datos clínicos nunca se borran. Una referencia circular (`care.treatment_plans` con `ai.recommendations`) se cierra con un `ALTER TABLE` posterior en la misma migración. |
 | Nombres de restricciones | Explícitos: `pk_<tabla>`, `fk_<tabla>_<columna>`, `uq_<tabla>_<columnas>`, `ck_<tabla>_<regla>`, `ix_<tabla>_<columnas>` y `ux_<tabla>_<columnas>` para únicos parciales o funcionales. |
 | Estados | Columna `status` con `CHECK`; el historial de cambios en tablas aparte cuando se exige (`alerts.alert_status_history`, `ai.recommendation_decisions`). |
 | Correcciones | En los registros clínicos, una fila nueva con `entry_type = 'CORRECTION'` o `'VOID'`, `supersedes_id` y `correction_reason` (RF-39, ADR-08). La versión vigente es la que ninguna otra supera. |
 | Optimismo | `lock_version integer` en los agregados que varios usuarios editan (`409` si no coincide). |
-| Extensiones | `pg_trgm` (búsqueda en `ai.knowledge_documents`). `uuidv7()`, `sha256()` y `gen_random_bytes` de PostgreSQL 18 no necesitan extensiones. El cifrado y los HMAC de columnas se hacen en la aplicación (Seguridad 8); la base solo guarda el resultado. |
+| Extensiones | `pg_trgm` (búsqueda en `ai.knowledge_documents`). `uuidv7()` y `sha256()` de PostgreSQL 18 no necesitan extensiones. El cifrado y los HMAC de columnas se hacen en la aplicación (Seguridad 8); la base solo guarda el resultado. |
 | Clases de datos | Se usan las de Seguridad 1.2: H (clínico), C (identidad y contacto), S (secreto). Las columnas S están marcadas en el diccionario y `insumap_readonly` no las ve. |
 
 ## 4. Multi-tenancy y RLS
@@ -96,24 +96,24 @@ Toda tabla con `clinic_id` tiene `ENABLE` y `FORCE ROW LEVEL SECURITY`, con `USI
 
 | Plantilla | Condición | Uso |
 |---|---|---|
-| **P0** Catálogo global | Sin RLS. `insumap_app` e `insumap_readonly` solo tienen `SELECT` (salvo `ai.model_versions`). Escribe el migrador. | Roles, permisos y catálogos globales |
-| **P1** Tenant | `clinic_id = iam.app_clinic_id()` en `USING` y `WITH CHECK`, más `iam.app_role() IN (...)` según la tabla y el comando. | Datos de clínica sin dueño paciente |
-| **P2** Tenant y paciente propio | P1, y para `PT` además `patient_id = clinic.current_patient_id()` (`SELECT` y `INSERT`). | Datos del paciente |
-| **P3** Semilla global o tenant | `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()`. Escritura: `clinic_id = iam.app_clinic_id()` y rol `CA`. Política adicional `TO insumap_migrator USING (true) WITH CHECK (true)` para sembrar. | Perfiles de metas, plantillas, reglas, catálogos y retención |
-| **P4** Anterior al contexto | Sin RLS ni `clinic_id` útil: se lee o escribe antes de conocer la clínica o el usuario. Privilegios mínimos por columna y claves de alta entropía o HMAC. | `iam.login_attempts`, `iam.rate_limit_buckets`, `iam.login_lockouts`, `iam.auth_challenges` |
-| **P5** Solo por función | `INSERT` únicamente mediante una función `SECURITY DEFINER`; `insumap_app` no tiene `INSERT` directo. | `audit.audit_log` |
-| **P6** Fila propia | `user_id = iam.app_user_id()` (o `recipient_user_id`), con ramas administrativas explícitas donde la regla lo pide. | `iam.users`, `iam.mfa_factors`, `iam.refresh_tokens`, `iam.password_history`, notificaciones, suscripciones push |
-| **P7** Evento con clínica opcional | `INSERT` en cualquier contexto con `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()`. `SELECT` por rol. | `iam.security_events` |
-| **P8** Raíz de tenant | `id = iam.app_clinic_id()` para `CA`, `DR`, `PT` y `SY`; `PA` ve y gestiona todas. | `clinic.clinics` |
+| **RLS-0** Catálogo global | Sin RLS. `insumap_app` e `insumap_readonly` solo tienen `SELECT` (salvo `ai.model_versions`). Escribe el migrador. | Roles, permisos y catálogos globales |
+| **RLS-1** Tenant | `clinic_id = iam.app_clinic_id()` en `USING` y `WITH CHECK`, más `iam.app_role() IN (...)` según la tabla y el comando. | Datos de clínica sin dueño paciente |
+| **RLS-2** Tenant y paciente propio | RLS-1, y para `PT` además `patient_id = clinic.current_patient_id()` (`SELECT` y `INSERT`). | Datos del paciente |
+| **RLS-3** Semilla global o tenant | `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()`. Escritura: `clinic_id = iam.app_clinic_id()` y rol `CA`. Política adicional `TO insumap_migrator USING (true) WITH CHECK (true)` para sembrar. | Perfiles de metas, plantillas, reglas, catálogos y retención |
+| **RLS-4** Anterior al contexto | Sin RLS ni `clinic_id` útil: se lee o escribe antes de conocer la clínica o el usuario. Privilegios mínimos por columna y claves de alta entropía o HMAC. | `iam.login_attempts`, `iam.rate_limit_buckets`, `iam.login_lockouts`, `iam.auth_challenges` |
+| **RLS-5** Solo por función | `INSERT` únicamente mediante una función `SECURITY DEFINER`; `insumap_app` no tiene `INSERT` directo. | `audit.audit_log` |
+| **RLS-6** Fila propia | `user_id = iam.app_user_id()` (o `recipient_user_id`), con ramas administrativas explícitas donde la regla lo pide. | `iam.users`, `iam.mfa_factors`, `iam.refresh_tokens`, `iam.password_history`, notificaciones, suscripciones push |
+| **RLS-7** Evento con clínica opcional | `INSERT` en cualquier contexto con `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()`. `SELECT` por rol. | `iam.security_events` |
+| **RLS-8** Raíz de tenant | `id = iam.app_clinic_id()` para `CA`, `DR`, `PT` y `SY`; `PA` ve y gestiona todas. | `clinic.clinics` |
 
 ### 4.4 Decisiones de diseño de la RLS
 
 1. **Exclusión por rol por tabla, no por esquema.** Las tablas de datos clínicos (`monitoring.*`, `care.treatment_plans`, `care.clinical_notes`, `alerts.alerts`, `ai.*` de salida, `messaging.*`) solo admiten `app.role IN ('DOCTOR','PATIENT','SYSTEM')` según el caso, y nunca `CA` ni `PA`. Pero `care.target_profiles`, `care.protocol_templates`, `alerts.alert_rules`, `care.reading_validation_settings` y `care.symptom_catalog` los gestiona `CLINIC_ADMIN`, así que la exclusión no puede ser por esquema.
 2. **La asignación médico-paciente no está en la RLS.** Para `DOCTOR`, la política exige clínica y rol; la verificación de que el paciente está asignado la hace `PatientRecordAccessProxy` (P11) con `clinic.care_team_assignments` (Arquitectura 12, defensa 3). Un error del proxy se limita a la clínica del médico, no la cruza.
 3. **Filas propias del paciente** con `clinic.current_patient_id()`, no con subconsultas.
-4. **Escrituras antes de conocer la clínica.** El login, la activación, el refresh y los límites de tasa corren antes de que exista contexto. Se resuelven de tres formas: (a) funciones `SECURITY DEFINER` que devuelven solo las columnas mínimas (`iam.lookup_login_identity`, `iam.lookup_invitation_by_code_hash`, `iam.lookup_refresh_token`); (b) tablas P4 sin RLS que solo guardan HMAC o hashes de alta entropía, con privilegios por columna; (c) `iam.security_events`, que acepta `INSERT` con `clinic_id` nulo (P7). Tras la búsqueda, el caso de uso fija `app.clinic_id` y `app.user_id` provisionales para el resto de la transacción, como pide Seguridad 3.4, paso 1.4.
+4. **Escrituras antes de conocer la clínica.** El login, la activación, el refresh y los límites de tasa corren antes de que exista contexto. Se resuelven de tres formas: (a) funciones `SECURITY DEFINER` que devuelven solo las columnas mínimas (`iam.lookup_login_identity`, `iam.lookup_invitation_by_code_hash`, `iam.lookup_refresh_token`); (b) tablas RLS-4 sin RLS que solo guardan HMAC o hashes de alta entropía, con privilegios por columna; (c) `iam.security_events`, que acepta `INSERT` con `clinic_id` nulo (RLS-7). Tras la búsqueda, el caso de uso fija `app.clinic_id` y `app.user_id` provisionales para el resto de la transacción, como pide Seguridad 3.4, paso 1.4.
 5. **Planificador.** Los trabajos usan `app.role = 'SYSTEM'` (sección 4.1) y la función `clinic.list_active_clinics()` para recorrer las clínicas.
-6. **`PLATFORM_ADMIN` crea la primera clínica y su primer administrador sin `clinic_id`.** La política de `clinic.clinics` (P8) le permite crear la clínica. La cuenta y la invitación del primer `CLINIC_ADMIN` las crea la función `iam.create_first_clinic_admin(...)` (`SECURITY DEFINER`, propuesta), de modo que ninguna tabla de `iam` necesita una rama para `PA`.
+6. **`PLATFORM_ADMIN` no tiene `clinic_id` y aun así da de alta clínicas y administradores.** La política de `clinic.clinics` (RLS-8) le permite crear, suspender y reactivar clínicas, y es la única tabla de datos con rama para `PA` (Seguridad 6.2, punto 7: `patients`, `monitoring`, `care`, `alerts`, `ai`, `messaging` y `audit` no la tienen). La cuenta, la membresía, el perfil y la invitación del primer `CLINIC_ADMIN` las crea `iam.create_first_clinic_admin(...)` y las del primer `PLATFORM_ADMIN` (Seguridad 3.7, comando `insumap create-platform-admin`), `iam.create_platform_admin(...)`, ambas `SECURITY DEFINER` (propuesta). La invitación del `PLATFORM_ADMIN` no tiene clínica: `iam.credential_invitations.clinic_id` es nulo solo en ese caso y la activación corre sin `app.clinic_id`, con `app.user_id` provisional. Al suspender una clínica, el trigger `clinic.on_clinic_suspended()` revoca las sesiones de todos sus usuarios, de modo que `PA` no necesita acceso a `iam.refresh_tokens`.
 7. **Agregados del administrador.** Los KPI de la clínica, `alerts.read_summary` y la lista de riesgo de abandono salen de funciones `SECURITY DEFINER` que devuelven solo conteos o columnas administrativas y suprimen las celdas menores que `clinic.clinic_settings.kpi_min_cell_size` (RF-83). Así el administrador no lee ninguna fila clínica.
 8. **`FORCE` y las funciones definer.** `FORCE ROW LEVEL SECURITY` sujeta también al dueño de la tabla. Por eso las funciones `SECURITY DEFINER` pertenecen a `insumap_definer` (sección 5), un rol `NOLOGIN` y `NOBYPASSRLS` con políticas `TO insumap_definer USING (true)` solo en las tablas que esas funciones leen; el filtro lo aplica la función. Se evita `BYPASSRLS`, que en Neon hay que verificar (ver Seguridad 6.2, punto 6).
 9. **Columnas S y `insumap_readonly`.** Se hacen invisibles con privilegios por columna: `iam.users.password_hash`, `iam.mfa_factors.secret_ciphertext` y `code_hash`, todos los `token_hash` y `code_hash`, `clinic.patients.document_hash` y `document_ciphertext`, y `alerts.push_subscriptions.auth_ciphertext`.
@@ -128,9 +128,9 @@ Resumen de lo que permiten las políticas. `L` es lectura, `E` escritura (`INSER
 | `iam.users`, `iam.memberships` | propio | L/E clínica | L clínica | propio | L |
 | `iam.mfa_factors`, `iam.password_history`, `iam.refresh_tokens` | propio | restablecer personal de la clínica | propio | propio | - |
 | `iam.credential_invitations` | - | L/E clínica | - | - | L/E |
-| `iam.security_events` | L todas | L clínica | - | - | E |
+| `iam.security_events` | L todas (incluye `audit.read_platform`) | L clínica | - | - | E |
 | `clinic.clinics` | L/E todas | L propia | L propia | L propia | L propia |
-| `clinic.sites`, `clinic.staff_profiles`, `clinic.staff_sites` | - | L/E clínica | L clínica | - | L |
+| `clinic.sites`, `clinic.staff_profiles`, `clinic.staff_sites`, `clinic.clinic_settings` | - | L/E clínica | L clínica | L (solo `clinic_settings`) | L |
 | `clinic.patients`, `clinic.care_team_assignments` | - | L/E clínica (identidad y equipo) | L clínica (equipo: propias filas) | propio | L |
 | `clinic.patient_consents`, `clinic.privacy_requests` | - | L estado / tramitar | L consentimiento | propio L/E | L |
 | `clinic.import_batches`, `clinic.import_rows` | - | L/E clínica | - | - | - |
@@ -143,11 +143,11 @@ Resumen de lo que permiten las políticas. `L` es lectura, `E` escritura (`INSER
 | `ai.risk_assessments`, `ai.pattern_findings`, `ai.recommendations`, `ai.recommendation_decisions`, `ai.clinical_summaries` | - | - | L clínica; decide recomendaciones | - | L/E |
 | `ai.assistant_messages` | - | - | - | L/E propio | E respuestas |
 | `ai.knowledge_documents` | - | L/E clínica | L | L aprobados | L aprobados |
-| `ai.model_versions`, `ai.ai_evaluations` | L evaluaciones | L evaluaciones de la clínica | - | - | E |
+| `ai.model_versions`, `ai.ai_evaluations` | L evaluaciones (por función) | L evaluaciones de la clínica | - | - | E |
 | `messaging.*` | - | - | L/E clínica | L/E propio | L |
-| `audit.audit_log` | L todas | L clínica | - | - | E (por función) |
-| `audit.data_access_log` | - | L clínica | E | E | E |
-| `audit.retention_policies` | L/E globales | L/E clínica | - | - | L |
+| `audit.audit_log` | - | L clínica | - | - | E (por función) |
+| `audit.data_access_log` | - | L/E clínica (listados administrativos) | E | E | E |
+| `audit.retention_policies` | E globales (por función) | L clínica y globales; E (por función) | - | - | L |
 
 ## 5. Roles SQL
 
@@ -155,7 +155,7 @@ Resumen de lo que permiten las políticas. `L` es lectura, `E` escritura (`INSER
 |---|---|---|---|---|
 | `insumap_migrator` | Sí (conexión directa) | Dueño de los objetos. Único que corre migraciones y siembra. | DDL y DML sobre todo el esquema. Nunca lo usa la API. | Sujeto a `FORCE`; tiene política permisiva `TO insumap_migrator` solo en las tablas sembradas (perfiles, plantillas, reglas, catálogos, retención, usuario de sistema). |
 | `insumap_app` | Sí (pooler) | La API y el planificador. | `USAGE` en los esquemas; DML mínimo por tabla según la sección 9; `EXECUTE` en las funciones. Sin DDL. Sin `BYPASSRLS`. Sin `UPDATE` ni `DELETE` en tablas append-only. `DELETE` solo en `iam.password_history` y `alerts.push_subscriptions`. Sin `INSERT` directo en `audit.audit_log`. | Sujeto a RLS en todo. |
-| `insumap_readonly` | Sí | Diagnóstico y reportes de solo lectura. | `SELECT` por columna, sin columnas S ni las tablas P4 de `iam`. | Sujeto a RLS: sin contexto ve cero filas. |
+| `insumap_readonly` | Sí | Diagnóstico y reportes de solo lectura. | `SELECT` por columna, sin columnas S ni las tablas RLS-4 de `iam`. | Sujeto a RLS: sin contexto ve cero filas. |
 | `insumap_definer` | No | Dueño de las funciones `SECURITY DEFINER` (sección 6). | Solo los `SELECT`/`INSERT`/`UPDATE`/`DELETE` que cada función necesita; `NOBYPASSRLS`. | Políticas `TO insumap_definer` solo donde hace falta. |
 
 Ningún rol de la aplicación es superusuario ni tiene `BYPASSRLS`. En Neon, el login dueño (`neondb_owner`) salta la RLS por diseño de la plataforma y no se usa en la aplicación (Seguridad 6.2).
@@ -180,11 +180,14 @@ Toda función `SECURITY DEFINER` fija `SET search_path = pg_catalog, <esquema>`,
 | `iam.lookup_invitation_by_code_hash(p_code_hash)` | Devuelve `invitation_id`, `clinic_id`, `purpose`, `status`, `expires_at` y `failed_attempts` de una invitación. | `VerifyActivationUseCase` |
 | `iam.lookup_refresh_token(p_token_hash)` | Devuelve `user_id`, `clinic_id`, rol, `family_id` y estado de un refresh token. | `RefreshSessionUseCase` |
 | `iam.create_first_clinic_admin(...)` (propuesta) | Crea la cuenta, la membresía, el perfil y la invitación del primer `CLINIC_ADMIN` de una clínica. | `CreateFirstClinicAdminUseCase` (`PLATFORM_ADMIN`) |
+| `iam.create_platform_admin(...)` (propuesta) | Crea la cuenta, la membresía sin clínica y la invitación sin clínica del primer `PLATFORM_ADMIN` (Seguridad 3.7). | Comando `insumap create-platform-admin` |
 | `iam.unlock_account(p_user_id)` (propuesta) | Reinicia `login_lockouts` de una cuenta de la clínica de la sesión. | `UnlockAccountUseCase` (`CLINIC_ADMIN`) |
-| `clinic.current_patient_id()` | Ver sección 4.2. | Las políticas P2 |
+| `clinic.current_patient_id()` | Ver sección 4.2. | Las políticas RLS-2 |
 | `clinic.list_active_clinics()` | Lista las clínicas `ACTIVE` para el planificador. | Los trabajos programados |
 | `clinic.clinic_kpis()` (propuesta) | Conteos de pacientes por estado, activación, adherencia y alertas, sin detalle clínico y con supresión de celdas pequeñas. | `ClinicKpisUseCase` |
 | `alerts.clinic_alert_summary()` (propuesta) | Conteos agregados de alertas (`alerts.read_summary`). | `ClinicKpisUseCase` |
+| `ai.platform_ai_evaluations()` (propuesta) | Devuelve las evaluaciones de IA de toda la plataforma al `PLATFORM_ADMIN` (`ai_evaluations.read`) sin darle una rama de RLS sobre `ai`. | `ListAiEvaluationsUseCase` |
+| `audit.set_retention_policy(...)` (propuesta) | Único camino de escritura de `audit.retention_policies`: valida el rol (`PLATFORM_ADMIN` para filas globales, `CLINIC_ADMIN` para las de su clínica) y registra `RETENTION_POLICY_CHANGED`. | `UpdateRetentionPolicyUseCase` |
 | `ai.dropout_risk_list()` (propuesta) | Lista de pacientes en riesgo de abandono con nombre administrativo, estado y días sin registrar, sin valores clínicos. | `DropoutRiskUseCase` |
 | `audit.append_audit_log(...)` | Única vía de escritura de `audit_log`; el trigger calcula la cadena. | `AuditingCommandHandler` |
 | `audit.verify_chain(p_clinic_id)` | Recalcula la cadena de hashes y devuelve la primera fila rota. Si hay discrepancia, el job registra `AUDIT_CHAIN_BROKEN`. | `VerifyAuditChainJob`, pruebas de restauración |
@@ -199,6 +202,7 @@ Triggers:
 | `care.reject_active_version_update()` | `care.target_profiles`, `care.protocol_templates`, `alerts.alert_rules`, `care.reading_validation_settings` | Una versión `ACTIVE` solo admite el paso a `RETIRED` |
 | `care.guard_plan_items_draft()` | `care.treatment_plan_items`, `care.treatment_plans` | Los ítems solo cambian con el plan en `DRAFT`; un plan `ACTIVE` solo pasa a `SUPERSEDED` |
 | `clinic.ensure_primary_doctor()` (constraint trigger diferido) | `clinic.care_team_assignments` | Un paciente con equipo vigente tiene exactamente un principal (RF-28; `409` al retirar al único principal) |
+| `clinic.on_clinic_suspended()` (`AFTER UPDATE`, `SECURITY DEFINER`) | `clinic.clinics` | Al pasar a `SUSPENDED`, revoca (`CLINIC_SUSPENDED`) todas las familias de refresh de los usuarios de la clínica |
 | `clinic.reject_notice_content_update()` | `clinic.privacy_notice_versions` | El texto y su hash son inmutables; solo cambia `is_current` |
 | `iam.check_membership_clinic_role()` | `iam.memberships` | `clinic_id` nulo solo para `PLATFORM_ADMIN` |
 
@@ -211,7 +215,7 @@ Triggers:
 - `alerts.alert_status_history`, `ai.recommendation_decisions`, `care.clinical_notes`, `care.treatment_plan_snapshots` y `messaging.messages`.
 - Propuestas por su naturaleza de evidencia o de resultado calculado: `iam.security_events`, `clinic.patient_consents`, `clinic.privacy_notice_versions` (contenido), `care.glycemic_metric_snapshots`, `care.triage_reviews`, `ai.glucose_forecasts`, `ai.risk_assessments`, `ai.pattern_findings`, `ai.clinical_summaries` y `ai.assistant_messages`.
 
-`audit.retention_policies` **no** es append-only: es configuración que cambia (ver sección 13, D12). Las tablas técnicas de `iam` (`login_attempts`, `rate_limit_buckets`) no llevan trigger: se protegen por privilegios (`insumap_app` sin `UPDATE`/`DELETE`) y se purgan por función.
+`audit.retention_policies` **no** es append-only: es configuración que cambia (ver sección 13, MD-12). Las tablas técnicas de `iam` (`login_attempts`, `rate_limit_buckets`) no llevan trigger: se protegen por privilegios (`insumap_app` sin `UPDATE`/`DELETE`) y se purgan por función.
 
 **Cadena de hashes de `audit.audit_log`** (Seguridad 7.2). Es una cadena por clínica:
 
@@ -235,8 +239,8 @@ Ningún valor de esta tabla aparece en el código, en un `DEFAULT` ni en un `CHE
 | Recordatorios | `care.reminder_schedules` | `DOCTOR` (`reminders.manage_assigned`) y `PATIENT` (`reminders.manage_own`) |
 | Rango medible, retraso máximo, ventana de duplicado, tasa de cambio plausible y razón de unidades de la validación de lecturas | `care.reading_validation_settings` (versionado, propuesta) | `CLINIC_ADMIN` |
 | Síntomas disponibles y cuáles son de alarma | `care.symptom_catalog` (propuesta) | `CLINIC_ADMIN` |
-| Plazo de las recomendaciones, intervalo de pronóstico, días de inactividad, tamaño mínimo de celda de los KPI | `clinic.clinic_settings` (propuesta) | `CLINIC_ADMIN` |
-| Plazos de retención | `audit.retention_policies` | `PLATFORM_ADMIN` o `CLINIC_ADMIN` (ver brechas) |
+| Plazo de las recomendaciones, intervalo de pronóstico, días de inactividad, tamaño mínimo de celda de los KPI | `clinic.clinic_settings` (propuesta; fila global sembrada y fila por clínica) | `CLINIC_ADMIN` |
+| Plazos de retención | `audit.retention_policies` (vía `audit.set_retention_policy`) | `PLATFORM_ADMIN` (globales) o `CLINIC_ADMIN` (ver brechas) |
 | Versión del aviso de privacidad vigente | `clinic.privacy_notice_versions` (propuesta) | `CLINIC_ADMIN` |
 | Material del asistente educativo | `ai.knowledge_documents` (propuesta) | `CLINIC_ADMIN` |
 | Permisos por rol | `iam.role_permissions` | Migración (semilla) |
@@ -363,7 +367,7 @@ erDiagram
     users ||--o{ memberships : "user_id"
     clinic_clinics |o--o{ memberships : "clinic_id"
     roles ||--o{ memberships : "role_id"
-    clinic_clinics ||--o{ credential_invitations : "clinic_id"
+    clinic_clinics |o--o{ credential_invitations : "clinic_id"
     users ||--o{ credential_invitations : "user_id"
     clinic_patients |o--o{ credential_invitations : "patient_id"
     users ||--o{ credential_invitations : "issued_by"
@@ -393,7 +397,7 @@ Catálogo de roles del sistema (RBAC). Semilla de `insumap-database`; el código
 - **FK:** ninguna.
 - **Unicidad:** `code`.
 - **Tenant:** sin `clinic_id`; ver la política de RLS.
-- **RLS:** Plantilla P0 (catálogo global). Sin RLS; `insumap_app` e `insumap_readonly` solo tienen `SELECT`. Solo el migrador escribe.
+- **RLS:** Plantilla RLS-0 (catálogo global). Sin RLS; `insumap_app` e `insumap_readonly` solo tienen `SELECT`. Solo el migrador escribe.
 - **Índices:** solo la clave primaria y las de unicidad.
 - **Retención:** Permanente (semilla).
 - **Casos de uso:** LoginUseCase, GetCurrentUserUseCase (`GET /auth/me`), Verificación de permisos (`PermissionCode`).
@@ -407,7 +411,7 @@ Catálogo de códigos de permiso (`dominio.accion` o `dominio.accion_alcance`). 
 - **FK:** ninguna.
 - **Unicidad:** `code`.
 - **Tenant:** sin `clinic_id`; ver la política de RLS.
-- **RLS:** Plantilla P0 (catálogo global).
+- **RLS:** Plantilla RLS-0 (catálogo global).
 - **Índices:** solo la clave primaria y las de unicidad.
 - **Retención:** Permanente (semilla). Un permiso nuevo llega por migración, nunca por código.
 - **Casos de uso:** Verificación de permisos (`PermissionCode`), GetCurrentUserUseCase.
@@ -421,7 +425,7 @@ Matriz rol por permiso. La presencia de la fila concede el permiso; lo que no es
 - **FK:** `role_id` -> `iam.roles(id)`; `permission_id` -> `iam.permissions(id)`.
 - **Unicidad:** PK compuesta (`role_id`, `permission_id`).
 - **Tenant:** sin `clinic_id`; ver la política de RLS.
-- **RLS:** Plantilla P0 (catálogo global).
+- **RLS:** Plantilla RLS-0 (catálogo global).
 - **Índices:** `ix_role_permissions_permission_id` en (`permission_id`) para la consulta inversa.
 - **Retención:** Permanente (semilla).
 - **Casos de uso:** Verificación de permisos (`PermissionCode`).
@@ -435,24 +439,24 @@ Identidad y credenciales de toda persona con cuenta: personal y pacientes (la cu
 - **FK:** ninguna.
 - **Unicidad:** `email_normalized` (índice único parcial `WHERE email_normalized IS NOT NULL`).
 - **Tenant:** sin `clinic_id`; ver la política de RLS.
-- **RLS:** Plantilla P6. `SELECT`: la propia fila (`id = iam.app_user_id()`) o usuarios con membresía en la clínica de la sesión (`CA`, `DR`, `SY`). `INSERT`/`UPDATE`: `CA` sobre personal y pacientes de su clínica; cada usuario actualiza su propia fila (contraseña, MFA). El login, la activación y el refresh leen antes del contexto con `iam.lookup_login_identity`. `insumap_readonly` no ve `password_hash` (grant por columnas).
+- **RLS:** Plantilla RLS-6. `SELECT`: la propia fila (`id = iam.app_user_id()`) o usuarios con membresía en la clínica de la sesión (`CA`, `DR`, `SY`). `INSERT`/`UPDATE`: `CA` sobre personal y pacientes de su clínica; cada usuario actualiza su propia fila (contraseña, MFA). El login, la activación y el refresh leen antes del contexto con `iam.lookup_login_identity`. `insumap_readonly` no ve `password_hash` (grant por columnas).
 - **Índices:** `ux_users_email_normalized` (único parcial); `ix_users_status` en (`status`) para el job de invitaciones vencidas.
 - **Retención:** Sin purga en el MVP. Al desactivar a un paciente la fila se conserva (la historia clínica no se borra, RF-94).
-- **Casos de uso:** LoginUseCase, CompleteActivationUseCase, ChangePasswordUseCase, CompletePasswordResetUseCase, CreateStaffUserUseCase, ChangePatientStatusUseCase, DeactivateStaffUseCase, ImportPatientsUseCase (crea la cuenta `IMPORTED`), CreateFirstClinicAdminUseCase.
+- **Casos de uso:** LoginUseCase, CompleteActivationUseCase, ChangePasswordUseCase, CompletePasswordResetUseCase, CreateStaffUserUseCase, ChangePatientStatusUseCase, DeactivateStaffUseCase, ImportPatientsUseCase (crea la cuenta `IMPORTED`), CreateFirstClinicAdminUseCase, CreatePlatformAdminCommand (`insumap create-platform-admin`).
 
 #### `iam.memberships`
 
-Vínculo de una persona con una clínica y un rol. En el MVP cada usuario tiene una sola membresía (`user_id` único): un usuario pertenece a una clínica. El `PLATFORM_ADMIN` tiene una membresía sin clínica.
+Vínculo de una persona con una clínica y un rol. Existe para todo usuario: el personal y los pacientes (la importación crea la cuenta `IMPORTED` y su membresía `PATIENT` en la misma transacción) y de ella salen el `role` y el `clinic_id` del JWT. En el MVP cada usuario tiene una sola membresía (`user_id` único): un usuario pertenece a una clínica. El `PLATFORM_ADMIN` tiene una membresía sin clínica.
 
 - **Columnas clave:** `role_id`, `is_active`.
 - **PK:** `id`.
 - **FK:** `user_id` -> `iam.users(id)`; `clinic_id` -> `clinic.clinics(id)`; `role_id` -> `iam.roles(id)`.
 - **Unicidad:** `user_id` (una membresía por usuario).
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P1 con rama global: `clinic_id = iam.app_clinic_id()` para `CA`, `DR` y `SY`; el `PLATFORM_ADMIN` solo alcanza su propia fila. Un `CHECK` por trigger impide `clinic_id` nulo en roles distintos de `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-1 con rama global: `clinic_id = iam.app_clinic_id()` para `CA`, `DR` y `SY`; el `PLATFORM_ADMIN` solo alcanza su propia fila. Un `CHECK` por trigger impide `clinic_id` nulo en roles distintos de `PLATFORM_ADMIN`.
 - **Índices:** `ix_memberships_clinic_id_role_id` en (`clinic_id`, `role_id`) para listar personal.
 - **Retención:** Sin purga. Un cambio de rol incrementa `users.token_version` y revoca las familias de refresh.
-- **Casos de uso:** LoginUseCase, CreateStaffUserUseCase, DeactivateStaffUseCase, CreateFirstClinicAdminUseCase, GetCurrentUserUseCase.
+- **Casos de uso:** LoginUseCase, ImportPatientsUseCase (crea la membresía `PATIENT`), ChangePatientStatusUseCase, CreateStaffUserUseCase, DeactivateStaffUseCase, CreateFirstClinicAdminUseCase, CreatePlatformAdminCommand (`insumap create-platform-admin`), GetCurrentUserUseCase.
 
 #### `iam.credential_invitations`
 
@@ -462,11 +466,11 @@ Invitaciones de un solo uso: activación de paciente, activación de personal y 
 - **PK:** `id`.
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `user_id` -> `iam.users(id)`; `patient_id` -> `clinic.patients(id)`; `issued_by` -> `iam.users(id)`; `revoked_by` -> `iam.users(id)`; `replaced_by_id` -> `iam.credential_invitations(id)`.
 - **Unicidad:** `code_hash`; Una invitación vigente por cuenta y propósito: único parcial (`user_id`, `purpose`) `WHERE status IN ('PENDING','VERIFIED')` (equivale a una por paciente).
-- **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1. `CA` (`credentials.issue`, `credentials.revoke`) en su clínica; `SY` para el job de vencimiento. La activación busca por `code_hash` antes de conocer la clínica con `iam.lookup_invitation_by_code_hash` (definer), y desde ahí fija `app.clinic_id`. Sin acceso de `DR`, `PT` ni `PLATFORM_ADMIN` (la primera invitación de un `CLINIC_ADMIN` la crea `iam.create_first_clinic_admin`).
+- **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
+- **RLS:** Plantilla RLS-1. `CA` (`credentials.issue`, `credentials.revoke`) en su clínica; `SY` para el job de vencimiento. La activación busca por `code_hash` antes de conocer la clínica con `iam.lookup_invitation_by_code_hash` (definer), y desde ahí fija `app.clinic_id`. Sin acceso de `DR`, `PT` ni `PLATFORM_ADMIN`. Las invitaciones sin clínica (activación del `PLATFORM_ADMIN`) solo las crea `iam.create_platform_admin(...)` (definer) y, tras `lookup_invitation_by_code_hash`, la activación fija `app.user_id` provisional y una rama adicional (`clinic_id IS NULL AND user_id = iam.app_user_id()`) permite leerlas y actualizarlas; no existe `app.clinic_id` en esa transacción. La primera invitación de un `CLINIC_ADMIN` la crea `iam.create_first_clinic_admin`.
 - **Índices:** `ux_credential_invitations_code_hash`; `ux_credential_invitations_open` (único parcial); `ix_credential_invitations_expiry` en (`expires_at`) `WHERE status IN ('PENDING','VERIFIED')` para `expire_invitations`; `ix_credential_invitations_patient_id` en (`patient_id`, `issued_at` DESC).
 - **Retención:** 90 días después de un estado terminal (`USED`, `EXPIRED`, `REVOKED`, `LOCKED`), por `audit.retention_policies`.
-- **Casos de uso:** IssueCredentialsUseCase (`IssueCredentialsCommand`), RevokeCredentialsUseCase, VerifyActivationUseCase, CompleteActivationUseCase, ExpireInvitationsJob, CreateStaffUserUseCase, CreateFirstClinicAdminUseCase, ApplyRetentionPoliciesJob.
+- **Casos de uso:** IssueCredentialsUseCase (`IssueCredentialsCommand`), RevokeCredentialsUseCase, VerifyActivationUseCase, CompleteActivationUseCase, ExpireInvitationsJob, CreateStaffUserUseCase, CreateFirstClinicAdminUseCase, CreatePlatformAdminCommand (`insumap create-platform-admin`), ApplyRetentionPoliciesJob.
 
 #### `iam.auth_challenges` (propuesta)
 
@@ -477,7 +481,7 @@ Retos y tokens de vida corta y un solo uso: sesión de activación, reto de MFA,
 - **FK:** `user_id` -> `iam.users(id)`; `clinic_id` -> `clinic.clinics(id)`; `invitation_id` -> `iam.credential_invitations(id)`.
 - **Unicidad:** `token_hash`.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P4 (anterior al contexto). Sin RLS: se localiza por un token de 256 bits antes de conocer clínica o usuario. `insumap_app` tiene `INSERT`, `SELECT` y `UPDATE` solo de `attempts` y `consumed_at`; no tiene `DELETE` (borra la función de purga). `insumap_readonly` sin acceso.
+- **RLS:** Plantilla RLS-4 (anterior al contexto). Sin RLS: se localiza por un token de 256 bits antes de conocer clínica o usuario. `insumap_app` tiene `INSERT`, `SELECT` y `UPDATE` solo de `attempts` y `consumed_at`; no tiene `DELETE` (borra la función de purga). `insumap_readonly` sin acceso.
 - **Índices:** `ux_auth_challenges_token_hash`; `ix_auth_challenges_expires_at` en (`expires_at`) para la purga.
 - **Retención:** 1 día después de vencer o consumirse.
 - **Casos de uso:** LoginUseCase (reto MFA), VerifyMfaUseCase, VerifyActivationUseCase, CompleteActivationUseCase, RequestPasswordResetUseCase, CompletePasswordResetUseCase, ConfirmEmailUseCase, ApplyRetentionPoliciesJob.
@@ -491,7 +495,7 @@ Refresh tokens opacos con rotación y detección de reutilización. Se guarda so
 - **FK:** `user_id` -> `iam.users(id)`; `clinic_id` -> `clinic.clinics(id)`; `replaced_by_id` -> `iam.refresh_tokens(id)`.
 - **Unicidad:** `token_hash`.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P6. Con contexto: `user_id = iam.app_user_id()`; `CA` sobre su clínica (revocar al suspender o restablecer MFA); `PLATFORM_ADMIN` sobre membresías sin clínica. El refresh lee antes del contexto con `iam.lookup_refresh_token` (definer); la rotación es un `UPDATE ... WHERE revoked_at IS NULL RETURNING`. `insumap_readonly` sin acceso.
+- **RLS:** Plantilla RLS-6. Con contexto: `user_id = iam.app_user_id()`; `CA` sobre su clínica (revocar al restablecer MFA o suspender personal). Al suspender una clínica, el trigger `clinic.on_clinic_suspended()` (definer) revoca las familias de todos sus usuarios, sin ramas para `PLATFORM_ADMIN`. El refresh lee antes del contexto con `iam.lookup_refresh_token` (definer); la rotación es un `UPDATE ... WHERE revoked_at IS NULL RETURNING`. `insumap_readonly` sin acceso.
 - **Índices:** `ux_refresh_tokens_token_hash`; `ix_refresh_tokens_family_id` en (`family_id`); `ix_refresh_tokens_user_active` en (`user_id`) `WHERE revoked_at IS NULL`.
 - **Retención:** 30 días después de vencer o ser revocado.
 - **Casos de uso:** LoginUseCase, RefreshSessionUseCase, LogoutUseCase, LogoutAllUseCase, ChangePasswordUseCase, ResetMfaUseCase, SuspendClinicUseCase, ChangePatientStatusUseCase, ApplyRetentionPoliciesJob.
@@ -505,7 +509,7 @@ Segundo factor del personal: secreto TOTP cifrado y códigos de respaldo de un s
 - **FK:** `user_id` -> `iam.users(id)`.
 - **Unicidad:** Un TOTP activo por usuario: único parcial (`user_id`) `WHERE factor_type = 'TOTP' AND revoked_at IS NULL`; `code_hash` (único parcial `WHERE code_hash IS NOT NULL`).
 - **Tenant:** sin `clinic_id`; ver la política de RLS.
-- **RLS:** Plantilla P6: `user_id = iam.app_user_id()` para leer y verificar. Un `CA` restablece el MFA del personal de su clínica (`UPDATE revoked_at`) y un `PLATFORM_ADMIN` el de un `CLINIC_ADMIN`; nadie restablece el suyo. Tras `iam.lookup_login_identity` el login fija `app.user_id` provisional para leer el factor. `insumap_readonly` sin acceso.
+- **RLS:** Plantilla RLS-6: `user_id = iam.app_user_id()` para leer y verificar. Un `CA` restablece el MFA del personal de su clínica (`UPDATE revoked_at`) y un `PLATFORM_ADMIN` el de un `CLINIC_ADMIN`; nadie restablece el suyo. Tras `iam.lookup_login_identity` el login fija `app.user_id` provisional para leer el factor. `insumap_readonly` sin acceso.
 - **Índices:** `ux_mfa_factors_active_totp` (único parcial); `ix_mfa_factors_user_id` en (`user_id`).
 - **Retención:** Mientras la cuenta exista. Regenerar códigos invalida (`revoked_at`) los anteriores.
 - **Casos de uso:** EnrollMfaUseCase, VerifyMfaUseCase, RegenerateRecoveryCodesUseCase, ResetMfaUseCase, LoginUseCase.
@@ -519,7 +523,7 @@ Registro de cada intento de login, exista o no la cuenta. Se escribe en una tran
 - **FK:** `user_id` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** sin `clinic_id`; ver la política de RLS.
-- **RLS:** Plantilla P4 (anterior al contexto). Sin RLS ni `clinic_id`: se escribe antes de conocer la clínica y guarda solo HMAC. `insumap_app` tiene `INSERT` y `SELECT`; sin `UPDATE` ni `DELETE` (purga por función). `insumap_readonly` sin acceso.
+- **RLS:** Plantilla RLS-4 (anterior al contexto). Sin RLS ni `clinic_id`: se escribe antes de conocer la clínica y guarda solo HMAC. `insumap_app` tiene `INSERT` y `SELECT`; sin `UPDATE` ni `DELETE` (purga por función). `insumap_readonly` sin acceso.
 - **Append-only:** Append-only por convención de privilegios (sin `UPDATE`/`DELETE` para `insumap_app`).
 - **Índices:** `ix_login_attempts_pair` en (`email_hmac`, `ip_hmac`, `occurred_at` DESC) para el bloqueo por pareja; `ix_login_attempts_email` en (`email_hmac`, `occurred_at` DESC) para el bloqueo global; `ix_login_attempts_occurred_at` en (`occurred_at`) para la purga.
 - **Retención:** 90 días.
@@ -534,7 +538,7 @@ Estado del bloqueo escalonado: nivel y fin del bloqueo por pareja (correo, IP) y
 - **FK:** ninguna.
 - **Unicidad:** (`scope`, `key_hmac`).
 - **Tenant:** sin `clinic_id`; ver la política de RLS.
-- **RLS:** Plantilla P4 (anterior al contexto). Sin RLS; `insumap_app` con `INSERT`, `SELECT` y `UPDATE`. El desbloqueo de un `CLINIC_ADMIN` (`POST /users/{id}/unlock`) pasa por la función `iam.unlock_account(p_user_id)` (definer, propuesta) que valida clínica.
+- **RLS:** Plantilla RLS-4 (anterior al contexto). Sin RLS; `insumap_app` con `INSERT`, `SELECT` y `UPDATE`. El desbloqueo de un `CLINIC_ADMIN` (`POST /users/{id}/unlock`) pasa por la función `iam.unlock_account(p_user_id)` (definer, propuesta) que valida clínica.
 - **Índices:** `ux_login_lockouts_scope_key` (único).
 - **Retención:** 1 día después de `locked_until` o de `reset_at`.
 - **Casos de uso:** LoginUseCase, UnlockAccountUseCase, ApplyRetentionPoliciesJob.
@@ -548,7 +552,7 @@ Hashes de las últimas contraseñas para impedir su reutilización (`PASSWORD_HI
 - **FK:** `user_id` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** sin `clinic_id`; ver la política de RLS.
-- **RLS:** Plantilla P6: `user_id = iam.app_user_id()`. Sin acceso de ningún administrador. `insumap_readonly` sin acceso.
+- **RLS:** Plantilla RLS-6: `user_id = iam.app_user_id()`. Sin acceso de ningún administrador. `insumap_readonly` sin acceso.
 - **Índices:** `ix_password_history_user_id` en (`user_id`, `created_at` DESC).
 - **Retención:** Se conservan las últimas 5 por usuario; el resto se borra al insertar (job o caso de uso).
 - **Casos de uso:** ChangePasswordUseCase, CompletePasswordResetUseCase, CompleteActivationUseCase.
@@ -562,7 +566,7 @@ Eventos de seguridad (reutilización de refresh, bloqueos, MFA, activaciones, ca
 - **FK:** `user_id` -> `iam.users(id)`; `clinic_id` -> `clinic.clinics(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P7. `INSERT`: cualquier contexto, incluso sin clínica (`WITH CHECK (clinic_id IS NULL OR clinic_id = iam.app_clinic_id())`). `SELECT`: `CA` con `audit.read` ve los de su clínica; `PLATFORM_ADMIN` (`audit.read_platform`) ve todos. Sin `UPDATE` ni `DELETE`.
+- **RLS:** Plantilla RLS-7. `INSERT`: cualquier contexto, incluso sin clínica (`WITH CHECK (clinic_id IS NULL OR clinic_id = iam.app_clinic_id())`). `SELECT`: `CA` con `audit.read` ve los de su clínica; `PLATFORM_ADMIN` (`audit.read_platform`) ve todos. Sin `UPDATE` ni `DELETE`.
 - **Append-only:** Append-only por trigger (propuesta): `audit.reject_mutation()`; solo la función de purga borra por retención.
 - **Índices:** `ix_security_events_clinic_occurred` en (`clinic_id`, `occurred_at` DESC); `ix_security_events_severity_occurred` en (`severity`, `occurred_at` DESC); `ix_security_events_user_id` en (`user_id`, `occurred_at` DESC).
 - **Retención:** 365 días.
@@ -577,7 +581,7 @@ Contadores de ventana fija para los límites de tasa críticos (login, MFA, acti
 - **FK:** ninguna.
 - **Unicidad:** PK compuesta (`family`, `key_hmac`, `window_start`).
 - **Tenant:** sin `clinic_id`; ver la política de RLS.
-- **RLS:** Plantilla P4 (anterior al contexto). Sin RLS ni `clinic_id`; `insumap_app` con `INSERT`, `SELECT` y `UPDATE` de `hits` y `limit_event_logged`. Corre en una transacción propia. `insumap_readonly` sin acceso.
+- **RLS:** Plantilla RLS-4 (anterior al contexto). Sin RLS ni `clinic_id`; `insumap_app` con `INSERT`, `SELECT` y `UPDATE` de `hits` y `limit_event_logged`. Corre en una transacción propia. `insumap_readonly` sin acceso.
 - **Índices:** `ix_rate_limit_buckets_window_start` en (`window_start`) para la purga.
 - **Retención:** 1 día.
 - **Casos de uso:** Middleware de límite de tasa (`PostgresRateLimiter`), LoginUseCase, VerifyActivationUseCase, IssueCredentialsUseCase, ImportPatientsUseCase, AskAssistantUseCase, GenerateClinicalSummaryUseCase, GeneratePatientReportUseCase, ApplyRetentionPoliciesJob.
@@ -679,7 +683,8 @@ erDiagram
         uuid patient_id FK
     }
     clinic_settings {
-        uuid clinic_id PK, FK
+        uuid id PK
+        uuid clinic_id FK
         integer recommendation_expiry_hours
         integer forecast_refresh_minutes
         integer dropout_inactivity_days
@@ -717,8 +722,8 @@ erDiagram
     clinics ||--o{ import_rows : "clinic_id"
     import_batches ||--o{ import_rows : "batch_id"
     patients |o--o{ import_rows : "patient_id"
-    clinics ||--o{ clinic_settings : "clinic_id"
-    iam_users ||--o{ clinic_settings : "updated_by"
+    clinics |o--o{ clinic_settings : "clinic_id"
+    iam_users |o--o{ clinic_settings : "updated_by"
 ```
 
 En el diagrama, las entidades con prefijo de esquema (por ejemplo `iam_users`) son referencias a tablas de otro esquema. Se muestran la clave primaria, las claves foráneas y las columnas clave; todas las columnas están en el [Diccionario](Diccionario-de-datos.md).
@@ -732,7 +737,7 @@ Clínica contratante (tenant). La bandera `is_demo` marca la clínica de "Datos 
 - **FK:** ninguna.
 - **Unicidad:** `lower(name)` (índice único funcional).
 - **Tenant:** la tabla es la raíz (`id` es el `clinic_id` de las demás).
-- **RLS:** Plantilla P8. `SELECT`: `id = iam.app_clinic_id()` para `CA`, `DR`, `PT`, `SY`; `PLATFORM_ADMIN` ve todas (`clinics.manage`). `INSERT`/`UPDATE`: solo `PLATFORM_ADMIN`. Es la única tabla de datos con rama para `PLATFORM_ADMIN` fuera de `iam`.
+- **RLS:** Plantilla RLS-8. `SELECT`: `id = iam.app_clinic_id()` para `CA`, `DR`, `PT`, `SY`; `PLATFORM_ADMIN` ve todas (`clinics.manage`). `INSERT`/`UPDATE`: solo `PLATFORM_ADMIN`. Es la única tabla de datos con rama para `PLATFORM_ADMIN` fuera de `iam`.
 - **Índices:** `ux_clinics_name_lower`; `ix_clinics_status` en (`status`).
 - **Retención:** Sin purga.
 - **Casos de uso:** CreateClinicUseCase, SuspendClinicUseCase, ReactivateClinicUseCase, LoginUseCase (estado de la clínica), GetClinicUseCase, ManageDemoClinicUseCase.
@@ -746,7 +751,7 @@ Sedes de una clínica (Post-MVP, RF-15).
 - **FK:** `clinic_id` -> `clinic.clinics(id)`.
 - **Unicidad:** (`clinic_id`, `lower(name)`).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1: `clinic_id = iam.app_clinic_id()`. `SELECT`: `CA`, `DR`. `INSERT`/`UPDATE`: `CA` (`sites.manage`).
+- **RLS:** Plantilla RLS-1: `clinic_id = iam.app_clinic_id()`. `SELECT`: `CA`, `DR`. `INSERT`/`UPDATE`: `CA` (`sites.manage`).
 - **Índices:** `ux_sites_clinic_name`.
 - **Retención:** Sin purga.
 - **Casos de uso:** ManageSitesUseCase.
@@ -760,7 +765,7 @@ Perfil profesional del personal (médicos y administradores). Relación 1:1 con 
 - **FK:** `user_id` -> `iam.users(id)`; `clinic_id` -> `clinic.clinics(id)`.
 - **Unicidad:** PK (`user_id`); (`clinic_id`, `professional_license`) único parcial `WHERE professional_license IS NOT NULL`.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1. `SELECT`: `CA` y `DR` de la clínica (el médico ve colegas para la asignación de equipos). `INSERT`/`UPDATE`: `CA` (`users.manage`); cada persona actualiza su propio perfil.
+- **RLS:** Plantilla RLS-1. `SELECT`: `CA` y `DR` de la clínica (el médico ve colegas para la asignación de equipos). `INSERT`/`UPDATE`: `CA` (`users.manage`); cada persona actualiza su propio perfil.
 - **Índices:** `ix_staff_profiles_clinic_id` en (`clinic_id`).
 - **Retención:** Sin purga.
 - **Casos de uso:** CreateStaffUserUseCase, DeactivateStaffUseCase, ListStaffUseCase, AssignDoctorUseCase.
@@ -774,7 +779,7 @@ Asociación muchos a muchos entre personal y sedes (Post-MVP, RF-15). Un médico
 - **FK:** `user_id` -> `clinic.staff_profiles(user_id)`; `site_id` -> `clinic.sites(id)`; `clinic_id` -> `clinic.clinics(id)`.
 - **Unicidad:** PK compuesta (`user_id`, `site_id`).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1. `SELECT`: `CA`, `DR`. Escritura: `CA` (`sites.manage`).
+- **RLS:** Plantilla RLS-1. `SELECT`: `CA`, `DR`. Escritura: `CA` (`sites.manage`).
 - **Índices:** `ix_staff_sites_site_id` en (`site_id`).
 - **Retención:** Sin purga.
 - **Casos de uso:** ManageSitesUseCase, CreateStaffUserUseCase.
@@ -788,7 +793,7 @@ Paciente de una clínica: identidad (clase C), documento cifrado y con hash para
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `user_id` -> `iam.users(id)`; `import_batch_id` -> `clinic.import_batches(id)`.
 - **Unicidad:** (`clinic_id`, `mrn`); (`clinic_id`, `document_hash`); `user_id`.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2. `CA` (`patients.read_roster`): identidad de su clínica; `DR`: la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`, no la RLS); `PT`: solo su fila (`user_id = iam.app_user_id()`); `SY` por clínica. Sin rama para `PLATFORM_ADMIN`. `INSERT`: el importador (`CA`). `UPDATE`: `CA` (datos administrativos permitidos por RF-19). El documento descifrado solo sale por casos de uso auditados (`DECRYPT`); `insumap_readonly` no ve las columnas S (`document_hash`, `document_ciphertext`).
+- **RLS:** Plantilla RLS-2. `CA` (`patients.read_roster`): identidad de su clínica; `DR`: la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`, no la RLS); `PT`: solo su fila (`user_id = iam.app_user_id()`); `SY` por clínica. Sin rama para `PLATFORM_ADMIN`. `INSERT`: el importador (`CA`). `UPDATE`: `CA` (datos administrativos permitidos por RF-19). El documento descifrado solo sale por casos de uso auditados (`DECRYPT`); `insumap_readonly` no ve las columnas S (`document_hash`, `document_ciphertext`).
 - **Índices:** `ux_patients_clinic_mrn`; `ux_patients_clinic_document_hash`; `ux_patients_user_id`; `ix_patients_clinic_name` en (`clinic_id`, `lower(full_name)`) para el listado administrativo.
 - **Retención:** La historia clínica no se borra al desactivar al paciente (RF-94); el plazo legal queda por definir en `Cumplimiento-y-privacidad.md`.
 - **Casos de uso:** ImportPatientsUseCase, ListPatientRosterUseCase, ChangePatientStatusUseCase, PatientOverviewFacade, DoctorDashboardFacade, AssignDoctorUseCase, IssueCredentialsUseCase, VerifyActivationUseCase, CompleteActivationUseCase, ExportPatientDataUseCase.
@@ -802,7 +807,7 @@ Asignación médico-paciente con historial. Es la fuente de `PatientRecordAccess
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `doctor_user_id` -> `clinic.staff_profiles(user_id)`; `assigned_by` -> `iam.users(id)`; `ended_by` -> `iam.users(id)`.
 - **Unicidad:** Un principal vigente por paciente: único parcial (`patient_id`) `WHERE is_primary AND ended_at IS NULL`; Una asignación abierta por (`patient_id`, `doctor_user_id`) `WHERE ended_at IS NULL`.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2. `CA` (`care_team.assign`, `care_team.read`): su clínica. `DR`: solo sus filas (`doctor_user_id = iam.app_user_id()`, `care_team.read`). `PT`: sus filas de equipo (`OWN`). `SY`: la clínica de la sesión (cadena de escalamiento). La asignación del médico a un paciente se verifica en la aplicación, no en la RLS. Un trigger diferido impide dejar al paciente sin principal.
+- **RLS:** Plantilla RLS-2. `CA` (`care_team.assign`, `care_team.read`): su clínica. `DR`: solo sus filas (`doctor_user_id = iam.app_user_id()`, `care_team.read`). `PT`: sus filas de equipo (`OWN`). `SY`: la clínica de la sesión (cadena de escalamiento). La asignación del médico a un paciente se verifica en la aplicación, no en la RLS. Un trigger diferido impide dejar al paciente sin principal.
 - **Índices:** `ux_care_team_primary` (único parcial); `ux_care_team_open_pair` (único parcial); `ix_care_team_doctor_open` en (`doctor_user_id`, `patient_id`) `WHERE ended_at IS NULL` para el triage del médico; `ix_care_team_patient_id` en (`patient_id`, `assigned_at` DESC).
 - **Retención:** Sin purga: el historial de fechas y motivo debe conservarse (HU-13).
 - **Casos de uso:** AssignDoctorUseCase (`AssignDoctorCommand`), WithdrawDoctorUseCase, PatientRecordAccessProxy, DoctorDashboardFacade, AlertEscalationHandler, DeactivateStaffUseCase (pacientes sin médico).
@@ -816,7 +821,7 @@ Versiones del aviso de privacidad y del consentimiento de cada clínica (propues
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `published_by` -> `iam.users(id)`.
 - **Unicidad:** (`clinic_id`, `version`); Una vigente por clínica: único parcial (`clinic_id`) `WHERE is_current`.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1. `SELECT`: todos los roles de la clínica; la activación pública la lee tras `lookup_invitation_by_code_hash` con la clínica fijada. `INSERT`: `CA`. Sin `UPDATE` salvo `is_current`; el contenido es inmutable (trigger).
+- **RLS:** Plantilla RLS-1. `SELECT`: todos los roles de la clínica; la activación pública la lee tras `lookup_invitation_by_code_hash` con la clínica fijada. `INSERT`: `CA`. Sin `UPDATE` salvo `is_current`; el contenido es inmutable (trigger).
 - **Append-only:** Contenido inmutable por trigger (propuesta).
 - **Índices:** `ux_privacy_notice_current` (único parcial).
 - **Retención:** Permanente: respalda consentimientos ya otorgados.
@@ -831,7 +836,7 @@ Historial de consentimientos del paciente por versión y alcance. Cada aceptaci�
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `privacy_notice_version_id` -> `clinic.privacy_notice_versions(id)`; `recorded_by` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2. `PT`: sus filas (`OWN`), `INSERT` propio (`consents.manage_own`). `CA`: `SELECT` de estado por paciente (`consents.read_status`), sin contenido adicional. `DR` y `SY`: `SELECT` en la clínica. En la activación, la inserción ocurre con la clínica fijada por la invitación.
+- **RLS:** Plantilla RLS-2. `PT`: sus filas (`OWN`), `INSERT` propio (`consents.manage_own`). `CA`: `SELECT` de estado por paciente (`consents.read_status`), sin contenido adicional. `DR` y `SY`: `SELECT` en la clínica. En la activación, la inserción ocurre con la clínica fijada por la invitación.
 - **Append-only:** Append-only por trigger (propuesta): evidencia legal del consentimiento.
 - **Índices:** `ix_patient_consents_latest` en (`patient_id`, `scope`, `occurred_at` DESC).
 - **Retención:** Según la normativa de protección de datos (`Cumplimiento-y-privacidad.md`, por definir).
@@ -846,7 +851,7 @@ Solicitudes de acceso, rectificación, supresión o retiro del paciente, con est
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `resolved_by` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2. `PT`: crea y ve las propias (`privacy_requests.create_own`). `CA`: tramita las de su clínica (`privacy_requests.manage`).
+- **RLS:** Plantilla RLS-2. `PT`: crea y ve las propias (`privacy_requests.create_own`). `CA`: tramita las de su clínica (`privacy_requests.manage`).
 - **Índices:** `ix_privacy_requests_open` en (`clinic_id`, `due_at`) `WHERE status IN ('OPEN','IN_PROGRESS')`; `ix_privacy_requests_patient_id` en (`patient_id`).
 - **Retención:** Según la normativa (por definir).
 - **Casos de uso:** PrivacyRequestUseCase, ExportPatientDataUseCase, ManageConsentUseCase.
@@ -860,7 +865,7 @@ Lote de importación de pacientes (FHIR R4 o CSV) con totales, origen y autor. E
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `created_by` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1. `CA` (`patients.import`, `import_batches.read`): su clínica. Sin acceso de `DR`, `PT` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-1. `CA` (`patients.import`, `import_batches.read`): su clínica. Sin acceso de `DR`, `PT` ni `PLATFORM_ADMIN`.
 - **Índices:** `ix_import_batches_clinic_created` en (`clinic_id`, `created_at` DESC); `ix_import_batches_file_sha256` en (`clinic_id`, `file_sha256`).
 - **Retención:** Sin purga (historial de lotes, RF-20).
 - **Casos de uso:** ImportPatientsUseCase (`PatientImportPipeline`), ListImportBatchesUseCase, GetImportBatchUseCase.
@@ -874,24 +879,24 @@ Resultado por fila de un lote: estado y códigos de incidencia. No guarda la fil
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `batch_id` -> `clinic.import_batches(id)`; `patient_id` -> `clinic.patients(id)`.
 - **Unicidad:** (`batch_id`, `row_number`, `resource_type`) con `NULLS NOT DISTINCT`.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1. `CA`: su clínica. Sin acceso de otros roles.
+- **RLS:** Plantilla RLS-1. `CA`: su clínica. Sin acceso de otros roles.
 - **Índices:** `ux_import_rows_batch_row`; `ix_import_rows_batch_status` en (`batch_id`, `status`) para descargar los errores.
 - **Retención:** Igual que el lote.
 - **Casos de uso:** ImportPatientsUseCase, GetImportBatchUseCase.
 
 #### `clinic.clinic_settings` (propuesta)
 
-Parámetros operativos de negocio de la clínica, una fila por clínica (propuesta). Son datos configurables, nunca constantes del código.
+Parámetros operativos de negocio de la clínica (propuesta). Una fila global sembrada (`clinic_id` nulo) con los valores por defecto y, opcionalmente, una fila por clínica que la sustituye. Son datos configurables, nunca constantes del código.
 
 - **Columnas clave:** `recommendation_expiry_hours`, `forecast_refresh_minutes`, `dropout_inactivity_days`, `kpi_min_cell_size`.
-- **PK:** `clinic_id`.
+- **PK:** `id`.
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `updated_by` -> `iam.users(id)`.
-- **Unicidad:** PK (`clinic_id`).
-- **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1. `SELECT`: todos los roles de la clínica y `SY`. `INSERT`/`UPDATE`: `CA`; cada cambio queda en `audit.audit_log`. La semilla inicial de cada clínica la crea `CreateClinicUseCase` con valores de la semilla de `insumap-database`.
-- **Índices:** solo la clave primaria y las de unicidad.
+- **Unicidad:** `clinic_id` con `NULLS NOT DISTINCT` (una fila por clínica y una global).
+- **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
+- **RLS:** Plantilla RLS-3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para todos los roles de la clínica y `SY`. `INSERT`/`UPDATE`: `CA` sobre su fila de clínica; cada cambio queda en `audit.audit_log`. La fila global la siembra el migrador. Sin rama para `PLATFORM_ADMIN`.
+- **Índices:** `ux_clinic_settings_clinic`.
 - **Retención:** Sin purga.
-- **Casos de uso:** CreateClinicUseCase, ExpireRecommendationsJob, RefreshForecastOnReadingRecorded, ClinicKpisUseCase, DropoutRiskUseCase, UpdateClinicSettingsUseCase.
+- **Casos de uso:** ExpireRecommendationsJob, RefreshForecastOnReadingRecorded, ClinicKpisUseCase, DropoutRiskUseCase, UpdateClinicSettingsUseCase.
 
 ### 9.3 Esquema `care`: Plan de tratamiento, metas y seguimiento
 
@@ -1095,7 +1100,7 @@ Perfiles de metas glucémicas versionados (TIR, TBR, TAR, CV, ayunas, posprandia
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `created_by` -> `iam.users(id)`.
 - **Unicidad:** (`clinic_id`, `code`, `version`) con `NULLS NOT DISTINCT`; Una `ACTIVE` por (`clinic_id`, `code`): único parcial `WHERE status = 'ACTIVE'` con `NULLS NOT DISTINCT`.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P3 (semilla global o clínica). `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `CA`, `DR`, `PT` (metas propias), `SY`. `INSERT`/`UPDATE`: solo `CA` con `clinic_id = iam.app_clinic_id()` (`target_profiles.manage`); las semillas las escribe el migrador (política `TO insumap_migrator`). Una versión `ACTIVE` solo admite el cambio a `RETIRED`.
+- **RLS:** Plantilla RLS-3 (semilla global o clínica). `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `CA`, `DR`, `PT` (metas propias), `SY`. `INSERT`/`UPDATE`: solo `CA` con `clinic_id = iam.app_clinic_id()` (`target_profiles.manage`); las semillas las escribe el migrador (política `TO insumap_migrator`). Una versión `ACTIVE` solo admite el cambio a `RETIRED`.
 - **Append-only:** Versión `ACTIVE` inmutable por trigger `care.reject_active_version_update()` (propuesta).
 - **Índices:** `ux_target_profiles_version`; `ux_target_profiles_active`; `ix_target_profiles_population_default` en (`population`) `WHERE is_default AND status = 'ACTIVE'`.
 - **Retención:** Permanente: las métricas y recomendaciones históricas conservan la versión usada.
@@ -1110,7 +1115,7 @@ Historial del perfil de metas asignado a cada paciente (propuesta). Sin asignaci
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `target_profile_id` -> `care.target_profiles(id)`; `assigned_by` -> `iam.users(id)`.
 - **Unicidad:** Una vigente por paciente: único parcial (`patient_id`) `WHERE ended_at IS NULL`.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2. `DR` y `SY`: clínica de la sesión; `PT`: lectura propia (`OWN`). `INSERT`/`UPDATE`: `DR` (la asignación al paciente la verifica el proxy). `CA` sin acceso.
+- **RLS:** Plantilla RLS-2. `DR` y `SY`: clínica de la sesión; `PT`: lectura propia (`OWN`). `INSERT`/`UPDATE`: `DR` (la asignación al paciente la verifica el proxy). `CA` sin acceso.
 - **Índices:** `ux_patient_target_open` (único parcial).
 - **Retención:** Permanente.
 - **Casos de uso:** AssignTargetProfileUseCase, ComputeGlycemicMetricsUseCase, PatientOverviewFacade.
@@ -1124,7 +1129,7 @@ Plantillas de protocolo versionadas (prototipo P05 del contenido del plan). Las 
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `default_target_profile_id` -> `care.target_profiles(id)`; `created_by` -> `iam.users(id)`.
 - **Unicidad:** (`clinic_id`, `code`, `version`) con `NULLS NOT DISTINCT`.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `CA` y `DR` (`protocol_templates.read`). `INSERT`/`UPDATE`: solo `CA` (`protocol_templates.manage`); migrador para semillas. Sin acceso de `PT`.
+- **RLS:** Plantilla RLS-3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `CA` y `DR` (`protocol_templates.read`). `INSERT`/`UPDATE`: solo `CA` (`protocol_templates.manage`); migrador para semillas. Sin acceso de `PT`.
 - **Append-only:** Versión `ACTIVE` inmutable por trigger (propuesta): se versiona, no se edita.
 - **Índices:** `ux_protocol_templates_version`; `ix_protocol_templates_active` en (`clinic_id`, `code`) `WHERE status = 'ACTIVE'`.
 - **Retención:** Permanente (los planes referencian la versión).
@@ -1139,7 +1144,8 @@ Plan de tratamiento versionado de un paciente. Un paciente tiene un solo plan `A
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `template_id` -> `care.protocol_templates(id)`; `previous_plan_id` -> `care.treatment_plans(id)`; `source_recommendation_id` -> `ai.recommendations(id)`; `target_profile_id` -> `care.target_profiles(id)`; `created_by` -> `iam.users(id)`; `activated_by` -> `iam.users(id)`.
 - **Unicidad:** (`patient_id`, `version`); Un plan activo por paciente: único parcial (`patient_id`) `WHERE status = 'ACTIVE'`.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2. `DR` (`treatment_plans.manage`) y `SY`: clínica de la sesión, asignación por proxy; `PT`: solo `SELECT` del plan activo propio (`treatment_plans.read_own`); sin acceso de `CA`. El plan `ACTIVE` solo admite el paso a `SUPERSEDED`; los ítems solo cambian en `DRAFT` (trigger).
+- **RLS:** Plantilla RLS-2. `DR` (`treatment_plans.manage`) y `SY`: clínica de la sesión, asignación por proxy; `PT`: solo `SELECT` del plan activo propio (`treatment_plans.read_own`); sin acceso de `CA`. El plan `ACTIVE` solo admite el paso a `SUPERSEDED`; los ítems solo cambian en `DRAFT` (trigger).
+- **Nota:** FK circular con `ai.recommendations.plan_id`: la migración crea ambas tablas sin esa clave y agrega `fk_treatment_plans_source_recommendation_id` con un `ALTER TABLE` posterior a la creación de `ai.recommendations`.
 - **Índices:** `ux_treatment_plans_version`; `ux_treatment_plans_active` (único parcial); `ix_treatment_plans_patient_status` en (`patient_id`, `status`).
 - **Retención:** Permanente (historial clínico).
 - **Casos de uso:** CreatePlanFromTemplateUseCase, ActivateTreatmentPlanUseCase (`ActivateTreatmentPlanCommand`), RestorePlanVersionUseCase, DecideRecommendationUseCase (aplicar), PatientOverviewFacade, RecordInsulinDoseUseCase (liga la dosis al plan), GetMyPlanUseCase.
@@ -1153,7 +1159,7 @@ Plan de tratamiento versionado de un paciente. Un paciente tiene un solo plan `A
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `plan_id` -> `care.treatment_plans(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 heredada del plan: `DR` y `SY` en la clínica; `PT` solo `SELECT` de los ítems de su plan activo (`OWN` vía `plan_id`). Trigger: `INSERT`/`UPDATE`/`DELETE` solo si el plan está en `DRAFT`.
+- **RLS:** Plantilla RLS-2 heredada del plan: `DR` y `SY` en la clínica; `PT` solo `SELECT` de los ítems de su plan activo (`OWN` vía `plan_id`). Trigger: `INSERT`/`UPDATE`/`DELETE` solo si el plan está en `DRAFT`.
 - **Índices:** `ix_treatment_plan_items_plan_id` en (`plan_id`, `sort_order`).
 - **Retención:** Permanente.
 - **Casos de uso:** CreatePlanFromTemplateUseCase, ActivateTreatmentPlanUseCase (invariantes de `TreatmentPlanBuilder`, P04), GetMyPlanUseCase.
@@ -1167,7 +1173,7 @@ Foto jsonb del plan antes de cada cambio (`TreatmentPlanMemento`, P16). Permite 
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `plan_id` -> `care.treatment_plans(id)`; `taken_by` -> `iam.users(id)`.
 - **Unicidad:** (`plan_id`, `snapshot_no`).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1 con rol: `DR` y `SY` en la clínica (`SELECT`, `INSERT`). Sin acceso de `CA`, `PT` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-1 con rol: `DR` y `SY` en la clínica (`SELECT`, `INSERT`). Sin acceso de `CA`, `PT` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()`.
 - **Índices:** `ux_treatment_plan_snapshots_no`.
 - **Retención:** Permanente.
@@ -1182,7 +1188,7 @@ Recordatorios programados (medición, dosis, control, registro) con hora local y
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `plan_id` -> `care.treatment_plans(id)`; `set_by` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2. `DR`: clínica de la sesión, asignación por proxy; `PT`: `SELECT` y `UPDATE` de los propios dentro de lo que permite el plan; `SY`: lectura y `UPDATE` de `last_sent_at`. Sin acceso de `CA`.
+- **RLS:** Plantilla RLS-2. `DR`: clínica de la sesión, asignación por proxy; `PT`: `SELECT` y `UPDATE` de los propios dentro de lo que permite el plan; `SY`: lectura y `UPDATE` de `last_sent_at`. Sin acceso de `CA`.
 - **Índices:** `ix_reminder_schedules_due` en (`local_time`) `WHERE is_active`; `ix_reminder_schedules_patient_id` en (`patient_id`).
 - **Retención:** Mientras el paciente esté activo.
 - **Casos de uso:** ManageRemindersUseCase, SendDueRemindersJob, GetMyPlanUseCase.
@@ -1196,7 +1202,7 @@ Controles de seguimiento (citas) y tareas de contacto por riesgo de abandono (Po
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `assigned_to` -> `iam.users(id)`; `risk_assessment_id` -> `ai.risk_assessments(id)`; `created_by` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2. `DR`: controles de la clínica, asignación por proxy (`follow_ups.manage`); `PT`: `SELECT` de los propios de tipo `CONTROL` (`follow_ups.read_own`); `CA`: tareas `OUTREACH` sin detalle clínico (permiso por definir, ver brechas); `SY`.
+- **RLS:** Plantilla RLS-2. `DR`: controles de la clínica, asignación por proxy (`follow_ups.manage`); `PT`: `SELECT` de los propios de tipo `CONTROL` (`follow_ups.read_own`); `CA`: tareas `OUTREACH` sin detalle clínico (permiso por definir, ver brechas); `SY`.
 - **Índices:** `ix_follow_ups_patient_status` en (`patient_id`, `status`); `ix_follow_ups_due` en (`scheduled_for`) `WHERE status = 'SCHEDULED'`.
 - **Retención:** Mientras el paciente esté activo.
 - **Casos de uso:** ScheduleFollowUpUseCase, DropoutRiskUseCase, NightlyTriageJob, SendDueRemindersJob.
@@ -1210,7 +1216,7 @@ Notas clínicas del médico, append-only: una nota equivocada se corrige con otr
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `author_user_id` -> `iam.users(id)`; `supersedes_id` -> `care.clinical_notes(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1 con rol: `DR` y `SY` en la clínica (`clinical_notes.manage`), asignación por proxy. Sin acceso de `CA`, `PT` ni `PLATFORM_ADMIN` (RF-81; ver contradicción con V8).
+- **RLS:** Plantilla RLS-1 con rol: `DR` y `SY` en la clínica (`clinical_notes.manage`), asignación por proxy. Sin acceso de `CA`, `PT` ni `PLATFORM_ADMIN` (RF-81; ver contradicción con V8).
 - **Append-only:** Append-only por trigger `audit.reject_mutation()`.
 - **Índices:** `ix_clinical_notes_patient_created` en (`patient_id`, `created_at` DESC).
 - **Retención:** Según la normativa de historia clínica (por definir).
@@ -1225,7 +1231,7 @@ Marcas de "revisado" del dashboard de triage (RF-79). Un paciente revisado baja 
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `reviewed_by` -> `iam.users(id)`; `risk_assessment_id` -> `ai.risk_assessments(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1 con rol: `DR` y `SY` (`dashboard.read_assigned`); asignación por proxy.
+- **RLS:** Plantilla RLS-1 con rol: `DR` y `SY` (`dashboard.read_assigned`); asignación por proxy.
 - **Append-only:** Append-only por trigger (propuesta): la última fila manda.
 - **Índices:** `ix_triage_reviews_latest` en (`patient_id`, `reviewed_by`, `reviewed_at` DESC).
 - **Retención:** 90 días (propuesta, por definir).
@@ -1240,7 +1246,7 @@ Parámetros de validación de lecturas de glucosa por clínica (rango medible, r
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `created_by` -> `iam.users(id)`.
 - **Unicidad:** (`clinic_id`, `version`) con `NULLS NOT DISTINCT`; Una `ACTIVE` por clínica: único parcial `WHERE status = 'ACTIVE'` con `NULLS NOT DISTINCT`.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `PT`, `DR`, `CA`, `SY`. `INSERT`/`UPDATE`: `CA`; migrador para la semilla. Versión `ACTIVE` inmutable.
+- **RLS:** Plantilla RLS-3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `PT`, `DR`, `CA`, `SY`. `INSERT`/`UPDATE`: `CA`; migrador para la semilla. Versión `ACTIVE` inmutable.
 - **Append-only:** Versión `ACTIVE` inmutable por trigger (propuesta).
 - **Índices:** `ux_reading_validation_version`; `ux_reading_validation_active`.
 - **Retención:** Permanente (las lecturas no guardan los parámetros; la versión vigente al registrar queda en la auditoría de configuración).
@@ -1255,7 +1261,7 @@ Catálogo de síntomas que el paciente puede registrar, con la marca de síntoma
 - **FK:** `clinic_id` -> `clinic.clinics(id)`.
 - **Unicidad:** (`clinic_id`, `code`) con `NULLS NOT DISTINCT`.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `PT`, `DR`, `SY`, `CA`. `INSERT`/`UPDATE`: `CA`; migrador para la semilla.
+- **RLS:** Plantilla RLS-3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `PT`, `DR`, `SY`, `CA`. `INSERT`/`UPDATE`: `CA`; migrador para la semilla.
 - **Índices:** `ux_symptom_catalog_code`.
 - **Retención:** Permanente.
 - **Casos de uso:** RecordSymptomUseCase, EvaluateAlertsOnReadingRecorded (síntomas de alarma), ManageSymptomCatalogUseCase.
@@ -1269,7 +1275,7 @@ Métricas glucémicas calculadas por ventana, con la versión del perfil de meta
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `target_profile_id` -> `care.target_profiles(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2. `DR` y `SY` en la clínica (`metrics.read_assigned`), asignación por proxy; `PT`: `SELECT` propio (`metrics.read_own`). Sin acceso de `CA`.
+- **RLS:** Plantilla RLS-2. `DR` y `SY` en la clínica (`metrics.read_assigned`), asignación por proxy; `PT`: `SELECT` propio (`metrics.read_own`). Sin acceso de `CA`.
 - **Append-only:** Append-only por trigger (propuesta): cada cálculo es una fila.
 - **Índices:** `ix_glycemic_metrics_latest` en (`patient_id`, `window_days`, `computed_at` DESC).
 - **Retención:** 90 días (propuesta, por definir); la última de cada ventana se conserva.
@@ -1430,7 +1436,7 @@ Lote de registros enviado por el paciente (cola sin conexión, CSV de CGM o simu
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `submitted_by` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()` (`BEFORE UPDATE OR DELETE`). Las correcciones son filas nuevas con `supersedes_id`; sin `UPDATE`/`DELETE` para `insumap_app`. Los registros lo referencian con una FK `DEFERRABLE INITIALLY DEFERRED` para insertarlo al final con los conteos definitivos.
 - **Índices:** `ix_sync_batches_patient_received` en (`patient_id`, `received_at` DESC).
 - **Retención:** Según la normativa de historia clínica (por definir).
@@ -1445,7 +1451,7 @@ Lecturas de glucosa en mg/dL (CGM, glucómetro o manual). Append-only con correc
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `recorded_by` -> `iam.users(id)`; `sync_batch_id` -> `monitoring.sync_batches(id)`; `supersedes_id` -> `monitoring.glucose_readings(id)`.
 - **Unicidad:** (`patient_id`, `client_reading_id`); CHECK ((entry_type = 'ORIGINAL') = (supersedes_id IS NULL AND correction_reason IS NULL)).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()` (`BEFORE UPDATE OR DELETE`). Las correcciones son filas nuevas con `supersedes_id`; sin `UPDATE`/`DELETE` para `insumap_app`. La versión vigente de cada registro sale de la vista `monitoring.current_glucose_readings` (propuesta): filas sin otra que las supere ni anulación. Sin particionado en el MVP: la unicidad (`patient_id`, `client_reading_id`) no admite una clave de partición por tiempo; con 150 pacientes a 288 lecturas por día son unos 16 millones de filas por año, cubiertas por el índice compuesto (RNF-21).
 - **Índices:** `ux_glucose_readings_client_id` (único); `ix_glucose_readings_patient_measured` en (`patient_id`, `measured_at` DESC) `INCLUDE (value_mg_dl, source, status, entry_type)` para métricas, AGP y línea de tiempo; `ix_glucose_readings_supersedes` en (`supersedes_id`) `WHERE supersedes_id IS NOT NULL` para resolver la versión vigente; `ix_glucose_readings_clinic_measured` en (`clinic_id`, `measured_at`) para el triage nocturno por clínica.
 - **Retención:** Según la normativa de historia clínica (por definir). Nunca se borra por retención técnica.
@@ -1460,7 +1466,7 @@ Incidencias que la cadena de validación (P12) dejó sobre una lectura. Una fila
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `reading_id` -> `monitoring.glucose_readings(id)`.
 - **Unicidad:** (`reading_id`, `issue_code`).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 heredada de la lectura: `DR` y `SY` en la clínica; `PT` solo `SELECT` de las incidencias de sus lecturas (`reading_id` en `OWN`); `INSERT` junto con la lectura.
+- **RLS:** Plantilla RLS-2 heredada de la lectura: `DR` y `SY` en la clínica; `PT` solo `SELECT` de las incidencias de sus lecturas (`reading_id` en `OWN`); `INSERT` junto con la lectura.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()` (`BEFORE UPDATE OR DELETE`). Las correcciones son filas nuevas con `supersedes_id`; sin `UPDATE`/`DELETE` para `insumap_app`.
 - **Índices:** `ux_reading_issues_reading_code`.
 - **Retención:** Igual que la lectura.
@@ -1475,7 +1481,7 @@ Dosis de insulina registradas por el paciente (nunca sugeridas por la app). Appe
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `plan_id` -> `care.treatment_plans(id)`; `recorded_by` -> `iam.users(id)`; `sync_batch_id` -> `monitoring.sync_batches(id)`; `supersedes_id` -> `monitoring.insulin_doses(id)`.
 - **Unicidad:** (`patient_id`, `client_record_id`); CHECK ((entry_type = 'ORIGINAL') = (supersedes_id IS NULL AND correction_reason IS NULL)).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()` (`BEFORE UPDATE OR DELETE`). Las correcciones son filas nuevas con `supersedes_id`; sin `UPDATE`/`DELETE` para `insumap_app`.
 - **Índices:** `ux_insulin_doses_client_id`; `ix_insulin_doses_patient_time` en (`patient_id`, `administered_at` DESC); `ix_insulin_doses_supersedes` en (`supersedes_id`) `WHERE supersedes_id IS NOT NULL`.
 - **Retención:** Según la normativa de historia clínica (por definir).
@@ -1490,7 +1496,7 @@ Comidas con carbohidratos estimados. Append-only con correcciones.
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `recorded_by` -> `iam.users(id)`; `sync_batch_id` -> `monitoring.sync_batches(id)`; `supersedes_id` -> `monitoring.meals(id)`.
 - **Unicidad:** (`patient_id`, `client_record_id`); CHECK ((entry_type = 'ORIGINAL') = (supersedes_id IS NULL AND correction_reason IS NULL)).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()` (`BEFORE UPDATE OR DELETE`). Las correcciones son filas nuevas con `supersedes_id`; sin `UPDATE`/`DELETE` para `insumap_app`.
 - **Índices:** `ux_meals_client_id`; `ix_meals_patient_time` en (`patient_id`, `eaten_at` DESC); `ix_meals_supersedes` en (`supersedes_id`) `WHERE supersedes_id IS NOT NULL`.
 - **Retención:** Según la normativa de historia clínica (por definir).
@@ -1505,7 +1511,7 @@ Actividad física registrada. Append-only con correcciones.
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `recorded_by` -> `iam.users(id)`; `sync_batch_id` -> `monitoring.sync_batches(id)`; `supersedes_id` -> `monitoring.physical_activities(id)`.
 - **Unicidad:** (`patient_id`, `client_record_id`); CHECK ((entry_type = 'ORIGINAL') = (supersedes_id IS NULL AND correction_reason IS NULL)).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()` (`BEFORE UPDATE OR DELETE`). Las correcciones son filas nuevas con `supersedes_id`; sin `UPDATE`/`DELETE` para `insumap_app`.
 - **Índices:** `ux_physical_activities_client_id`; `ix_physical_activities_patient_time` en (`patient_id`, `started_at` DESC); `ix_physical_activities_supersedes` en (`supersedes_id`) `WHERE supersedes_id IS NOT NULL`.
 - **Retención:** Según la normativa de historia clínica (por definir).
@@ -1520,7 +1526,7 @@ Síntomas registrados desde el catálogo. Append-only con correcciones.
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `symptom_id` -> `care.symptom_catalog(id)`; `recorded_by` -> `iam.users(id)`; `sync_batch_id` -> `monitoring.sync_batches(id)`; `supersedes_id` -> `monitoring.symptoms(id)`.
 - **Unicidad:** (`patient_id`, `client_record_id`); CHECK ((entry_type = 'ORIGINAL') = (supersedes_id IS NULL AND correction_reason IS NULL)).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio. Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()` (`BEFORE UPDATE OR DELETE`). Las correcciones son filas nuevas con `supersedes_id`; sin `UPDATE`/`DELETE` para `insumap_app`.
 - **Índices:** `ux_symptoms_client_id`; `ix_symptoms_patient_time` en (`patient_id`, `occurred_at` DESC); `ix_symptoms_supersedes` en (`supersedes_id`) `WHERE supersedes_id IS NOT NULL`.
 - **Retención:** Según la normativa de historia clínica (por definir).
@@ -1535,7 +1541,7 @@ Resultados de laboratorio (HbA1c, LOINC 4548-4), autorreportados por el paciente
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `recorded_by` -> `iam.users(id)`; `sync_batch_id` -> `monitoring.sync_batches(id)`; `supersedes_id` -> `monitoring.lab_results(id)`.
 - **Unicidad:** (`patient_id`, `client_record_id`); CHECK ((entry_type = 'ORIGINAL') = (supersedes_id IS NULL AND correction_reason IS NULL)).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio y `DR` (`labs.write_assigned`; la asignación por proxy). Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 (registro del paciente). `SELECT`: `PT` solo sus filas (`patient_id = clinic.current_patient_id()`); `DR` y `SY` en la clínica de la sesión (la asignación la verifica `PatientRecordAccessProxy`). `INSERT`: `PT` con `WITH CHECK` propio y `DR` (`labs.write_assigned`; la asignación por proxy). Sin `UPDATE` ni `DELETE`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()` (`BEFORE UPDATE OR DELETE`). Las correcciones son filas nuevas con `supersedes_id`; sin `UPDATE`/`DELETE` para `insumap_app`.
 - **Índices:** `ux_lab_results_client_id`; `ix_lab_results_patient_date` en (`patient_id`, `performed_on` DESC); `ix_lab_results_supersedes` en (`supersedes_id`) `WHERE supersedes_id IS NOT NULL`.
 - **Retención:** Según la normativa de historia clínica (por definir).
@@ -1659,7 +1665,7 @@ Reglas de alerta versionadas como árbol (Composite, P08): hojas de umbral, dura
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `created_by` -> `iam.users(id)`.
 - **Unicidad:** (`clinic_id`, `code`, `version`) con `NULLS NOT DISTINCT`; Una `ACTIVE` por (`clinic_id`, `code`): único parcial `WHERE status = 'ACTIVE'`.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `CA`, `DR` (`alert_rules.read`) y `SY`. `INSERT`/`UPDATE`: solo `CA` (`alert_rules.manage`); migrador para semillas. Sin acceso de `PT`. Esta tabla queda fuera de la exclusión por rol de los esquemas clínicos.
+- **RLS:** Plantilla RLS-3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `CA`, `DR` (`alert_rules.read`) y `SY`. `INSERT`/`UPDATE`: solo `CA` (`alert_rules.manage`); migrador para semillas. Sin acceso de `PT`. Esta tabla queda fuera de la exclusión por rol de los esquemas clínicos.
 - **Append-only:** Versión `ACTIVE` inmutable por trigger (propuesta).
 - **Índices:** `ux_alert_rules_version`; `ux_alert_rules_active`; `ix_alert_rules_type_active` en (`alert_type`) `WHERE status = 'ACTIVE'`.
 - **Retención:** Permanente (cada alerta referencia su versión).
@@ -1674,7 +1680,7 @@ Alertas generadas por una regla, un pronóstico o un síntoma de alarma. Estado 
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `rule_id` -> `alerts.alert_rules(id)`; `trigger_reading_id` -> `monitoring.glucose_readings(id)`; `forecast_id` -> `ai.glucose_forecasts(id)`; `acknowledged_by` -> `iam.users(id)`; `resolved_by` -> `iam.users(id)`.
 - **Unicidad:** Sin duplicar una alerta abierta: único parcial (`patient_id`, `rule_id`) `WHERE status IN ('OPEN','ESCALATED')`.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 con exclusión por rol: `DR` (`alerts.read_assigned`, `alerts.acknowledge`, `alerts.resolve`) y `SY` en la clínica (asignación por proxy); `PT`: `SELECT` y reconocimiento propio (`alerts.read_own`, `alerts.acknowledge_own`). Sin rama para `CA` ni `PLATFORM_ADMIN`: el resumen del administrador sale de `alerts.clinic_alert_summary()` (definer). `INSERT`: `SY`.
+- **RLS:** Plantilla RLS-2 con exclusión por rol: `DR` (`alerts.read_assigned`, `alerts.acknowledge`, `alerts.resolve`) y `SY` en la clínica (asignación por proxy); `PT`: `SELECT` y reconocimiento propio (`alerts.read_own`, `alerts.acknowledge_own`). Sin rama para `CA` ni `PLATFORM_ADMIN`: el resumen del administrador sale de `alerts.clinic_alert_summary()` (definer). `INSERT`: `SY`.
 - **Índices:** `ux_alerts_open_per_rule` (único parcial); `ix_alerts_patient_status` en (`patient_id`, `status`, `opened_at` DESC); `ix_alerts_escalation_due` en (`next_escalation_at`) `WHERE status IN ('OPEN','ESCALATED')` para el job; `ix_alerts_clinic_opened` en (`clinic_id`, `opened_at` DESC).
 - **Retención:** Según la normativa de historia clínica (por definir).
 - **Casos de uso:** EvaluateAlertsOnReadingRecorded, EvaluateAlertsJob, AcknowledgeAlertUseCase, ResolveAlertUseCase, EscalateUnacknowledgedAlertsJob, RefreshForecastOnReadingRecorded (`PREDICTIVE`), RecordSymptomUseCase (`SYMPTOM_ALARM`), DoctorDashboardFacade, PatientOverviewFacade, ClinicKpisUseCase (agregado).
@@ -1688,7 +1694,7 @@ Historial de transiciones de cada alerta: quién, cuándo y nota. Append-only.
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `alert_id` -> `alerts.alerts(id)`; `actor_user_id` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 heredada de la alerta: `DR` y `SY` en la clínica; `PT` `SELECT` de sus alertas. `INSERT` junto al cambio de estado.
+- **RLS:** Plantilla RLS-2 heredada de la alerta: `DR` y `SY` en la clínica; `PT` `SELECT` de sus alertas. `INSERT` junto al cambio de estado.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()`.
 - **Índices:** `ix_alert_status_history_alert` en (`alert_id`, `occurred_at`).
 - **Retención:** Igual que la alerta.
@@ -1703,7 +1709,7 @@ Notificaciones in-app para una persona. El contenido guarda solo una clave de te
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `recipient_user_id` -> `iam.users(id)`; `alert_id` -> `alerts.alerts(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P6 con tenant: `recipient_user_id = iam.app_user_id()` para leer y marcar leída (`notifications.read_own`); `SY` inserta en la clínica de la sesión. Todos los roles, incluido `PLATFORM_ADMIN`, ven solo las suyas.
+- **RLS:** Plantilla RLS-6 con tenant: `recipient_user_id = iam.app_user_id()` para leer y marcar leída (`notifications.read_own`); `SY` inserta en la clínica de la sesión. Todos los roles, incluido `PLATFORM_ADMIN`, ven solo las suyas.
 - **Índices:** `ix_notifications_unread` en (`recipient_user_id`, `created_at` DESC) `WHERE read_at IS NULL`.
 - **Retención:** 180 días (propuesta, por definir).
 - **Casos de uso:** NotifyAlertOpened (`Notification` × `NotificationChannel`, P07), SendDueRemindersJob, EscalateUnacknowledgedAlertsJob, ListNotificationsUseCase, MarkNotificationReadUseCase.
@@ -1717,7 +1723,7 @@ Entrega de cada notificación por canal (correo, Web Push, in-app). Un canal ca�
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `notification_id` -> `alerts.notifications(id)`.
 - **Unicidad:** (`notification_id`, `channel`).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1 con rol: `SY` (`SELECT`, `INSERT`, `UPDATE`); el destinatario solo ve las suyas vía `notification_id`. Sin acceso de `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-1 con rol: `SY` (`SELECT`, `INSERT`, `UPDATE`); el destinatario solo ve las suyas vía `notification_id`. Sin acceso de `CA` ni `PLATFORM_ADMIN`.
 - **Índices:** `ux_notification_deliveries_channel`; `ix_notification_deliveries_pending` en (`created_at`) `WHERE status = 'PENDING'`.
 - **Retención:** 180 días (propuesta, por definir).
 - **Casos de uso:** NotifyAlertOpened, SendDueRemindersJob, EscalateUnacknowledgedAlertsJob.
@@ -1731,7 +1737,7 @@ Suscripciones Web Push de un usuario. El endpoint se valida contra una lista de 
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `user_id` -> `iam.users(id)`.
 - **Unicidad:** `endpoint_hash`.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P6 con tenant: `user_id = iam.app_user_id()` para crear y borrar las propias; `SY` lee las activas del destinatario para enviar. `insumap_readonly` sin acceso.
+- **RLS:** Plantilla RLS-6 con tenant: `user_id = iam.app_user_id()` para crear y borrar las propias; `SY` lee las activas del destinatario para enviar. `insumap_readonly` sin acceso.
 - **Índices:** `ux_push_subscriptions_endpoint_hash`; `ix_push_subscriptions_user_active` en (`user_id`) `WHERE is_active`.
 - **Retención:** Mientras `is_active`; las inactivas, 90 días (propuesta).
 - **Casos de uso:** RegisterPushSubscriptionUseCase, NotifyAlertOpened, SendDueRemindersJob.
@@ -1745,7 +1751,7 @@ Canales habilitados y horario de silencio de cada persona (propuesta, HU-35). La
 - **FK:** `user_id` -> `iam.users(id)`; `clinic_id` -> `clinic.clinics(id)`.
 - **Unicidad:** PK (`user_id`).
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P6 con tenant: `user_id = iam.app_user_id()` (`notification_preferences.manage_own`); `SY` lee para decidir canales y silencio.
+- **RLS:** Plantilla RLS-6 con tenant: `user_id = iam.app_user_id()` (`notification_preferences.manage_own`); `SY` lee para decidir canales y silencio.
 - **Índices:** solo la clave primaria y las de unicidad.
 - **Retención:** Mientras la cuenta exista.
 - **Casos de uso:** ManageNotificationPreferencesUseCase, NotifyAlertOpened, SendDueRemindersJob.
@@ -1913,7 +1919,7 @@ Registro de cada modelo desplegado: versión, semilla y versión del simulador c
 - **FK:** ninguna.
 - **Unicidad:** (`model_name`, `model_version`).
 - **Tenant:** sin `clinic_id`; ver la política de RLS.
-- **RLS:** Plantilla P0 con escritura. Sin `clinic_id` ni RLS. `SELECT`: `insumap_app`; `INSERT`/`UPDATE` de `status` y `activated_at`: `insumap_app` (registro al ver una versión nueva). Sin datos personales.
+- **RLS:** Plantilla RLS-0 con escritura. Sin `clinic_id` ni RLS. `SELECT`: `insumap_app`; `INSERT`/`UPDATE` de `status` y `activated_at`: `insumap_app` (registro al ver una versión nueva). Sin datos personales.
 - **Índices:** `ux_model_versions_name_version`.
 - **Retención:** Permanente.
 - **Casos de uso:** RegisterModelVersionUseCase, EvaluateAiUseCase, NightlyTriageJob.
@@ -1927,7 +1933,7 @@ Pronósticos de glucosa de IA1 con cuantiles p10, p50 y p90 y riesgo de hipo e h
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `based_on_reading_id` -> `monitoring.glucose_readings(id)`; `target_profile_id` -> `care.target_profiles(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 con exclusión por rol: `DR` (`ai.forecasts.read_assigned`) y `SY` en la clínica; `PT`: `SELECT` propio (`ai.forecasts.read_own`). `INSERT`: `SY`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 con exclusión por rol: `DR` (`ai.forecasts.read_assigned`) y `SY` en la clínica; `PT`: `SELECT` propio (`ai.forecasts.read_own`). `INSERT`: `SY`. Sin rama para `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger (propuesta): cada inferencia es una fila.
 - **Índices:** `ix_glucose_forecasts_latest` en (`patient_id`, `generated_at` DESC) `WHERE NOT is_shadow`; `ix_glucose_forecasts_input_hash` en (`patient_id`, `input_hash`) para reutilizar la salida.
 - **Retención:** 90 días (propuesta, por definir); el último pronóstico por paciente se conserva.
@@ -1942,7 +1948,7 @@ Evaluaciones de riesgo: deterioro glucémico para el triage (IA2) y riesgo de ab
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `metric_snapshot_id` -> `care.glycemic_metric_snapshots(id)`; `target_profile_id` -> `care.target_profiles(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 con exclusión por rol: `DR` (`ai.risk.read_assigned`, `ai.dropout_risk.read`) y `SY` en la clínica. `CA` no lee filas: la lista de riesgo de abandono sale de `ai.dropout_risk_list()` (definer) sin valores clínicos. Sin acceso de `PT` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 con exclusión por rol: `DR` (`ai.risk.read_assigned`, `ai.dropout_risk.read`) y `SY` en la clínica. `CA` no lee filas: la lista de riesgo de abandono sale de `ai.dropout_risk_list()` (definer) sin valores clínicos. Sin acceso de `PT` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger (propuesta).
 - **Índices:** `ix_risk_assessments_latest` en (`patient_id`, `assessment_type`, `generated_at` DESC) `WHERE NOT is_shadow`; `ix_risk_assessments_triage` en (`clinic_id`, `assessment_type`, `risk_tier`, `generated_at` DESC) para el orden del triage.
 - **Retención:** 90 días (propuesta, por definir); la última por paciente y tipo se conserva.
@@ -1957,7 +1963,7 @@ Hallazgos de patrones y anomalías de IA3 con ventana, evidencia y confianza.
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 con exclusión por rol: `DR` (`ai.risk.read_assigned`) y `SY`. Sin acceso de `CA`, `PT` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 con exclusión por rol: `DR` (`ai.risk.read_assigned`) y `SY`. Sin acceso de `CA`, `PT` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger (propuesta).
 - **Índices:** `ix_pattern_findings_patient` en (`patient_id`, `generated_at` DESC) `WHERE NOT is_shadow`.
 - **Retención:** 180 días (propuesta, por definir).
@@ -1972,7 +1978,7 @@ Propuestas de ajuste de tratamiento de IA4. Nacen `PROPOSED`, nunca se aplican s
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `plan_id` -> `care.treatment_plans(id)`; `applied_plan_id` -> `care.treatment_plans(id)`; `target_profile_id` -> `care.target_profiles(id)`.
 - **Unicidad:** Una pendiente por plan y acción: único parcial (`plan_id`, `action`) `WHERE status = 'PROPOSED'`.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 con exclusión por rol: `DR` (`recommendations.read_assigned`, `recommendations.decide`) y `SY` en la clínica, asignación por proxy. Sin rama para `PT`, `CA` ni `PLATFORM_ADMIN`. `UPDATE` de `status`: `DR` (decisión) y `SY` (expiración, aplicación).
+- **RLS:** Plantilla RLS-2 con exclusión por rol: `DR` (`recommendations.read_assigned`, `recommendations.decide`) y `SY` en la clínica, asignación por proxy. Sin rama para `PT`, `CA` ni `PLATFORM_ADMIN`. `UPDATE` de `status`: `DR` (decisión) y `SY` (expiración, aplicación).
 - **Índices:** `ux_recommendations_pending` (único parcial); `ix_recommendations_patient_status` en (`patient_id`, `status`, `proposed_at` DESC); `ix_recommendations_expiry` en (`expires_at`) `WHERE status = 'PROPOSED'` para `expire_recommendations`.
 - **Retención:** Según la normativa de historia clínica (por definir).
 - **Casos de uso:** NightlyTriageJob (IA4), DecideRecommendationUseCase (`ApproveRecommendationCommand`, `ModifyRecommendationCommand`, `RejectRecommendationCommand`), ExpireRecommendationsJob, PatientOverviewFacade, EvaluateAiUseCase.
@@ -1986,7 +1992,7 @@ Cada transición de una recomendación con quién, cuándo, motivo y valor modif
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `recommendation_id` -> `ai.recommendations(id)`; `decided_by` -> `iam.users(id)`; `applied_plan_id` -> `care.treatment_plans(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 con exclusión por rol: `DR` y `SY` en la clínica (`SELECT`, `INSERT`). Sin acceso de `PT`, `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 con exclusión por rol: `DR` y `SY` en la clínica (`SELECT`, `INSERT`). Sin acceso de `PT`, `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()`.
 - **Índices:** `ix_recommendation_decisions_rec` en (`recommendation_id`, `decided_at`).
 - **Retención:** Según la normativa de historia clínica (por definir).
@@ -2001,7 +2007,7 @@ Resumen previo a la consulta de IA5 (con LLM o plantilla determinista) con refer
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `requested_by` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 con exclusión por rol: `DR` y `SY` en la clínica, asignación por proxy. Sin acceso de `PT`, `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 con exclusión por rol: `DR` y `SY` en la clínica, asignación por proxy. Sin acceso de `PT`, `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger (propuesta).
 - **Índices:** `ix_clinical_summaries_patient` en (`patient_id`, `generated_at` DESC).
 - **Retención:** 180 días (propuesta, por definir).
@@ -2016,7 +2022,7 @@ Conversación del paciente con el asistente educativo (IA6): sus preguntas y las
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `external_consent_id` -> `clinic.patient_consents(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 con exclusión por rol: `PT`: sus filas (`OWN`, `assistant.use`); `SY` inserta las respuestas. `DR` solo lee las conversaciones con escalamiento hacia su equipo vía el caso de uso. Sin acceso de `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 con exclusión por rol: `PT`: sus filas (`OWN`, `assistant.use`); `SY` inserta las respuestas. `DR` solo lee las conversaciones con escalamiento hacia su equipo vía el caso de uso. Sin acceso de `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger (propuesta).
 - **Índices:** `ix_assistant_messages_conversation` en (`patient_id`, `conversation_id`, `sent_at`).
 - **Retención:** 180 días (propuesta, por definir).
@@ -2031,7 +2037,7 @@ Material educativo aprobado por la clínica que alimenta el RAG sin estado de IA
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `approved_by` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1. `SELECT`: `PT` y `SY` solo `APPROVED`; `CA` y `DR` todos. `INSERT`/`UPDATE`: `CA` (permiso por definir, ver brechas).
+- **RLS:** Plantilla RLS-1. `SELECT`: `PT` y `SY` solo `APPROVED`; `CA` y `DR` todos. `INSERT`/`UPDATE`: `CA` (permiso por definir, ver brechas).
 - **Índices:** `ix_knowledge_documents_trgm` GIN (`title` `gin_trgm_ops`, `body` `gin_trgm_ops`) `WHERE status = 'APPROVED'` (extensión `pg_trgm`); `ix_knowledge_documents_clinic_status` en (`clinic_id`, `status`).
 - **Retención:** Permanente.
 - **Casos de uso:** AskAssistantUseCase (recuperación de contexto), ManageKnowledgeDocumentUseCase.
@@ -2045,10 +2051,10 @@ Comparaciones de cada caso de IA contra su respaldo (MAE, RMSE, Clarke, AUROC, c
 - **FK:** `clinic_id` -> `clinic.clinics(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `CA`; `PLATFORM_ADMIN` ve todas (`ai_evaluations.read`). `INSERT`: `SY`. Sin acceso de `DR` ni `PT`.
+- **RLS:** Plantilla RLS-3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `CA`. Sin rama para `PLATFORM_ADMIN` (Seguridad 6.2, punto 7): la evaluación de plataforma (`ai_evaluations.read`) sale de `ai.platform_ai_evaluations()` (definer, propuesta; ver MD-15). `INSERT`: `SY`. Sin acceso de `DR` ni `PT`.
 - **Índices:** `ix_ai_evaluations_use_case` en (`use_case`, `evaluated_at` DESC).
 - **Retención:** Permanente.
-- **Casos de uso:** EvaluateAiUseCase, ListAiEvaluationsUseCase.
+- **Casos de uso:** EvaluateAiUseCase, ListAiEvaluationsUseCase (`ai.platform_ai_evaluations` para `PLATFORM_ADMIN`).
 
 ### 9.7 Esquema `messaging`: Mensajería
 
@@ -2106,7 +2112,7 @@ Hilo de mensajes entre el paciente y su equipo de atención asignado. Un hilo po
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`.
 - **Unicidad:** `patient_id` (un hilo por paciente).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 con exclusión por rol: `PT`: su hilo (`OWN`, `messages.use_own`); `DR` y `SY` en la clínica, asignación por proxy (`messages.use_assigned`). Sin acceso de `CA` ni `PLATFORM_ADMIN` (V8).
+- **RLS:** Plantilla RLS-2 con exclusión por rol: `PT`: su hilo (`OWN`, `messages.use_own`); `DR` y `SY` en la clínica, asignación por proxy (`messages.use_assigned`). Sin acceso de `CA` ni `PLATFORM_ADMIN` (V8).
 - **Índices:** `ux_threads_patient_id`; `ix_threads_clinic_last_message` en (`clinic_id`, `last_message_at` DESC).
 - **Retención:** Según la normativa (por definir).
 - **Casos de uso:** SendMessageUseCase, ListThreadsUseCase.
@@ -2120,7 +2126,7 @@ Mensajes del hilo, append-only. El hilo muestra un aviso permanente de que no es
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `thread_id` -> `messaging.threads(id)`; `sender_user_id` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P2 con exclusión por rol: `PT` lee y escribe en su hilo; `DR` y `SY` en la clínica, asignación por proxy. Sin acceso de `CA` ni `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-2 con exclusión por rol: `PT` lee y escribe en su hilo; `DR` y `SY` en la clínica, asignación por proxy. Sin acceso de `CA` ni `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()`.
 - **Índices:** `ix_messages_thread_sent` en (`thread_id`, `sent_at` DESC).
 - **Retención:** Según la normativa (por definir).
@@ -2135,7 +2141,7 @@ Mensajes del hilo, append-only. El hilo muestra un aviso permanente de que no es
 - **FK:** `thread_id` -> `messaging.threads(id)`; `user_id` -> `iam.users(id)`; `clinic_id` -> `clinic.clinics(id)`.
 - **Unicidad:** PK compuesta (`thread_id`, `user_id`).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P6 con tenant: `user_id = iam.app_user_id()`; roles `PT` y `DR`.
+- **RLS:** Plantilla RLS-6 con tenant: `user_id = iam.app_user_id()`; roles `PT` y `DR`.
 - **Índices:** solo la clave primaria y las de unicidad.
 - **Retención:** Mientras exista el hilo.
 - **Casos de uso:** ListMessagesUseCase, MarkThreadReadUseCase.
@@ -2205,7 +2211,7 @@ Auditoría de acciones que cambian datos de seguridad o decisiones clínicas, co
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `actor_user_id` -> `iam.users(id)`.
 - **Unicidad:** (`clinic_id`, `chain_seq`).
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P5 (solo por función). `INSERT`: únicamente `audit.append_audit_log(...)` (definer); `insumap_app` no tiene `INSERT` directo. `SELECT`: `CA` su clínica (`audit.read`); `PLATFORM_ADMIN` todas (`audit.read_platform`). Sin `UPDATE` ni `DELETE`.
+- **RLS:** Plantilla RLS-5 (solo por función). `INSERT`: únicamente `audit.append_audit_log(...)` (definer); `insumap_app` no tiene `INSERT` directo. `SELECT`: solo `CA` de su clínica (`audit.read`). Sin rama para `PLATFORM_ADMIN` (Seguridad 6.2, punto 7): `audit.read_platform` se atiende con `iam.security_events` (ver MD-15). Sin `UPDATE` ni `DELETE`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()` para todos los roles. Cadena de hashes: `audit.compute_chain_hash()` (`BEFORE INSERT`) toma `pg_advisory_xact_lock(hashtextextended(clinic_id::text, 0))`, lee `prev_hash` de la última fila y calcula `row_hash`. Contenido canónico (propuesta, lo fija `insumap-database`): campos separados por `0x1F` en el orden de las columnas desde `clinic_id` hasta `ip_hmac`, con fechas en ISO-8601 UTC. `audit.verify_chain(p_clinic_id)` la recalcula y señala la primera fila rota.
 - **Índices:** `ux_audit_log_clinic_seq`; `ix_audit_log_clinic_occurred` en (`clinic_id`, `occurred_at` DESC); `ix_audit_log_actor` en (`clinic_id`, `actor_user_id`, `occurred_at` DESC); `ix_audit_log_entity` en (`clinic_id`, `entity_type`, `entity_id`).
 - **Retención:** Según la normativa de historia clínica y protección de datos (por definir). Ninguna purga borra sin escribir antes un `PURGE` aquí.
@@ -2220,7 +2226,7 @@ Registro de cada lectura de datos clínicos (`PhiAccessAuditDecorator`, P09): qu
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `patient_id` -> `clinic.patients(id)`; `actor_user_id` -> `iam.users(id)`.
 - **Unicidad:** solo la clave primaria.
 - **Tenant:** `clinic_id` NOT NULL.
-- **RLS:** Plantilla P1 con escritura abierta al contexto. `INSERT`: cualquier rol de la clínica con `WITH CHECK (clinic_id = iam.app_clinic_id())`; las filas `DENIED` se escriben en una transacción corta e independiente con el mismo contexto. `SELECT`: `CA` su clínica (`audit.read`). Sin `UPDATE` ni `DELETE`. Sin rama para `PLATFORM_ADMIN`.
+- **RLS:** Plantilla RLS-1 con escritura abierta al contexto. `INSERT`: cualquier rol de la clínica con `WITH CHECK (clinic_id = iam.app_clinic_id())`; las filas `DENIED` se escriben en una transacción corta e independiente con el mismo contexto. `SELECT`: `CA` su clínica (`audit.read`). Sin `UPDATE` ni `DELETE`. Sin rama para `PLATFORM_ADMIN`.
 - **Append-only:** Append-only por trigger `audit.reject_mutation()`; solo la función de purga (`audit.purge_expired`) borra, activando un indicador local (`SET LOCAL audit.purging = 'on'`) que el trigger respeta. Sin cadena de hashes por su volumen. Propuesta: particionado por rango mensual sobre `occurred_at` (PK compuesta con `occurred_at`) para retirar particiones completas en la purga.
 - **Índices:** `ix_data_access_log_clinic_occurred` en (`clinic_id`, `occurred_at` DESC); `ix_data_access_log_patient` en (`clinic_id`, `patient_id`, `occurred_at` DESC); `ix_data_access_log_actor` en (`clinic_id`, `actor_user_id`, `occurred_at` DESC).
 - **Retención:** Según la normativa de historia clínica y protección de datos (por definir).
@@ -2235,10 +2241,10 @@ Plazo de retención por tipo de dato. Los plazos son parámetros de la BD, no de
 - **FK:** `clinic_id` -> `clinic.clinics(id)`; `updated_by` -> `iam.users(id)`.
 - **Unicidad:** (`clinic_id`, `table_name`) con `NULLS NOT DISTINCT`.
 - **Tenant:** `clinic_id` nulo (semilla global o persona sin clínica).
-- **RLS:** Plantilla P3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `CA` y `SY`; `PLATFORM_ADMIN` todas. `INSERT`/`UPDATE`: `PLATFORM_ADMIN` para las globales y `CA` para las de su clínica (el permiso `retention.manage` no existe en el catálogo; ver brechas). Cada cambio escribe `RETENTION_POLICY_CHANGED` en `audit_log`.
+- **RLS:** Plantilla RLS-3. `SELECT`: `clinic_id IS NULL OR clinic_id = iam.app_clinic_id()` para `CA` y `SY`. Sin rama para `PLATFORM_ADMIN` (Seguridad 6.2, punto 7). `insumap_app` no escribe directo: los cambios pasan por `audit.set_retention_policy(...)` (definer, propuesta), que acepta `PLATFORM_ADMIN` para las filas globales y `CA` para las de su clínica (el permiso `retention.manage` no existe en el catálogo; ver brechas) y escribe `RETENTION_POLICY_CHANGED` en `audit_log`. Las semillas las escribe el migrador.
 - **Índices:** `ux_retention_policies_table`.
 - **Retención:** Permanente.
-- **Casos de uso:** ApplyRetentionPoliciesJob, UpdateRetentionPolicyUseCase, PrivacyRequestUseCase.
+- **Casos de uso:** ApplyRetentionPoliciesJob, UpdateRetentionPolicyUseCase (`audit.set_retention_policy`), PrivacyRequestUseCase.
 
 ## 10. Consultas principales e índices
 
@@ -2305,16 +2311,17 @@ Vista inversa de la sección 9: qué tablas toca cada caso de uso. Los nombres s
 | AssignTargetProfileUseCase | `care.target_profiles`, `care.patient_target_assignments` |
 | AuditingCommandHandler | `audit.audit_log` |
 | ChangePasswordUseCase | `iam.users`, `iam.refresh_tokens`, `iam.password_history` |
-| ChangePatientStatusUseCase | `iam.users`, `iam.refresh_tokens`, `clinic.patients` |
+| ChangePatientStatusUseCase | `iam.users`, `iam.memberships`, `iam.refresh_tokens`, `clinic.patients` |
 | ClinicKpisUseCase | `clinic.clinic_settings`, `alerts.alerts` |
 | CompleteActivationUseCase | `iam.users`, `iam.credential_invitations`, `iam.auth_challenges`, `iam.password_history`, `clinic.patients`, `clinic.privacy_notice_versions`, `clinic.patient_consents`, `audit.audit_log` |
 | CompletePasswordResetUseCase | `iam.users`, `iam.auth_challenges`, `iam.password_history` |
 | ComputeGlycemicMetricsUseCase | `care.target_profiles`, `care.patient_target_assignments`, `care.glycemic_metric_snapshots`, `monitoring.glucose_readings` |
 | ConfirmEmailUseCase | `iam.auth_challenges` |
 | CorrectRecordUseCase | `monitoring.glucose_readings`, `monitoring.insulin_doses`, `monitoring.meals`, `monitoring.physical_activities`, `monitoring.symptoms`, `monitoring.lab_results` |
-| CreateClinicUseCase | `clinic.clinics`, `clinic.clinic_settings` |
+| CreateClinicUseCase | `clinic.clinics` |
 | CreateFirstClinicAdminUseCase | `iam.users`, `iam.memberships`, `iam.credential_invitations` |
 | CreatePlanFromTemplateUseCase | `care.protocol_templates`, `care.treatment_plans`, `care.treatment_plan_items`, `care.treatment_plan_snapshots` |
+| CreatePlatformAdminCommand | `iam.users`, `iam.memberships`, `iam.credential_invitations` |
 | CreateStaffUserUseCase | `iam.users`, `iam.memberships`, `iam.credential_invitations`, `clinic.staff_profiles`, `clinic.staff_sites` |
 | DeactivateStaffUseCase | `iam.users`, `iam.memberships`, `clinic.staff_profiles`, `clinic.care_team_assignments` |
 | DecideRecommendationUseCase | `care.treatment_plans`, `care.treatment_plan_snapshots`, `ai.recommendations`, `ai.recommendation_decisions`, `audit.audit_log` |
@@ -2339,7 +2346,7 @@ Vista inversa de la sección 9: qué tablas toca cada caso de uso. Los nombres s
 | GetTimelineUseCase | `monitoring.glucose_readings`, `monitoring.reading_issues`, `monitoring.insulin_doses`, `monitoring.meals`, `monitoring.physical_activities`, `monitoring.symptoms`, `monitoring.lab_results` |
 | GlycemicTargetStrategy | `care.target_profiles` |
 | ImportCgmCsvUseCase | `care.reading_validation_settings`, `monitoring.sync_batches`, `monitoring.glucose_readings` |
-| ImportPatientsUseCase | `iam.users`, `iam.rate_limit_buckets`, `clinic.patients`, `clinic.import_batches`, `clinic.import_rows`, `monitoring.lab_results` |
+| ImportPatientsUseCase | `iam.users`, `iam.memberships`, `iam.rate_limit_buckets`, `clinic.patients`, `clinic.import_batches`, `clinic.import_rows`, `monitoring.lab_results` |
 | IssueCredentialsUseCase | `iam.credential_invitations`, `iam.rate_limit_buckets`, `clinic.patients`, `audit.audit_log` |
 | ListAiEvaluationsUseCase | `ai.ai_evaluations` |
 | ListAlertHistoryUseCase | `alerts.alert_status_history` |
@@ -2418,26 +2425,27 @@ Cuando dos documentos se contradicen se toma el de [Seguridad.md](Seguridad.md) 
 
 | # | Tema | Decisión en este modelo | Documento que difiere |
 |---|---|---|---|
-| D1 | Clínicas por usuario | Una sola (`iam.memberships.user_id` único). Seguridad 5 y Actores 1.3 | Arquitectura 12 permite varias membresías y cambiar de clínica con un token nuevo |
-| D2 | Invitación vencida | La cuenta vuelve a `IMPORTED` (Seguridad 3.1 y Actores 5) | Arquitectura 11 (`expire_invitations`) dice que la cuenta sigue `INVITED` |
-| D3 | Variables de sesión | Tres: `app.clinic_id`, `app.user_id` y `app.role` (Seguridad 6.2) | Arquitectura 3 y 5 y AGENTS de la base mencionan dos |
-| D4 | Trabajo de retención | Aplica `audit.retention_policies` a datos técnicos y, por función y con `PURGE`, a `data_access_log` (Seguridad 7.1 y 16) | Arquitectura 11 dice que nunca toca auditoría |
-| D5 | Filas `DENIED` | Se escriben en una transacción corta e independiente (Arquitectura 4); Seguridad 7.1 solo fija la misma transacción para los accesos concedidos | Ambigüedad menor |
-| D6 | Fin de una asignación | Vigente si `ended_at IS NULL` o está en el futuro (Seguridad 6.3); el MVP solo escribe `now()` al retirar | Ninguno, pero la regla es más amplia que el índice único parcial |
-| D7 | Tipos de insulina | `BASAL`, `BOLUS`, `CORRECTION` y `MIXED` (unión) | RF-34 lista basal, bolo y corrección; Datos-simulados lista `BASAL`, `BOLUS` y `MIXED` |
-| D8 | Quién programa recordatorios | El médico por paciente y el paciente los suyos (RF-49, Actores) | AGENTS del backend 3.2 dice que `care.reminder_schedules` lo configura el `CLINIC_ADMIN` |
-| D9 | Filas de auditoría de fallos | Sin fila si la acción falla (Seguridad 7.2); `audit_log` no tiene columna `outcome` | Patrones P09 dice que `AuditingCommandHandler` registra éxito o fallo |
-| D10 | Visibilidad de notas clínicas | Solo el equipo asignado (RF-81) | Actores V8 dice que paciente y equipo ven mensajes y notas |
-| D11 | Correo de contacto | `clinic.patients.contact_email` (de la importación, sin verificar) y `iam.users.email` (login, se fija al activar) | Seguridad 21 #4 solo habla del correo de login |
-| D12 | Append-only en `audit.*` | Solo `audit_log` y `data_access_log`; `retention_policies` es configuración editable | AGENTS de la base dice que `audit.*` rechaza `UPDATE` y `DELETE` |
-| D13 | Estado de cuenta del personal | `iam.users.status` para todos; `is_active` del personal equivale a `status = 'ACTIVE'` | Seguridad 2.3 y Actores 5.1 hablan de `is_active` para el personal |
-| D14 | Importación en dos pasos | `import_batches.status` `PREVIEWED` y la huella `file_sha256`; el archivo no se guarda (Seguridad 13.3), así que confirmar vuelve a enviar el archivo | RF-18 pide previsualizar y luego confirmar el lote |
+| MD-1 | Clínicas por usuario | Una sola (`iam.memberships.user_id` único). Seguridad 5 y Actores 1.3 | Arquitectura 12 permite varias membresías y cambiar de clínica con un token nuevo |
+| MD-2 | Invitación vencida | La cuenta vuelve a `IMPORTED` (Seguridad 3.1 y Actores 5) | Arquitectura 11 (`expire_invitations`) dice que la cuenta sigue `INVITED` |
+| MD-3 | Variables de sesión | Tres: `app.clinic_id`, `app.user_id` y `app.role` (Seguridad 6.2) | Arquitectura 3 y 5 y AGENTS de la base mencionan dos |
+| MD-4 | Trabajo de retención | Aplica `audit.retention_policies` a datos técnicos y, por función y con `PURGE`, a `data_access_log` (Seguridad 7.1 y 16) | Arquitectura 11 dice que nunca toca auditoría |
+| MD-5 | Filas `DENIED` | Se escriben en una transacción corta e independiente (Arquitectura 4); Seguridad 7.1 solo fija la misma transacción para los accesos concedidos | Ambigüedad menor |
+| MD-6 | Fin de una asignación | Vigente si `ended_at IS NULL` o está en el futuro (Seguridad 6.3); el MVP solo escribe `now()` al retirar | Ninguno, pero la regla es más amplia que el índice único parcial |
+| MD-7 | Tipos de insulina | `BASAL`, `BOLUS`, `CORRECTION` y `MIXED` (unión) | RF-34 lista basal, bolo y corrección; Datos-simulados lista `BASAL`, `BOLUS` y `MIXED` |
+| MD-8 | Quién programa recordatorios | El médico por paciente y el paciente los suyos (RF-49, Actores) | AGENTS del backend 3.2 dice que `care.reminder_schedules` lo configura el `CLINIC_ADMIN` |
+| MD-9 | Filas de auditoría de fallos | Sin fila si la acción falla (Seguridad 7.2); `audit_log` no tiene columna `outcome` | Patrones P09 dice que `AuditingCommandHandler` registra éxito o fallo |
+| MD-10 | Visibilidad de notas clínicas | Solo el equipo asignado (RF-81) | Actores V8 dice que paciente y equipo ven mensajes y notas |
+| MD-11 | Correo de contacto | `clinic.patients.contact_email` (de la importación, sin verificar) y `iam.users.email` (login, se fija al activar) | Seguridad 21 #4 solo habla del correo de login |
+| MD-12 | Append-only en `audit.*` | Solo `audit_log` y `data_access_log`; `retention_policies` es configuración editable | AGENTS de la base dice que `audit.*` rechaza `UPDATE` y `DELETE` |
+| MD-13 | Estado de cuenta del personal | `iam.users.status` para todos; `is_active` del personal equivale a `status = 'ACTIVE'` | Seguridad 2.3 y Actores 5.1 hablan de `is_active` para el personal |
+| MD-14 | Importación en dos pasos | `import_batches.status` `PREVIEWED` y la huella `file_sha256`; el archivo no se guarda (Seguridad 13.3), así que confirmar vuelve a enviar el archivo | RF-18 pide previsualizar y luego confirmar el lote |
+| MD-15 | `PLATFORM_ADMIN` en `audit` y `ai` | Sin rama de RLS en `audit` ni `ai` (Seguridad 6.2, punto 7). `audit.read_platform` se atiende con `iam.security_events` y `ai_evaluations.read` con `ai.platform_ai_evaluations()`; los plazos globales de retención con `audit.set_retention_policy` | Actores 3.2 y 3.3 conceden `audit.read_platform` y `ai_evaluations.read` a `PLATFORM_ADMIN`, lo que parece pedir lectura directa |
 
 ## 14. Brechas y propuestas para `insumap-database`
 
 **Tablas propuestas** (no están en la lista base): `iam.auth_challenges`, `iam.login_lockouts`, `iam.rate_limit_buckets`, `clinic.staff_sites`, `clinic.privacy_notice_versions`, `clinic.privacy_requests`, `clinic.clinic_settings`, `care.patient_target_assignments`, `care.triage_reviews`, `care.reading_validation_settings`, `care.symptom_catalog`, `care.glycemic_metric_snapshots`, `alerts.notification_preferences`, `ai.knowledge_documents` y `messaging.thread_reads`. Las tres primeras de `iam` salen de Seguridad 12 y 21 #8; las demás cubren requisitos sin tabla (RF-15, RF-48, RF-79, RF-90, RF-93, Metricas 1, HU-35 y IA6).
 
-**Funciones y triggers propuestos:** las de las secciones 4.2 y 6, incluida la vista `monitoring.current_glucose_readings`.
+**Funciones y triggers propuestos:** las de las secciones 4.2 y 6 (incluidas `iam.create_platform_admin`, `audit.set_retention_policy`, `ai.platform_ai_evaluations` y `clinic.on_clinic_suspended`) y la vista `monitoring.current_glucose_readings`.
 
 **Brechas abiertas:**
 
