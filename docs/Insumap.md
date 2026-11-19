@@ -30,7 +30,7 @@ La atención de la diabetes ocurre en consultas separadas por meses, mientras la
 Insumap es una plataforma web que conecta a la clínica, a sus médicos y a sus pacientes alrededor de un mismo registro:
 
 1. La **clínica importa** a sus pacientes desde su propia base de datos (FHIR R4 Bundle o CSV) y les **emite credenciales** de un solo uso.
-2. El **paciente** activa su cuenta, acepta el tratamiento de datos y registra glucosa (manual o CGM), insulina, comidas, actividad, síntomas y HbA1c desde una PWA pensada para el celular.
+2. El **paciente** activa su cuenta, acepta el tratamiento de datos y registra glucosa (manual o CGM), insulina, comidas, actividad, síntomas y HbA1c desde una PWA diseñada primero para escritorio, instalable y usable también desde el celular.
 3. Uno o varios **médicos asignados** vigilan a sus pacientes desde un dashboard con triage, métricas (TIR, GMI, CV, AGP), alertas y plan de tratamiento.
 4. La **IA propone** (pronósticos, riesgo, patrones, ajustes, resúmenes) y **el médico aprueba, modifica o rechaza con motivo**. Toda salida de IA tiene un respaldo determinista.
 5. El **administrador de la clínica** gestiona usuarios, equipos de atención, metas, reglas de alerta y plantillas de protocolo, sin ver datos clínicos detallados.
@@ -58,7 +58,7 @@ Insumap es una plataforma web que conecta a la clínica, a sus médicos y a sus 
 | Clínica u hospital | cliente B2B | Visión de población, priorización de pacientes, menos consultas evitables, trazabilidad de decisiones y datos de adopción. |
 | Administrador de la clínica | `CLINIC_ADMIN` | Alta masiva de pacientes sin captura manual, control de equipos y reglas, auditoría y KPIs, sin exposición a datos clínicos. |
 | Médico | `DOCTOR` | Lista de "a quién ver hoy" con motivos, métricas estándar (AGP, TIR), resumen previo a la consulta y propuestas de ajuste que él decide. |
-| Paciente | `PATIENT` | Registro simple desde el celular (también sin conexión), ver su tendencia y metas, recordatorios, mensajes con su equipo y un asistente educativo con límites claros. |
+| Paciente | `PATIENT` | Registro simple desde escritorio o celular (también sin conexión), ver su tendencia y metas, recordatorios, mensajes con su equipo y un asistente educativo con límites claros. |
 | Administrador de la plataforma | `PLATFORM_ADMIN` | Alta y control de clínicas con un rol mínimo; sin acceso clínico. |
 | Equipo de desarrollo | equipo académico | Un caso completo para aplicar patrones de diseño, seguridad y IA con human-in-the-loop. |
 
@@ -121,7 +121,7 @@ El MVP son las fases 1 a 9 del plan más el modo `backfill` del simulador (ver [
 | Integración directa con sensores CGM de fabricantes (APIs propietarias) | Se importa por CSV o FHIR; la integración directa queda como trabajo futuro. |
 | Facturación y contratos de la clínica | Se documenta el modelo, no se implementa. |
 | Telemedicina por video, e-prescripción, historia clínica completa | Insumap complementa la historia clínica de la clínica, no la reemplaza. |
-| Aplicaciones nativas iOS y Android | Se entrega una PWA mobile-first. |
+| Aplicaciones nativas iOS y Android | Se entrega una PWA instalable, con prioridad de diseño en escritorio. |
 | Estimación de carbohidratos por foto | Futuro. |
 | Dispositivos de insulina de lazo cerrado | Futuro. |
 

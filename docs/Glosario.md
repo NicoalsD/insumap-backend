@@ -87,7 +87,7 @@ Términos clínicos y técnicos usados en la documentación de Insumap, en orden
 | Plan de tratamiento | `treatment_plans` | Conjunto versionado de insulinas, horarios, metas y recordatorios de un paciente. Estados `DRAFT`, `ACTIVE`, `SUPERSEDED`. |
 | Plantilla de protocolo | `protocol_templates` | Plan modelo de la clínica que el médico clona para un paciente (Prototype, P05). |
 | Proxy (P11) | `PatientRecordAccessProxy`, `RemoteAiServiceProxy` | Intermediario que controla el acceso (asignación) o protege una llamada remota (circuit breaker y respaldo). |
-| PWA | `PWA` | Aplicación web instalable que funciona sin conexión; la app del paciente es mobile-first. |
+| PWA | `PWA` | Aplicación web instalable que funciona sin conexión; todas las superficies se diseñan primero para escritorio y la app del paciente sigue usable desde 360 px. |
 | RAG | `retrieval` | Recuperación de material aprobado para fundamentar la respuesta del asistente educativo. |
 | Rate limiting | `RATE_LIMITED` | Límite de peticiones por ventana para frenar abusos y fuerza bruta. |
 | Recomendación | `Recommendation` | Propuesta de la IA para el médico. Estados `PROPOSED`, `APPROVED`, `APPROVED_WITH_CHANGES`, `REJECTED`, `APPLIED`, `EXPIRED`. |

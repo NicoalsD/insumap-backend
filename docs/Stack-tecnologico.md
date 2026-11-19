@@ -3,7 +3,7 @@
 El stack de Insumap responde a tres tipos de restricciones:
 
 - **Académicas:** backend en Python con patrones de diseño explícitos, IA obligatoria para apoyar decisiones, código en inglés y POO, y 150 commits o más en `insumap-backend`.
-- **Del producto:** los datos de salud son datos sensibles (Ley 1581 de 2012). Por eso se exigen aislamiento por clínica, auditoría de cada lectura clínica, consentimiento versionado y minimización hacia la IA. El paciente usa una PWA desde el celular; el médico y el administrador usan un dashboard web. Detalle en [Cumplimiento-y-privacidad.md](Cumplimiento-y-privacidad.md).
+- **Del producto:** los datos de salud son datos sensibles (Ley 1581 de 2012). Por eso se exigen aislamiento por clínica, auditoría de cada lectura clínica, consentimiento versionado y minimización hacia la IA. El paciente usa una PWA instalable, diseñada primero para escritorio y usable desde el celular; el médico y el administrador usan un dashboard web diseñado primero para escritorio. Detalle en [Cumplimiento-y-privacidad.md](Cumplimiento-y-privacidad.md).
 - **De presupuesto y operación:** costo cercano a cero, un equipo de tres personas y ningún dato real de pacientes. Por eso todo corre en planes gratuitos o de bajo costo, la IA corre en CPU y los pacientes son simulados.
 
 Diagramas relacionados: [contenedores (C4)](images/c4-contenedores.png) · [despliegue](images/despliegue.png).
