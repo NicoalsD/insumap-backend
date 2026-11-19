@@ -65,7 +65,7 @@ class ListPatientsUseCase:
         actor = input.actor
         actor.require(PermissionCode.PATIENTS_READ_ROSTER)
         clinic_id = clinic_of(actor)
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+        with self._uow.begin(TransactionContext.for_actor(actor)) as unit:
             page = self._roster.list(clinic_id, input.filters, input.page)
             self._log.record_granted(
                 _entry(
@@ -76,6 +76,8 @@ class ListPatientsUseCase:
                     outcome=DataAccessOutcome.GRANTED,
                 )
             )
+            # A read commits its audit row: without it the transaction rolls back.
+            unit.commit()
         return page
 
 
@@ -109,7 +111,7 @@ class GetPatientUseCase:
         actor = input.actor
         actor.require(PermissionCode.PATIENTS_READ_ROSTER)
         clinic_id = clinic_of(actor)
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+        with self._uow.begin(TransactionContext.for_actor(actor)) as unit:
             view = self._roster.get(clinic_id, input.patient_id)
             if view is None:
                 self._log.record_denied(
@@ -131,6 +133,7 @@ class GetPatientUseCase:
                     outcome=DataAccessOutcome.GRANTED,
                 )
             )
+            unit.commit()
         return view
 
 

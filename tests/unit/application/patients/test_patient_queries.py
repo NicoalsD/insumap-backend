@@ -124,6 +124,7 @@ def test_list_returns_only_the_clinic_and_writes_one_patient_list_row() -> None:
 
     assert [item.patient_id for item in page.items] == [PATIENT_A, PATIENT_B]
     assert page.next_cursor is None
+    assert world.uow.commits == 1
     assert len(world.log.granted) == 1
     row = world.log.granted[0]
     assert row.resource is DataResource.PATIENT_LIST
@@ -198,6 +199,7 @@ def test_detail_returns_the_view_and_writes_a_demographics_row() -> None:
 
     assert found.patient_id == PATIENT_A
     assert found.document_last4 == "1234"
+    assert world.uow.commits == 1
     row = world.log.granted[0]
     assert row.resource is DataResource.PATIENT_DEMOGRAPHICS
     assert row.patient_id == PATIENT_A
