@@ -177,3 +177,20 @@ class FieldLimits:
     CURSOR_MAX_LENGTH: ClassVar[int] = 512
     """Longest pagination cursor accepted (the records cursor carries a time and
     an id); a longer one is invalid."""
+
+    # Plan de tratamiento, metas y recordatorios (API.md 8.7). Columnas:
+    # care.target_profiles.code, label, source_reference; care.reminder_schedules.
+    TARGET_PROFILE_CODE_MAX_LENGTH: ClassVar[int] = 40
+    """``care.target_profiles.code`` (varchar(40))."""
+
+    TARGET_PROFILE_CODE_PATTERN: ClassVar[str] = r"^[A-Z][A-Z0-9_]*$"
+    """Upper snake case, as the ``ck_target_profiles_code`` CHECK requires."""
+
+    PROFILE_LABEL_MAX_LENGTH: ClassVar[int] = 120
+    """``care.target_profiles.label`` (varchar(120))."""
+
+    SOURCE_REFERENCE_MAX_LENGTH: ClassVar[int] = 300
+    """``care.target_profiles.source_reference`` (varchar(300))."""
+
+    SMALLINT_MAX: ClassVar[int] = 32767
+    """Largest value of a ``smallint`` column (``min_days`` and the minutes)."""
