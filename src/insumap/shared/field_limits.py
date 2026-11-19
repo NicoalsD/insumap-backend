@@ -393,3 +393,11 @@ class FieldLimits:
 
     MESSAGE_BODY_MAX_LENGTH: ClassVar[int] = 1000
     """Longest message of a thread (``messaging.messages.body``)."""
+
+    # Pattern findings (ai.pattern_finding_reviews.reason, API.md 8.10).
+
+    PATTERN_FINDING_NOTE_MIN_LENGTH: ClassVar[int] = 1
+    """Shortest note that dismisses a pattern finding, after trimming."""
+
+    PATTERN_FINDING_NOTE_MAX_LENGTH: ClassVar[int] = 500
+    """Longest note that dismisses a pattern finding (``reason`` is varchar(500))."""

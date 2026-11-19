@@ -18,6 +18,7 @@ from insumap.api.routers.ai_assessments_schemas import (
     AiEvaluationResponse,
     ClinicalSummaryResponse,
     CreateClinicalSummaryRequest,
+    DismissPatternFindingRequest,
     DropoutRiskResponse,
     PatternFindingResponse,
     RiskResponse,
@@ -38,12 +39,14 @@ from insumap.application.ai.assessment_reads import (
     ListDropoutRisksUseCase,
     ListPatternFindingsUseCase,
 )
+from insumap.application.ai.finding_dismissal import DismissPatternFindingCommand
 from insumap.application.ai.records import AiEvaluationFilter
 from insumap.application.ai.risk import GetPatientRiskUseCase
 from insumap.application.ai.summaries import (
     CreateClinicalSummaryUseCase,
     GetClinicalSummaryUseCase,
 )
+from insumap.application.commands.base import CommandBus
 from insumap.application.common.actor import Actor
 from insumap.domain.ai.risk import RiskTier
 from insumap.domain.identity.permissions import PermissionCode
@@ -72,6 +75,13 @@ ROLE_ERRORS: Final = error_responses(
     HTTPStatus.UNAUTHORIZED,
     HTTPStatus.FORBIDDEN,
     HTTPStatus.UNPROCESSABLE_ENTITY,
+)
+DISMISS_ERRORS: Final = error_responses(
+    HTTPStatus.UNAUTHORIZED,
+    HTTPStatus.FORBIDDEN,
+    HTTPStatus.UNPROCESSABLE_ENTITY,
+    HTTPStatus.NOT_FOUND,
+    HTTPStatus.CONFLICT,
 )
 type TierQuery = Annotated[
     RiskTier | None,
@@ -107,6 +117,7 @@ class AiAssessmentRouter:
         *,
         risk: GetPatientRiskUseCase,
         findings: ListPatternFindingsUseCase,
+        commands: CommandBus,
         create_summary: CreateClinicalSummaryUseCase,
         get_summary: GetClinicalSummaryUseCase,
         dropout: ListDropoutRisksUseCase,
@@ -116,6 +127,7 @@ class AiAssessmentRouter:
     ) -> None:
         self._risk = risk
         self._findings = findings
+        self._commands = commands
         self._create_summary = create_summary
         self._get_summary = get_summary
         self._dropout = dropout
@@ -165,6 +177,26 @@ class AiAssessmentRouter:
                     for item in page.items
                 ],
                 next_cursor=page.next_cursor,
+            )
+
+        def dismiss_pattern_finding(
+            patient_id: UUID,
+            finding_id: UUID,
+            body: DismissPatternFindingRequest,
+            actor: Annotated[Actor, session],
+        ) -> PatternFindingResponse:
+            result = self._commands.dispatch(
+                DismissPatternFindingCommand(
+                    actor=actor,
+                    patient_id=patient_id,
+                    finding_id=finding_id,
+                    note=body.note,
+                )
+            )
+            return PatternFindingResponse.of(
+                result,
+                label=self._label(RISK_LABEL_KEY),
+                simulated=actor.clinic_is_demo,
             )
 
         def create_clinical_summary(
@@ -265,9 +297,25 @@ class AiAssessmentRouter:
             summary="Listar los hallazgos de patrones de un paciente asignado",
             description=(
                 "Hallazgos de IA3 (hipoglucemia nocturna, fenómeno del alba, picos "
-                "posprandiales, dosis y adherencia), más recientes primero."
+                "posprandiales, dosis y adherencia), más recientes primero. Cada uno "
+                "trae `status` (`NEW` o `DISMISSED`) y, si el médico lo descartó, "
+                "`dismissed_at` y `dismissed_by`."
             ),
             responses=READ_ERRORS,
+            openapi_extra={ACCESS_EXTENSION: access(read)},
+        )
+        add(
+            f"{PATIENT_PATH}/pattern-findings/{{finding_id}}/dismiss",
+            dismiss_pattern_finding,
+            methods=["POST"],
+            operation_id="dismiss_pattern_finding",
+            summary="Descartar un hallazgo de patrones de un paciente asignado",
+            description=(
+                "El médico descarta el hallazgo con una nota obligatoria. Queda "
+                "registrado como descartado y ya no se muestra como nuevo. Un "
+                "hallazgo se descarta una sola vez: después responde `409`."
+            ),
+            responses=DISMISS_ERRORS,
             openapi_extra={ACCESS_EXTENSION: access(read)},
         )
         add(
@@ -300,11 +348,12 @@ class AiAssessmentRouter:
             list_dropout_risks,
             methods=["GET"],
             operation_id="list_dropout_risks",
-            summary="Listar el riesgo de abandono de mis pacientes asignados",
+            summary="Listar el riesgo de abandono de los pacientes",
             description=(
-                "Riesgo de abandono (IA7) del último cálculo por paciente asignado, "
-                "sin valores clínicos. La lista de la clínica para el administrador "
-                "todavía no está disponible."
+                "Riesgo de abandono (IA7) del último cálculo por paciente. El médico "
+                "ve sus pacientes asignados; el administrador de la clínica ve la "
+                "lista administrativa de su clínica (estado de la cuenta y días sin "
+                "registros), sin valores clínicos."
             ),
             responses=ROLE_ERRORS,
             openapi_extra={
@@ -319,7 +368,9 @@ class AiAssessmentRouter:
             summary="Listar la evaluación de la IA frente al respaldo",
             description=(
                 "Métricas agregadas de cada caso de uso frente a su respaldo, sobre "
-                "cohortes simuladas. Nunca series de pacientes."
+                "cohortes simuladas. El administrador de la clínica ve las de su "
+                "clínica y las globales; el de la plataforma ve las de todas las "
+                "clínicas. Nunca series de pacientes."
             ),
             responses=ROLE_ERRORS,
             openapi_extra={

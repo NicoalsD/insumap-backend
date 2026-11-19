@@ -638,6 +638,22 @@ class PatternFindingOrm(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class PatternFindingReviewOrm(Base):
+    """``ai.pattern_finding_reviews``: append only, the doctor dismisses a finding."""
+
+    __tablename__ = "pattern_finding_reviews"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    finding_id: Mapped[UUID] = mapped_column(Uuid)
+    action: Mapped[str] = mapped_column(String(9))
+    reason: Mapped[str] = mapped_column(String(500))
+    reviewed_by: Mapped[UUID] = mapped_column(Uuid)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ClinicalSummaryOrm(Base):
     """``ai.clinical_summaries``: append only (IA5)."""
 
