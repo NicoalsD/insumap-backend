@@ -196,6 +196,7 @@ class ClinicOrm(Base):
     name: Mapped[str] = mapped_column(String(120))
     status: Mapped[str] = mapped_column(String(9))
     is_demo: Mapped[bool] = mapped_column(Boolean)
+    timezone: Mapped[str] = mapped_column(String(64))
 
 
 class StaffProfileOrm(Base):
@@ -216,6 +217,7 @@ class PatientOrm(Base):
     user_id: Mapped[UUID] = mapped_column(Uuid)
     full_name: Mapped[str] = mapped_column(String(120))
     birth_date: Mapped[date] = mapped_column(Date)
+    diabetes_type: Mapped[str] = mapped_column(String(5))
     contact_email: Mapped[str | None] = mapped_column(String(254))
 
 
