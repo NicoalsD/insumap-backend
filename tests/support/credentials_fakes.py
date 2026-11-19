@@ -131,6 +131,25 @@ class FakeCredentialInvitations(CredentialInvitationPort):
         self.rows[invitation_id] = replace(row, replaced_by_id=replaced_by_id)
 
 
+class DistinctActivationCodes(ActivationCodeGeneratorPort):
+    """The first code is ``first``; every later one is new, as random codes are.
+
+    The fixed generator of the identity doubles answers the same code forever,
+    which the unique code hash of the database would refuse on a second issue.
+    """
+
+    def __init__(self, first: str = "ABCDEFGHJKMNPQRS") -> None:
+        self._first = first
+        self._calls = 0
+
+    @override
+    def generate(self) -> ActivationCode:
+        self._calls += 1
+        if self._calls == 1:
+            return ActivationCode(self._first)
+        return ActivationCode(f"{self._calls:016d}")
+
+
 class SequenceActivationCodes(ActivationCodeGeneratorPort):
     """Hands out the given codes in order, so a re-issue gets a different one."""
 
