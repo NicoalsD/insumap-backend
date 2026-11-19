@@ -19,6 +19,13 @@ LIST_SEPARATOR = ","
 WILDCARD_ORIGIN = "*"
 ALLOWED_ORIGIN_PREFIXES = ("http://", "https://")
 TRAILING_SLASH = "/"
+DEFAULT_PUSH_ENDPOINT_HOSTS = (
+    "fcm.googleapis.com",
+    "updates.push.services.mozilla.com",
+    "web.push.apple.com",
+    "*.notify.windows.com",
+)
+"""Push services of the major browsers (verify before a production release)."""
 
 
 class Settings(BaseSettings):
@@ -94,6 +101,16 @@ class Settings(BaseSettings):
     rate_limit_reset_request_per_account_per_hour: int = Field(default=3, ge=1)
     rate_limit_reset_complete_per_ip_per_minute: int = Field(default=10, ge=1)
     web_app_base_url: str = Field(default="http://localhost:5173", min_length=1)
+    # Patient credentials (docs/Seguridad.md 3.2 and 3.3; docs/API.md section 5).
+    activation_code_ttl_hours: int = Field(default=168, ge=1)
+    rate_limit_credential_issue_per_clinic_per_hour: int = Field(default=300, ge=1)
+    rate_limit_credential_batch_per_clinic_per_hour: int = Field(default=10, ge=1)
+
+    # Web Push endpoints the browser may register (Seguridad.md 13.4). Hosts
+    # only, no scheme; ``*.`` matches any subdomain. Not a secret.
+    push_endpoint_allowed_hosts: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: list(DEFAULT_PUSH_ENDPOINT_HOSTS)
+    )
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -124,6 +141,18 @@ class Settings(BaseSettings):
         """Keys are 32 bytes in base64; the error never repeats the value."""
         if value is not None:
             decode_key(value.get_secret_value())
+        return value
+
+    @field_validator("push_endpoint_allowed_hosts", mode="before")
+    @classmethod
+    def split_push_hosts(cls, value: object) -> object:
+        """Read ``PUSH_ENDPOINT_ALLOWED_HOSTS`` as a comma separated list."""
+        if isinstance(value, str):
+            return [
+                item.strip().lower()
+                for item in value.split(LIST_SEPARATOR)
+                if item.strip()
+            ]
         return value
 
     @field_validator("cors_origins", mode="before")

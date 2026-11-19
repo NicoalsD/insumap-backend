@@ -8,17 +8,42 @@ from datetime import timedelta
 from typing import Final, Never, final
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
+from insumap.api.routers.alerts import AlertRouter
 from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.care_team import CareTeamRouter
 from insumap.api.routers.clinics import ClinicRouter
+from insumap.api.routers.credentials import CredentialRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.imports import ImportRouter
 from insumap.api.routers.meta import MetaRouter
 from insumap.api.routers.metrics import MetricsRouter
+from insumap.api.routers.notifications import NotificationRouter
+from insumap.api.routers.patients import PatientRouter
 from insumap.api.routers.records import RecordsRouter
+from insumap.api.routers.reminders import ReminderRouter
 from insumap.api.routers.sites import SiteRouter
+from insumap.api.routers.targets import TargetProfileRouter
+from insumap.api.routers.treatment import TreatmentRouter
 from insumap.api.routers.users import UserRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
+from insumap.application.alerts.commands import (
+    AcknowledgeAlertCommand,
+    AcknowledgeAlertCommandHandler,
+    CreateAlertRuleCommand,
+    CreateAlertRuleCommandHandler,
+    CreateAlertRuleVersionCommand,
+    CreateAlertRuleVersionCommandHandler,
+    ResolveAlertCommand,
+    ResolveAlertCommandHandler,
+)
+from insumap.application.alerts.evaluation import EvaluateAlertRulesOnReading
+from insumap.application.alerts.queries import (
+    GetAlertRuleUseCase,
+    GetAlertSummaryUseCase,
+    GetAlertUseCase,
+    ListAlertRulesUseCase,
+    ListAlertsUseCase,
+)
 from insumap.application.care_team.commands import (
     AssignDoctorCommand,
     AssignDoctorCommandHandler,
@@ -31,6 +56,10 @@ from insumap.application.care_team.commands import (
 )
 from insumap.application.care_team.list_assignments import (
     ListCareTeamAssignmentsUseCase,
+)
+from insumap.application.clinic_admins.commands import (
+    CreateClinicAdminCommand,
+    CreateClinicAdminCommandHandler,
 )
 from insumap.application.clinics.commands import (
     CreateClinicCommand,
@@ -64,6 +93,16 @@ from insumap.application.commands.transactional import (
     TransactionalCommandHandler,
 )
 from insumap.application.common.unit_of_work import UnitOfWorkPort
+from insumap.application.credentials.commands import (
+    IssueCredentialsCommand,
+    IssueCredentialsCommandHandler,
+    RevokeCredentialInvitationCommand,
+    RevokeCredentialInvitationCommandHandler,
+)
+from insumap.application.credentials.issuance import (
+    IssueCredentialsBatchUseCase,
+    IssueCredentialUseCase,
+)
 from insumap.application.events.publisher import (
     DomainEventPublisher,
     InProcessDomainEventPublisher,
@@ -127,6 +166,7 @@ from insumap.application.monitoring.glucose import (
     RecordGlucoseReadingsBatchUseCase,
     RecordGlucoseReadingUseCase,
 )
+from insumap.application.monitoring.profile import GetOwnPatientProfileUseCase
 from insumap.application.monitoring.queries import (
     ExportTimelineUseCase,
     GetTimelineUseCase,
@@ -141,7 +181,19 @@ from insumap.application.monitoring.records import (
     RecordSymptomUseCase,
     RecordWriter,
 )
+from insumap.application.notifications.list_notifications import (
+    ListNotificationsUseCase,
+)
+from insumap.application.notifications.mark_read import MarkNotificationReadUseCase
 from insumap.application.notifications.notification import NotificationChannel
+from insumap.application.notifications.preferences import (
+    GetNotificationPreferencesUseCase,
+    UpdateNotificationPreferencesUseCase,
+)
+from insumap.application.notifications.web_push import (
+    RegisterWebPushSubscriptionUseCase,
+    RemoveWebPushSubscriptionUseCase,
+)
 from insumap.application.onboarding.commands import (
     ConfirmImportCommand,
     ConfirmImportCommandHandler,
@@ -156,10 +208,34 @@ from insumap.application.onboarding.queries import (
     ListImportBatchesUseCase,
     ListImportRowsUseCase,
 )
+from insumap.application.patients.commands import (
+    DeactivatePatientCommand,
+    DeactivatePatientCommandHandler,
+    ReactivatePatientCommand,
+    ReactivatePatientCommandHandler,
+    SuspendPatientCommand,
+    SuspendPatientCommandHandler,
+)
+from insumap.application.patients.queries import (
+    GetPatientUseCase,
+    ListPatientsUseCase,
+)
 from insumap.application.readiness import (
     AlwaysReadyProbe,
     CheckReadinessUseCase,
     ReadinessProbe,
+)
+from insumap.application.reminders.commands import (
+    CreateReminderCommand,
+    CreateReminderCommandHandler,
+    UpdateOwnReminderCommand,
+    UpdateOwnReminderCommandHandler,
+    UpdatePatientReminderCommand,
+    UpdatePatientReminderCommandHandler,
+)
+from insumap.application.reminders.queries import (
+    ListOwnRemindersUseCase,
+    ListPatientRemindersUseCase,
 )
 from insumap.application.security.rate_limit import RateLimitCheck, RateLimitRule
 from insumap.application.sites.commands import (
@@ -171,6 +247,48 @@ from insumap.application.sites.commands import (
     UpdateSiteCommandHandler,
 )
 from insumap.application.sites.list_sites import ListSitesUseCase
+from insumap.application.targets.commands import (
+    AssignTargetProfileCommand,
+    AssignTargetProfileCommandHandler,
+    CreateTargetProfileCommand,
+    CreateTargetProfileCommandHandler,
+    CreateTargetProfileVersionCommand,
+    CreateTargetProfileVersionCommandHandler,
+)
+from insumap.application.targets.queries import (
+    GetTargetProfileUseCase,
+    ListTargetProfilesUseCase,
+)
+from insumap.application.treatment.plan_commands import (
+    ActivateTreatmentPlanCommand,
+    ActivateTreatmentPlanCommandHandler,
+    CreateTreatmentPlanCommand,
+    CreateTreatmentPlanCommandHandler,
+    CreateTreatmentPlanVersionCommand,
+    CreateTreatmentPlanVersionCommandHandler,
+    RestoreTreatmentPlanCommand,
+    RestoreTreatmentPlanCommandHandler,
+    UpdateTreatmentPlanCommand,
+    UpdateTreatmentPlanCommandHandler,
+    make_scope,
+)
+from insumap.application.treatment.queries import (
+    GetOwnTreatmentPlanUseCase,
+    GetProtocolTemplateUseCase,
+    GetTreatmentPlanUseCase,
+    ListProtocolTemplatesUseCase,
+    ListTreatmentPlanSnapshotsUseCase,
+    ListTreatmentPlansUseCase,
+)
+from insumap.application.treatment.snapshots import PlanSnapshotCaretaker
+from insumap.application.treatment.template_commands import (
+    CreateProtocolTemplateCommand,
+    CreateProtocolTemplateCommandHandler,
+    CreateProtocolTemplateVersionCommand,
+    CreateProtocolTemplateVersionCommandHandler,
+    RetireProtocolTemplateCommand,
+    RetireProtocolTemplateCommandHandler,
+)
 from insumap.application.users.commands import (
     CreateStaffUserCommand,
     CreateStaffUserCommandHandler,
@@ -187,8 +305,21 @@ from insumap.application.users.queries import GetStaffUseCase, ListStaffUseCase
 from insumap.domain.identity.password_policy import PasswordPolicy
 from insumap.domain.identity.refresh_token import RefreshTokenLifetime
 from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistry
+from insumap.domain.monitoring.events import GlucoseReadingRecorded
 from insumap.domain.monitoring.validation import build_validation_chain
 from insumap.domain.onboarding.vocabulary import SourceFormat
+from insumap.infrastructure.alerts_adapters import (
+    AlertsAdapters,
+    build_alerts_adapters,
+)
+from insumap.infrastructure.clinic_admin_adapters import (
+    ClinicAdminAdapters,
+    build_clinic_admin_adapters,
+)
+from insumap.infrastructure.credentials_adapters import (
+    CredentialsAdapters,
+    build_credentials_adapters,
+)
 from insumap.infrastructure.identity_adapters import (
     IdentityAdapters,
     build_engine,
@@ -202,9 +333,17 @@ from insumap.infrastructure.monitoring_adapters import (
     MonitoringAdapters,
     build_monitoring_adapters,
 )
+from insumap.infrastructure.notification_adapters import (
+    NotificationAdapters,
+    build_notification_adapters,
+)
 from insumap.infrastructure.onboarding.adapters import (
     OnboardingAdapters,
     build_onboarding_adapters,
+)
+from insumap.infrastructure.patient_adapters import (
+    PatientAdapters,
+    build_patient_adapters,
 )
 from insumap.infrastructure.persistence.transactions import (
     CurrentSession,
@@ -215,6 +354,14 @@ from insumap.infrastructure.platform_adapters import (
     build_platform_adapters,
 )
 from insumap.infrastructure.security.keys import KeyRing
+from insumap.infrastructure.targets_adapters import (
+    TargetsAdapters,
+    build_targets_adapters,
+)
+from insumap.infrastructure.treatment_adapters import (
+    TreatmentAdapters,
+    build_treatment_adapters,
+)
 from insumap.shared.config import Settings, get_settings
 from insumap.shared.field_limits import FieldLimits
 from insumap.shared.i18n import MessageCatalog
@@ -246,6 +393,30 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     ResetStaffMfaCommand,
     PreviewImportCommand,
     ConfirmImportCommand,
+    CreateAlertRuleCommand,
+    CreateAlertRuleVersionCommand,
+    AcknowledgeAlertCommand,
+    ResolveAlertCommand,
+    CreateProtocolTemplateCommand,
+    CreateProtocolTemplateVersionCommand,
+    RetireProtocolTemplateCommand,
+    CreateTreatmentPlanCommand,
+    UpdateTreatmentPlanCommand,
+    ActivateTreatmentPlanCommand,
+    CreateTreatmentPlanVersionCommand,
+    RestoreTreatmentPlanCommand,
+    CreateTargetProfileCommand,
+    CreateTargetProfileVersionCommand,
+    AssignTargetProfileCommand,
+    CreateReminderCommand,
+    UpdatePatientReminderCommand,
+    UpdateOwnReminderCommand,
+    CreateClinicAdminCommand,
+    SuspendPatientCommand,
+    ReactivatePatientCommand,
+    DeactivatePatientCommand,
+    IssueCredentialsCommand,
+    RevokeCredentialInvitationCommand,
 )
 """Every command of the API: a missing handler fails when the container is built."""
 
@@ -307,7 +478,7 @@ class Container:
     them. Tests pass their own settings, clock or probe through the constructor.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - composition root: one optional adapter set per module
         self,
         settings: Settings | None = None,
         *,
@@ -317,8 +488,15 @@ class Container:
         event_publisher: DomainEventPublisher | None = None,
         platform_adapters: PlatformAdapters | None = None,
         monitoring_adapters: MonitoringAdapters | None = None,
+        targets_adapters: TargetsAdapters | None = None,
+        credentials_adapters: CredentialsAdapters | None = None,
         email_channel: NotificationChannel | None = None,
         onboarding_adapters: OnboardingAdapters | None = None,
+        alert_adapters: AlertsAdapters | None = None,
+        treatment_adapters: TreatmentAdapters | None = None,
+        notification_adapters: NotificationAdapters | None = None,
+        clinic_admin_adapters: ClinicAdminAdapters | None = None,
+        patient_adapters: PatientAdapters | None = None,
     ) -> None:
         self.settings: Settings = settings or get_settings()
         self.clock: Clock = clock or SystemClock.instance()
@@ -349,10 +527,17 @@ class Container:
             current=current,
             app_hmac_key=decode_key(self.settings.app_hmac_key.get_secret_value()),
         )
+        targets = targets_adapters or build_targets_adapters(current=current)
         monitoring = monitoring_adapters or build_monitoring_adapters(
             current=current,
             clock=self.clock,
             transactions=SqlTransactionFactory(engine, current),
+        )
+        patient_ports = patient_adapters or build_patient_adapters(
+            current=current, transactions=SqlTransactionFactory(engine, current)
+        )
+        clinic_admins = clinic_admin_adapters or build_clinic_admin_adapters(
+            current=current
         )
         if email_channel is not None:
             platform = replace(platform, email_channel=email_channel)
@@ -364,6 +549,19 @@ class Container:
                 current=self.settings.mfa_encryption_key,
                 previous=self.settings.mfa_encryption_key_previous,
             ),
+        )
+        alerts = alert_adapters or build_alerts_adapters(current=current)
+        treatment = treatment_adapters or build_treatment_adapters(
+            current=current, metrics_targets=monitoring.targets
+        )
+        notifications = notification_adapters or build_notification_adapters(
+            current=current,
+            unit_of_work=adapters.unit_of_work,
+            ids=adapters.ids,
+            clock=self.clock,
+        )
+        credentials = credentials_adapters or build_credentials_adapters(
+            current=current
         )
         services = self._build_identity_services(adapters, platform)
         unit_of_work = CurrentUnitOfWork()
@@ -380,6 +578,14 @@ class Container:
             *self._site_commands(adapters, platform),
             *self._users_commands(adapters, platform, unit_of_work),
             *self._onboarding_commands(adapters, onboarding, unit_of_work),
+            *self._alert_commands(adapters, monitoring, alerts),
+            *self._treatment_commands(adapters, treatment, monitoring),
+            *self._targets_commands(adapters, monitoring, targets),
+            *self._clinic_admin_commands(
+                adapters, platform, clinic_admins, unit_of_work
+            ),
+            *self._patient_commands(adapters, platform, patient_ports),
+            *self._credential_commands(adapters, platform, unit_of_work, credentials),
         ]
         self.command_bus: CommandBus = InMemoryCommandBus(
             registrations, required=ALL_COMMAND_TYPES
@@ -422,9 +628,165 @@ class Container:
             ),
             staff_actor=self.full_session_actor,
         )
+        self.credential_router = CredentialRouter(
+            commands=self.command_bus,
+            issue=IssueCredentialUseCase(
+                commands=self.command_bus,
+                issue_limit=self._credential_issue_limit(adapters),
+            ),
+            issue_batch=IssueCredentialsBatchUseCase(
+                commands=self.command_bus,
+                issue_limit=self._credential_issue_limit(adapters),
+                batch_limit=self._credential_batch_limit(adapters),
+            ),
+            staff_actor=self.full_session_actor,
+        )
         self.records_router = self._build_records_router(adapters, monitoring)
         self.metrics_router = self._build_metrics_router(adapters, monitoring)
         self.import_router = self._build_import_router(adapters, onboarding)
+        self._subscribe_alert_evaluation(adapters, alerts)
+        self.alerts_router = self._build_alerts_router(adapters, monitoring, alerts)
+        self.target_profile_router = self._build_target_profile_router(
+            adapters, targets
+        )
+        self.reminder_router = self._build_reminder_router(
+            adapters, monitoring, targets
+        )
+        self.notification_router = self._build_notification_router(
+            adapters, notifications
+        )
+        self.patient_router = self._build_patient_router(
+            adapters, monitoring, patient_ports
+        )
+        self.treatment_router = self._build_treatment_router(
+            adapters, monitoring, treatment
+        )
+
+    def _treatment_commands(
+        self,
+        adapters: IdentityAdapters,
+        treatment: TreatmentAdapters,
+        monitoring: MonitoringAdapters,
+    ) -> list[Registration]:
+        """The treatment decisions (P13), each behind transaction and audit (P09)."""
+        guard, clock, ids = self._command_guard, self.clock, adapters.ids
+        gate = AssignedPatientGate(monitoring.patient_records)
+        scope = make_scope(treatment.plans, gate)
+        caretaker = PlanSnapshotCaretaker(treatment.snapshots)
+        plans, templates = treatment.plans, treatment.templates
+        return [
+            bind(
+                CreateProtocolTemplateCommand,
+                guard.wrap(
+                    CreateProtocolTemplateCommandHandler(
+                        templates=templates, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                CreateProtocolTemplateVersionCommand,
+                guard.wrap(
+                    CreateProtocolTemplateVersionCommandHandler(
+                        templates=templates, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                RetireProtocolTemplateCommand,
+                guard.wrap(RetireProtocolTemplateCommandHandler(templates=templates)),
+            ),
+            bind(
+                CreateTreatmentPlanCommand,
+                guard.wrap(
+                    CreateTreatmentPlanCommandHandler(
+                        gate=gate,
+                        plans=plans,
+                        templates=templates,
+                        targets=treatment.targets,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                UpdateTreatmentPlanCommand,
+                guard.wrap(
+                    UpdateTreatmentPlanCommandHandler(
+                        scope=scope,
+                        plans=plans,
+                        snapshots=caretaker,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                ActivateTreatmentPlanCommand,
+                guard.wrap(
+                    ActivateTreatmentPlanCommandHandler(
+                        scope=scope,
+                        plans=plans,
+                        templates=templates,
+                        snapshots=caretaker,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                CreateTreatmentPlanVersionCommand,
+                guard.wrap(
+                    CreateTreatmentPlanVersionCommandHandler(
+                        scope=scope, plans=plans, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                RestoreTreatmentPlanCommand,
+                guard.wrap(
+                    RestoreTreatmentPlanCommandHandler(
+                        scope=scope,
+                        plans=plans,
+                        snapshots=treatment.snapshots,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+        ]
+
+    def _build_treatment_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        treatment: TreatmentAdapters,
+    ) -> TreatmentRouter:
+        """Wire the treatment reads (API.md 8.7); the writes go through the bus."""
+        uow = adapters.unit_of_work
+        gate = AssignedPatientGate(monitoring.patient_records)
+        own = OwnPatientGate(adapters.consents)
+        return TreatmentRouter(
+            commands=self.command_bus,
+            list_templates=ListProtocolTemplatesUseCase(
+                uow=uow, templates=treatment.templates
+            ),
+            get_template=GetProtocolTemplateUseCase(
+                uow=uow, templates=treatment.templates
+            ),
+            list_plans=ListTreatmentPlansUseCase(
+                uow=uow, gate=gate, plans=treatment.plans
+            ),
+            get_plan=GetTreatmentPlanUseCase(uow=uow, gate=gate, plans=treatment.plans),
+            list_snapshots=ListTreatmentPlanSnapshotsUseCase(
+                uow=uow,
+                gate=gate,
+                plans=treatment.plans,
+                snapshots=treatment.snapshots,
+            ),
+            get_own_plan=GetOwnTreatmentPlanUseCase(
+                uow=uow, gate=own, plans=treatment.plans
+            ),
+            staff_actor=self.full_session_actor,
+        )
 
     def _build_identity_services(
         self, adapters: IdentityAdapters, platform: PlatformAdapters
@@ -680,6 +1042,36 @@ class Container:
             ),
         ]
 
+    def _clinic_admin_commands(
+        self,
+        adapters: IdentityAdapters,
+        platform: PlatformAdapters,
+        clinic_admins: ClinicAdminAdapters,
+        current: CurrentUnitOfWork,
+    ) -> list[Registration]:
+        """Clinic administrator decisions (P13), behind transaction and audit (P09)."""
+        guard, clock = self._command_guard, self.clock
+        return [
+            bind(
+                CreateClinicAdminCommand,
+                guard.wrap(
+                    CreateClinicAdminCommandHandler(
+                        clinics=platform.clinics,
+                        provisioning=clinic_admins.provisioning,
+                        codes=platform.activation_codes,
+                        code_hasher=adapters.code_hasher,
+                        channel=platform.email_channel,
+                        messages=self.message_catalog,
+                        clock=clock,
+                        current=current,
+                        invitation_ttl=timedelta(
+                            days=self.settings.staff_invitation_days
+                        ),
+                    )
+                ),
+            ),
+        ]
+
     def _site_commands(
         self, adapters: IdentityAdapters, platform: PlatformAdapters
     ) -> list[Registration]:
@@ -777,6 +1169,117 @@ class Container:
                         channel=platform.email_channel,
                         messages=self.message_catalog,
                         current=current,
+                        clock=clock,
+                    )
+                ),
+            ),
+        ]
+
+    def _patient_commands(
+        self,
+        adapters: IdentityAdapters,
+        platform: PlatformAdapters,
+        ports: PatientAdapters,
+    ) -> list[Registration]:
+        """The patient account decisions (P13, P18), behind transaction and audit."""
+        guard, clock = self._command_guard, self.clock
+        directory, users = platform.patients, adapters.users
+        tokens, roster = adapters.refresh_tokens, ports.roster
+        return [
+            bind(
+                SuspendPatientCommand,
+                guard.wrap(
+                    SuspendPatientCommandHandler(
+                        patients=directory,
+                        users=users,
+                        refresh_tokens=tokens,
+                        roster=roster,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                ReactivatePatientCommand,
+                guard.wrap(
+                    ReactivatePatientCommandHandler(
+                        patients=directory, users=users, roster=roster
+                    )
+                ),
+            ),
+            bind(
+                DeactivatePatientCommand,
+                guard.wrap(
+                    DeactivatePatientCommandHandler(
+                        patients=directory,
+                        users=users,
+                        refresh_tokens=tokens,
+                        invitations=ports.invitations,
+                        roster=roster,
+                        clock=clock,
+                    )
+                ),
+            ),
+        ]
+
+    def _credential_issue_limit(self, adapters: IdentityAdapters) -> RateLimitCheck:
+        """300 code issues per clinic and hour (API.md section 5)."""
+        return RateLimitCheck(
+            adapters.rate_limiter,
+            RateLimitRule(
+                family="credential_issue_clinic",
+                limit=self.settings.rate_limit_credential_issue_per_clinic_per_hour,
+                window=timedelta(hours=1),
+            ),
+        )
+
+    def _credential_batch_limit(self, adapters: IdentityAdapters) -> RateLimitCheck:
+        """10 credential batches per clinic and hour (API.md section 5)."""
+        return RateLimitCheck(
+            adapters.rate_limiter,
+            RateLimitRule(
+                family="credential_batch_clinic",
+                limit=self.settings.rate_limit_credential_batch_per_clinic_per_hour,
+                window=timedelta(hours=1),
+            ),
+        )
+
+    def _credential_commands(
+        self,
+        adapters: IdentityAdapters,
+        platform: PlatformAdapters,
+        current: CurrentUnitOfWork,
+        credentials: CredentialsAdapters,
+    ) -> list[Registration]:
+        """The patient credential decisions (P13), with transaction and audit (P09)."""
+        guard, clock = self._command_guard, self.clock
+        return [
+            bind(
+                IssueCredentialsCommand,
+                guard.wrap(
+                    IssueCredentialsCommandHandler(
+                        contacts=credentials.patient_contacts,
+                        users=adapters.users,
+                        invitations=credentials.invitations,
+                        codes=platform.activation_codes,
+                        code_hasher=adapters.code_hasher,
+                        channel=platform.email_channel,
+                        messages=self.message_catalog,
+                        base_url=self.settings.web_app_base_url,
+                        ids=adapters.ids,
+                        clock=clock,
+                        current=current,
+                        code_ttl=timedelta(
+                            hours=self.settings.activation_code_ttl_hours
+                        ),
+                    )
+                ),
+            ),
+            bind(
+                RevokeCredentialInvitationCommand,
+                guard.wrap(
+                    RevokeCredentialInvitationCommandHandler(
+                        users=adapters.users,
+                        invitations=credentials.invitations,
                         clock=clock,
                     )
                 ),
@@ -1010,6 +1513,101 @@ class Container:
             ),
         )
 
+    def _alert_commands(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        alerts: AlertsAdapters,
+    ) -> list[Registration]:
+        """The alert decisions (P13), each behind transaction and audit (P09)."""
+        guard, clock, ids = self._command_guard, self.clock, adapters.ids
+        own = OwnPatientGate(adapters.consents)
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        return [
+            bind(
+                CreateAlertRuleCommand,
+                guard.wrap(
+                    CreateAlertRuleCommandHandler(
+                        rules=alerts.rules, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                CreateAlertRuleVersionCommand,
+                guard.wrap(
+                    CreateAlertRuleVersionCommandHandler(
+                        rules=alerts.rules, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                AcknowledgeAlertCommand,
+                guard.wrap(
+                    AcknowledgeAlertCommandHandler(
+                        alerts=alerts.alerts,
+                        own_gate=own,
+                        assigned_gate=assigned,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                ResolveAlertCommand,
+                guard.wrap(
+                    ResolveAlertCommandHandler(
+                        alerts=alerts.alerts,
+                        assigned_gate=assigned,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+        ]
+
+    def _subscribe_alert_evaluation(
+        self, adapters: IdentityAdapters, alerts: AlertsAdapters
+    ) -> None:
+        """Evaluate the rules after each committed reading (P17), if in-process."""
+        publisher = self.event_publisher
+        if not isinstance(publisher, InProcessDomainEventPublisher):
+            return
+        publisher.subscribe(
+            GlucoseReadingRecorded,
+            EvaluateAlertRulesOnReading(
+                uow=adapters.unit_of_work,
+                rules=alerts.rules,
+                alerts=alerts.alerts,
+                history=alerts.history,
+                ids=adapters.ids,
+                clock=self.clock,
+            ),
+        )
+
+    def _build_alerts_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        alerts: AlertsAdapters,
+    ) -> AlertRouter:
+        """Wire the rules and alerts reads (API.md 8.9) over the scoped gates."""
+        uow = adapters.unit_of_work
+        own = OwnPatientGate(adapters.consents)
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        return AlertRouter(
+            commands=self.command_bus,
+            list_rules=ListAlertRulesUseCase(uow=uow, rules=alerts.rules),
+            get_rule=GetAlertRuleUseCase(uow=uow, rules=alerts.rules),
+            list_alerts=ListAlertsUseCase(
+                uow=uow, own_gate=own, assigned_gate=assigned, alerts=alerts.alerts
+            ),
+            get_summary=GetAlertSummaryUseCase(uow=uow, summary=alerts.summary),
+            get_alert=GetAlertUseCase(
+                uow=uow, own_gate=own, assigned_gate=assigned, alerts=alerts.alerts
+            ),
+            session_actor=self.full_session_actor,
+        )
+
     def _build_records_router(
         self, adapters: IdentityAdapters, monitoring: MonitoringAdapters
     ) -> RecordsRouter:
@@ -1179,6 +1777,187 @@ class Container:
                 series=monitoring.series,
                 forecasts=monitoring.forecasts,
                 clock=clock,
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _targets_commands(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        targets: TargetsAdapters,
+    ) -> list[Registration]:
+        """Goals and reminders decisions (P13), each behind transaction and audit."""
+        guard, clock, ids = self._command_guard, self.clock, adapters.ids
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        own = OwnPatientGate(adapters.consents)
+        catalog, reminders = targets.catalog, targets.reminders
+        return [
+            bind(
+                CreateTargetProfileCommand,
+                guard.wrap(
+                    CreateTargetProfileCommandHandler(
+                        catalog=catalog, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                CreateTargetProfileVersionCommand,
+                guard.wrap(
+                    CreateTargetProfileVersionCommandHandler(
+                        catalog=catalog, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                AssignTargetProfileCommand,
+                guard.wrap(
+                    AssignTargetProfileCommandHandler(
+                        gate=assigned,
+                        catalog=catalog,
+                        assignments=targets.assignments,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                CreateReminderCommand,
+                guard.wrap(
+                    CreateReminderCommandHandler(
+                        gate=assigned, reminders=reminders, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                UpdatePatientReminderCommand,
+                guard.wrap(
+                    UpdatePatientReminderCommandHandler(
+                        gate=assigned, reminders=reminders, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                UpdateOwnReminderCommand,
+                guard.wrap(
+                    UpdateOwnReminderCommandHandler(
+                        gate=own, reminders=reminders, clock=clock
+                    )
+                ),
+            ),
+        ]
+
+    def _build_target_profile_router(
+        self, adapters: IdentityAdapters, targets: TargetsAdapters
+    ) -> TargetProfileRouter:
+        """Wire the goals catalog, the versions and the assignment (API.md 8.7)."""
+        uow = adapters.unit_of_work
+        return TargetProfileRouter(
+            commands=self.command_bus,
+            list_profiles=ListTargetProfilesUseCase(uow=uow, catalog=targets.catalog),
+            get_profile=GetTargetProfileUseCase(uow=uow, catalog=targets.catalog),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_reminder_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        targets: TargetsAdapters,
+    ) -> ReminderRouter:
+        """Wire the reminders of the doctor (assigned) and of the patient (own)."""
+        uow = adapters.unit_of_work
+        return ReminderRouter(
+            commands=self.command_bus,
+            list_patient=ListPatientRemindersUseCase(
+                uow=uow,
+                gate=AssignedPatientGate(monitoring.patient_records),
+                reminders=targets.reminders,
+            ),
+            list_own=ListOwnRemindersUseCase(
+                uow=uow,
+                gate=OwnPatientGate(adapters.consents),
+                reminders=targets.reminders,
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_notification_router(
+        self, adapters: IdentityAdapters, notifications: NotificationAdapters
+    ) -> NotificationRouter:
+        """Wire the notification use cases (API.md 8.9) over ``notifications``.
+
+        The Web Push endpoints are checked against the configured allowlist; the
+        auth secret is encrypted with the identity cipher.
+        """
+        uow, consents, clock = adapters.unit_of_work, adapters.consents, self.clock
+        return NotificationRouter(
+            list_notifications=ListNotificationsUseCase(
+                uow=uow,
+                consents=consents,
+                notifications=notifications.notifications,
+                messages=self.message_catalog,
+            ),
+            mark_read=MarkNotificationReadUseCase(
+                uow=uow,
+                consents=consents,
+                notifications=notifications.notifications,
+                clock=clock,
+            ),
+            get_preferences=GetNotificationPreferencesUseCase(
+                uow=uow,
+                consents=consents,
+                store=notifications.preferences,
+            ),
+            update_preferences=UpdateNotificationPreferencesUseCase(
+                uow=uow,
+                consents=consents,
+                store=notifications.preferences,
+                clock=clock,
+            ),
+            register_push=RegisterWebPushSubscriptionUseCase(
+                uow=uow,
+                consents=consents,
+                subscriptions=notifications.push_subscriptions,
+                security_events=adapters.security_events,
+                cipher=adapters.cipher,
+                ids=adapters.ids,
+                clock=clock,
+                allowed_hosts=tuple(self.settings.push_endpoint_allowed_hosts),
+            ),
+            remove_push=RemoveWebPushSubscriptionUseCase(
+                uow=uow,
+                consents=consents,
+                subscriptions=notifications.push_subscriptions,
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_patient_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        ports: PatientAdapters,
+    ) -> PatientRouter:
+        """Wire the patient administration (API.md 8.4) and the own profile (8.6).
+
+        The own profile reuses the use case of the monitoring slice: it checks the
+        permission, the consent and the patient of the token.
+        """
+        uow, clock = adapters.unit_of_work, self.clock
+        return PatientRouter(
+            commands=self.command_bus,
+            list_patients=ListPatientsUseCase(
+                uow=uow, roster=ports.roster, access_log=ports.access_log, clock=clock
+            ),
+            get_patient=GetPatientUseCase(
+                uow=uow, roster=ports.roster, access_log=ports.access_log, clock=clock
+            ),
+            own_profile=GetOwnPatientProfileUseCase(
+                uow=uow,
+                gate=OwnPatientGate(adapters.consents),
+                users=adapters.users,
+                targets=monitoring.targets,
             ),
             session_actor=self.full_session_actor,
         )

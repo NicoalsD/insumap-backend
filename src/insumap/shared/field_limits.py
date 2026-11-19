@@ -159,6 +159,9 @@ class FieldLimits:
     READINGS_BATCH_MAX_BYTES: ClassVar[int] = 512 * 1024
     """Body size of one offline batch (512 KiB)."""
 
+    CREDENTIAL_BATCH_MAX_ITEMS: ClassVar[int] = 100
+    """Patients in one credential batch (``Seguridad.md`` 3.3)."""
+
     CGM_CSV_MAX_BYTES: ClassVar[int] = 10 * 1024 * 1024
     """Body size of one CGM CSV import (10 MiB)."""
 
@@ -227,3 +230,89 @@ class FieldLimits:
 
     IMPORT_PREVIEW_MAX_AGE_MINUTES: ClassVar[int] = 60
     """How long a previewed batch waits for its confirmation before it expires."""
+
+    # Alerts (alerts.alert_rules and alerts.alerts).
+
+    ALERT_NAME_MAX_LENGTH: ClassVar[int] = 120
+    """Maximum length of the name of an alert rule (``alerts.alert_rules.name``)."""
+
+    ALERT_LEVEL_MIN: ClassVar[int] = 1
+    """Lowest hypoglycemia level (``alerts.alert_rules.level``, CHECK 1 to 3)."""
+
+    ALERT_LEVEL_MAX: ClassVar[int] = 3
+    """Highest hypoglycemia level, and the last step of an escalation chain."""
+
+    ALERT_MINUTES_MIN: ClassVar[int] = 1
+    """Shortest duration or wait of a rule, in minutes."""
+
+    ALERT_MINUTES_MAX: ClassVar[int] = 10080
+    """Longest duration or wait of a rule, in minutes (one week)."""
+
+    ALERT_RATE_INPUT_MAX: ClassVar[int] = 100
+    """Largest rate of change accepted in a rule, in mg/dL per minute."""
+
+    ALERT_CONDITION_MAX_DEPTH: ClassVar[int] = 4
+    """Deepest nesting of a rule condition tree (an input limit, not a clinical one)."""
+
+    ALERT_CONDITION_MAX_NODES: ClassVar[int] = 16
+    """Most nodes, leaves and groups together, in one rule condition tree."""
+
+    # Treatment plans and protocol templates (care schema).
+
+    TEMPLATE_NAME_MAX_LENGTH: ClassVar[int] = 120
+    """Maximum length of a protocol template name (``protocol_templates.name``)."""
+
+    TEMPLATE_CODE_MAX_LENGTH: ClassVar[int] = 40
+    """Maximum length of a protocol template code (``protocol_templates.code``)."""
+
+    PLAN_ITEM_NAME_MAX_LENGTH: ClassVar[int] = 120
+    """Maximum length of a plan item name (``treatment_plan_items.name``)."""
+
+    INSTRUCTIONS_MAX_LENGTH: ClassVar[int] = 500
+    """Maximum length of the instructions of an item or of a template's description."""
+
+    PLAN_NOTES_MAX_LENGTH: ClassVar[int] = 1000
+    """Maximum length of the notes of a plan (``care.treatment_plans.notes``)."""
+
+    PLAN_ITEMS_MAX_ITEMS: ClassVar[int] = 100
+    """Most items one plan or template may list (a technical bound of the request)."""
+
+    # Plan de tratamiento, metas y recordatorios (API.md 8.7). Columnas:
+    # care.target_profiles.code, label, source_reference; care.reminder_schedules.
+    TARGET_PROFILE_CODE_MAX_LENGTH: ClassVar[int] = 40
+    """``care.target_profiles.code`` (varchar(40))."""
+
+    TARGET_PROFILE_CODE_PATTERN: ClassVar[str] = r"^[A-Z][A-Z0-9_]*$"
+    """Upper snake case, as the ``ck_target_profiles_code`` CHECK requires."""
+
+    PROFILE_LABEL_MAX_LENGTH: ClassVar[int] = 120
+    """``care.target_profiles.label`` (varchar(120))."""
+
+    SOURCE_REFERENCE_MAX_LENGTH: ClassVar[int] = 300
+    """``care.target_profiles.source_reference`` (varchar(300))."""
+
+    SMALLINT_MAX: ClassVar[int] = 32767
+    """Largest value of a ``smallint`` column (``min_days`` and the minutes)."""
+
+    TARGET_MG_DL_MAX: ClassVar[int] = 9999
+    """Largest glucose threshold of a profile: ``numeric(5,1)`` columns."""
+
+    INTEGER_MAX: ClassVar[int] = 2147483647
+    """Largest value of an ``integer`` column (minimum readings for the CV)."""
+
+    # Notifications (alerts.push_subscriptions and alerts.notification_preferences).
+
+    PUSH_ENDPOINT_MAX_LENGTH: ClassVar[int] = 2048
+    """Longest Web Push endpoint URL (``alerts.push_subscriptions.endpoint``)."""
+
+    PUSH_ENDPOINT_PATTERN: ClassVar[str] = r"^https://[^\s]+$"
+    """A Web Push endpoint is an https URL without spaces (use fullmatch)."""
+
+    PUSH_KEY_MAX_LENGTH: ClassVar[int] = 255
+    """Longest public key of a subscription (``alerts.push_subscriptions.p256dh``)."""
+
+    PUSH_AUTH_SECRET_MAX_LENGTH: ClassVar[int] = 64
+    """Longest auth secret of a subscription, before it is encrypted."""
+
+    PUSH_KEY_PATTERN: ClassVar[str] = r"^[A-Za-z0-9_-]+$"
+    """Subscription keys are base64url without padding (use fullmatch)."""
