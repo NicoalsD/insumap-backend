@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     rate_limit_activation_per_ip_per_minute: int = Field(default=10, ge=1)
     rate_limit_activation_per_ip_per_hour: int = Field(default=50, ge=1)
     rate_limit_refresh_per_user_per_minute: int = Field(default=30, ge=1)
+    privacy_request_due_days: int = Field(
+        default=10,
+        ge=1,
+        description="Days to answer a privacy request (provisional, see docs).",
+    )
 
     # Patient records and exports (docs/API.md, section 5).
     rate_limit_records_per_user_per_minute: int = Field(default=120, ge=1)

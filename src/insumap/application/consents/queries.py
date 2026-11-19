@@ -19,7 +19,6 @@ from insumap.application.common.unit_of_work import TransactionContext, UnitOfWo
 from insumap.application.consents.gate import OwnConsentGate
 from insumap.application.consents.ports import (
     ConsentHistoryPort,
-    ConsentStatusFilter,
     PatientConsentStatus,
     PrivacyNoticeQueryPort,
     PrivacyNoticeView,
@@ -89,7 +88,6 @@ class ListConsentStatusesInput:
     """The administrator asking, the standing filter and the page."""
 
     actor: Actor
-    query: ConsentStatusFilter
     page: PageRequest
 
 
@@ -119,7 +117,7 @@ class ListConsentStatusesUseCase:
         if actor.clinic_id is None:
             raise PermissionDeniedError
         with self._uow.begin(TransactionContext.for_actor(actor)) as unit:
-            page = self._history.statuses(actor.clinic_id, input.query, input.page)
+            page = self._history.statuses(actor.clinic_id, input.page)
             self._log.record_granted(
                 DataAccessRecord(
                     occurred_at=self._clock.now(),

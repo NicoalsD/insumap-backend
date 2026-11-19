@@ -309,6 +309,7 @@ class PrivacyNoticeVersionOrm(Base):
     clinic_id: Mapped[UUID] = mapped_column(Uuid)
     version: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
+    effective_from: Mapped[datetime] = _timestamp()
     is_current: Mapped[bool] = mapped_column(Boolean)
 
 
@@ -451,3 +452,24 @@ class AlertStatusHistoryOrm(Base):
     actor_type: Mapped[str] = mapped_column(String(6))
     note: Mapped[str | None] = mapped_column(String(500))
     occurred_at: Mapped[datetime] = _timestamp()
+
+
+class PrivacyRequestOrm(Base):
+    """``clinic.privacy_requests``: requests of a patient, with status and deadline."""
+
+    __tablename__ = "privacy_requests"
+    __table_args__ = CLINIC
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    request_type: Mapped[str] = mapped_column(String(18))
+    status: Mapped[str] = mapped_column(String(11))
+    description: Mapped[str | None] = mapped_column(String(500))
+    requested_at: Mapped[datetime] = _timestamp()
+    due_at: Mapped[datetime] = _timestamp()
+    resolved_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    resolved_by: Mapped[UUID | None] = mapped_column(Uuid)
+    resolution_note: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = _timestamp()
+    updated_at: Mapped[datetime] = _timestamp()
