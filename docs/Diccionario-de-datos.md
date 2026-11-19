@@ -35,6 +35,7 @@ Las demás constantes de `FieldLimits` (`REQUEST_ID_PATTERN`, `PASSWORD_MIN_LENG
 |---|---|---|---|
 | `FieldLimits.REASON_MIN_LENGTH` | 10 | `ai.recommendation_decisions.reason`, `alerts.alert_rules.change_reason`, `alerts.alert_status_history.note`, `alerts.alerts.resolution_note`, `audit.audit_log.reason`, `care.follow_ups.result_note` y 14 más | Mínimo de un motivo (RF-70: 10 a 500 caracteres). Se generaliza a todo motivo. |
 | `FieldLimits.REASON_MAX_LENGTH` | 500 | `ai.recommendation_decisions.reason`, `alerts.alert_rules.change_reason`, `alerts.alert_status_history.note`, `alerts.alerts.resolution_note`, `audit.audit_log.reason`, `care.follow_ups.result_note` y 15 más | Máximo de un motivo (RF-70). |
+| `FieldLimits.PATTERN_FINDING_NOTE_MAX_LENGTH` | 500 | `ai.pattern_finding_reviews.reason` | Nota que descarta un hallazgo de patrones (RF-68). Se recorta antes de medir; mínimo `FieldLimits.PATTERN_FINDING_NOTE_MIN_LENGTH` = 1. |
 | `FieldLimits.CLINIC_NAME_MAX_LENGTH` | 120 | `clinic.clinics.name` | Nombre de clínica. |
 | `FieldLimits.TAX_ID_MAX_LENGTH` | 32 | `clinic.clinics.tax_id` | Identificación fiscal. |
 | `FieldLimits.TIMEZONE_MAX_LENGTH` | 64 | `clinic.clinics.timezone` | Nombre de zona IANA. |
@@ -1343,6 +1344,21 @@ Cada transición de una recomendación con quién, cuándo, motivo y valor modif
 | `modified_suggestion` | `jsonb` | Sí |  | CHECK jsonb_typeof = 'object'; CHECK (decision = 'APPROVED_WITH_CHANGES') = (modified_suggestion IS NOT NULL) | Valor cambiado por el médico. |
 | `model_version` | `varchar(80)` | No |  | FieldLimits.MODEL_VERSION_MAX_LENGTH (propuesta) | Versión del modelo (copia de la recomendación). |
 | `applied_plan_id` | `uuid` | Sí |  | FK care.treatment_plans(id) | Versión del plan creada en `APPLIED`. |
+
+### `ai.pattern_finding_reviews`
+
+Respuesta del médico a un hallazgo de IA3: descartarlo (RF-68). Append-only; un hallazgo se descarta una sola vez (`UNIQUE (finding_id)`), y la API responde `409 INVALID_STATE_TRANSITION` si ya lo está. Solo el `DOCTOR` puede insertar, y solo como sí mismo (`reviewed_by = iam.app_user_id()`).
+
+| Columna | Tipo | Nulo | Por defecto | Restricción | Descripción |
+|---|---|---|---|---|---|
+| `id` | `uuid` | No | `uuidv7()` | PK | Identificador de la fila (UUID v7). |
+| `clinic_id` | `uuid` | No |  | FK clinic.clinics(id) | Clínica dueña de la fila (tenant). La RLS filtra por esta columna. |
+| `patient_id` | `uuid` | No |  | FK clinic.patients(id) | Paciente del hallazgo. |
+| `finding_id` | `uuid` | No |  | FK compuesta (id, clinic_id, patient_id) a ai.pattern_findings; UNIQUE | Hallazgo descartado. |
+| `action` | `varchar(9)` | No |  | CHECK IN ('DISMISSED') | Decisión. Hoy solo `DISMISSED`. |
+| `reason` | `varchar(500)` | Sí |  | CHECK char_length(btrim(reason)) BETWEEN 1 AND 500 | Nota del médico (`FieldLimits.PATTERN_FINDING_NOTE_*`). La API siempre la envía, así que en la práctica no es nula. |
+| `reviewed_by` | `uuid` | No |  | FK iam.users(id) | Médico que descartó. |
+| `reviewed_at` | `timestamptz` | No | `now()` |  | Momento del descarte. |
 
 ### `ai.clinical_summaries`
 

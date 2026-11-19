@@ -342,12 +342,63 @@ def test_the_doctor_lists_the_dropout_risk_of_assigned_patients_only(
     assert theirs["items"] == []
 
 
-def test_the_clinic_admin_is_refused_the_dropout_list_until_its_function_exists(
+def test_the_clinic_admin_reads_the_administrative_dropout_list_of_its_clinic(
     api: IdentityApi,
 ) -> None:
+    api.ai.dropout_clinic.items.append(
+        DropoutRiskView(
+            patient_id=PATIENT_ID,
+            patient_name="Paciente Simulado",
+            account_status="ACTIVE",
+            days_without_record=3,
+            risk_tier=RiskTier.MEDIUM,
+            explanation=EXPLANATION,
+            is_fallback=True,
+            fallback_reason="INSUFFICIENT_DATA",
+            generated_at=NOW,
+        )
+    )
     token = api.staff_token(CLINIC_ADMIN, Role.CLINIC_ADMIN, ADMIN_PERMISSIONS)
 
     response = api.client.get(DROPOUT, headers=api.bearer(token))
+
+    assert response.status_code == 200, response.text
+    (item,) = response.json()["items"]
+    assert item["patient_name"] == "Paciente Simulado"
+    assert item["account_status"] == "ACTIVE"
+    assert item["days_without_record"] == 3
+    assert item["label"] == LABEL_SUGGESTION
+    assert item["simulated"] is True
+
+
+def test_the_doctor_dropout_list_has_no_administrative_fields(api: IdentityApi) -> None:
+    api.ai.dropout.items.append(
+        DropoutRiskView(
+            patient_id=PATIENT_ID,
+            patient_name="Paciente Simulado",
+            risk_tier=RiskTier.HIGH,
+            explanation=EXPLANATION,
+            is_fallback=False,
+            fallback_reason=None,
+            generated_at=NOW,
+        )
+    )
+    api.records.patients.assigned.add((DOCTOR, PATIENT_ID))
+
+    (item,) = api.client.get(DROPOUT, headers=doctor(api)).json()["items"]
+
+    assert item["account_status"] is None
+    assert item["days_without_record"] is None
+
+
+def test_the_platform_admin_is_refused_the_dropout_list(
+    api: IdentityApi,
+) -> None:
+    platform = api.staff_token(
+        PLATFORM, Role.PLATFORM_ADMIN, frozenset({PermissionCode.AI_DROPOUT_RISK_READ})
+    )
+
+    response = api.client.get(DROPOUT, headers=api.bearer(platform))
 
     assert response.status_code == 403
 
@@ -394,14 +445,40 @@ def test_the_clinic_admin_reads_the_evaluations_of_its_clinic(api: IdentityApi) 
     assert item["fallback_usage_pct"] == 12.5
 
 
-def test_the_platform_admin_is_refused_the_evaluations_until_its_function_exists(
+def test_the_platform_admin_reads_the_evaluations_of_every_clinic(
     api: IdentityApi,
 ) -> None:
+    api.ai.platform_evaluations.items.extend(
+        [
+            AiEvaluationView(
+                evaluation_id=UUID(int=701),
+                use_case="IA3",
+                model_name="pattern-detectors",
+                model_version="0.2.0",
+                baseline_name="pattern-rules",
+                cohort_ref="sim-seed7",
+                sample_size=120,
+                model_metrics={"precision": 0.9},
+                baseline_metrics={"precision": 0.7},
+                fallback_usage_pct=None,
+                evaluated_at=NOW,
+            )
+        ]
+    )
     token = api.staff_token(
         PLATFORM, Role.PLATFORM_ADMIN, frozenset({PermissionCode.AI_EVALUATIONS_READ})
     )
 
-    response = api.client.get(EVALUATIONS, headers=api.bearer(token))
+    response = api.client.get(f"{EVALUATIONS}?use_case=IA3", headers=api.bearer(token))
+
+    assert response.status_code == 200, response.text
+    (item,) = response.json()["items"]
+    assert item["use_case"] == "IA3"
+    assert item["simulated"] is True
+
+
+def test_the_doctor_is_refused_the_platform_evaluations(api: IdentityApi) -> None:
+    response = api.client.get(EVALUATIONS, headers=doctor(api))
 
     assert response.status_code == 403
 
@@ -434,3 +511,163 @@ def test_the_fallback_reason_of_a_summary_is_a_known_code(api: IdentityApi) -> N
     response = api.client.get(f"{SUMMARIES}/{view.summary_id}", headers=doctor(api))
 
     assert response.json()["fallback_reason"] == "AI_ERROR"
+
+
+FINDING_ID = UUID(int=501)
+DISMISS = f"{BASE}/patients/{PATIENT_ID}/pattern-findings/{{finding}}/dismiss"
+NOTE = "Hipoglucemia explicada por un ayuno de la noche."
+
+
+def _finding(number: int = 501, *, patient: UUID = PATIENT_ID) -> PatternFindingView:
+    return PatternFindingView(
+        finding_id=UUID(int=number),
+        patient_id=patient,
+        pattern_type="NOCTURNAL_HYPOGLYCEMIA",
+        window_start=NOW - timedelta(days=7),
+        window_end=NOW,
+        confidence=Decimal("0.88"),
+        evidence={"nights_affected": 4},
+        explanation=EXPLANATION,
+        model_version="0.2.0",
+        is_fallback=False,
+        fallback_reason=None,
+        generated_at=NOW,
+    )
+
+
+def test_the_doctor_dismisses_a_finding_and_the_list_shows_it_dismissed(
+    api: IdentityApi,
+) -> None:
+    api.ai.findings.items.append(_finding())
+    headers = doctor(api)
+
+    response = api.client.post(
+        DISMISS.format(finding=FINDING_ID),
+        json={"note": f"  {NOTE}  "},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["id"] == str(FINDING_ID)
+    assert body["status"] == "DISMISSED"
+    assert body["dismissed_by"] == str(DOCTOR)
+    assert body["dismissed_at"] is not None
+    assert body["label"] == LABEL_SUGGESTION
+    (row,) = api.ai.pattern_reviews.rows
+    assert row.note == NOTE
+    assert row.reviewed_by == DOCTOR
+    listing = api.client.get(FINDINGS, headers=headers).json()
+    (item,) = listing["items"]
+    assert item["status"] == "DISMISSED"
+    assert item["dismissed_by"] == str(DOCTOR)
+
+
+def test_a_finding_is_listed_as_new_until_it_is_dismissed(api: IdentityApi) -> None:
+    api.ai.findings.items.append(_finding())
+
+    (item,) = api.client.get(FINDINGS, headers=doctor(api)).json()["items"]
+
+    assert item["status"] == "NEW"
+    assert item["dismissed_at"] is None
+    assert item["dismissed_by"] is None
+
+
+def test_dismissing_a_finding_twice_is_409(api: IdentityApi) -> None:
+    api.ai.findings.items.append(_finding())
+    headers = doctor(api)
+    url = DISMISS.format(finding=FINDING_ID)
+    assert api.client.post(url, json={"note": NOTE}, headers=headers).status_code == 200
+
+    response = api.client.post(url, json={"note": NOTE}, headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "INVALID_STATE_TRANSITION"
+    assert len(api.ai.pattern_reviews.rows) == 1
+
+
+def test_a_finding_of_another_patient_is_404_like_a_missing_one(
+    api: IdentityApi,
+) -> None:
+    api.ai.findings.items.append(_finding(502, patient=OTHER_PATIENT))
+    headers = doctor(api)
+
+    other = api.client.post(
+        f"{BASE}/patients/{OTHER_PATIENT}/pattern-findings/{UUID(int=502)}/dismiss",
+        json={"note": NOTE},
+        headers=headers,
+    )
+    absent = api.client.post(
+        DISMISS.format(finding=UUID(int=999)), json={"note": NOTE}, headers=headers
+    )
+
+    assert other.status_code == absent.status_code == 404
+    assert api.ai.pattern_reviews.rows == []
+
+
+def test_a_patient_not_assigned_is_404_like_an_absent_one(api: IdentityApi) -> None:
+    api.ai.findings.items.append(_finding(502, patient=OTHER_PATIENT))
+    headers = doctor(api)
+
+    not_assigned = api.client.post(
+        f"{BASE}/patients/{OTHER_PATIENT}/pattern-findings/{UUID(int=502)}/dismiss",
+        json={"note": NOTE},
+        headers=headers,
+    )
+    absent = api.client.post(
+        f"{BASE}/patients/{UUID(int=998)}/pattern-findings/{UUID(int=502)}/dismiss",
+        json={"note": NOTE},
+        headers=headers,
+    )
+
+    assert not_assigned.status_code == absent.status_code == 404
+    assert not_assigned.json() == absent.json()
+
+
+@pytest.mark.parametrize("note", ["", "   ", "x" * 501])
+def test_the_note_must_be_one_to_500_characters_after_trimming(
+    api: IdentityApi, note: str
+) -> None:
+    api.ai.findings.items.append(_finding())
+
+    response = api.client.post(
+        DISMISS.format(finding=FINDING_ID), json={"note": note}, headers=doctor(api)
+    )
+
+    assert response.status_code == 422, response.text
+    assert api.ai.pattern_reviews.rows == []
+
+
+def test_the_note_is_required_and_no_other_field_is_accepted(api: IdentityApi) -> None:
+    api.ai.findings.items.append(_finding())
+    headers = doctor(api)
+    url = DISMISS.format(finding=FINDING_ID)
+
+    missing = api.client.post(url, json={}, headers=headers)
+    extra = api.client.post(url, json={"note": NOTE, "status": "NEW"}, headers=headers)
+
+    assert missing.status_code == 422
+    assert extra.status_code == 422
+    assert api.ai.pattern_reviews.rows == []
+
+
+def test_dismissing_without_a_token_is_401(api: IdentityApi) -> None:
+    api.ai.findings.items.append(_finding())
+
+    response = api.client.post(DISMISS.format(finding=FINDING_ID), json={"note": NOTE})
+
+    assert response.status_code == 401
+
+
+def test_the_clinic_admin_cannot_dismiss_a_finding(api: IdentityApi) -> None:
+    api.ai.findings.items.append(_finding())
+    token = api.staff_token(CLINIC_ADMIN, Role.CLINIC_ADMIN, ADMIN_PERMISSIONS)
+
+    response = api.client.post(
+        DISMISS.format(finding=FINDING_ID),
+        json={"note": NOTE},
+        headers=api.bearer(token),
+    )
+
+    assert response.status_code == 403
+    assert api.ai.pattern_reviews.rows == []

@@ -51,6 +51,10 @@ from insumap.application.ai.commands import (
     RejectRecommendationCommand,
     RejectRecommendationCommandHandler,
 )
+from insumap.application.ai.finding_dismissal import (
+    DismissPatternFindingCommand,
+    DismissPatternFindingCommandHandler,
+)
 from insumap.application.ai.queries import (
     GetRecommendationUseCase,
     ListRecommendationsUseCase,
@@ -531,6 +535,7 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     ApproveRecommendationCommand,
     ModifyRecommendationCommand,
     RejectRecommendationCommand,
+    DismissPatternFindingCommand,
     ResetClinicAdminAccessCommand,
     SuspendPatientCommand,
     ReactivatePatientCommand,
@@ -728,6 +733,7 @@ class Container:
             *self._onboarding_commands(adapters, onboarding, unit_of_work),
             *self._alert_commands(adapters, monitoring, alerts),
             *self._recommendation_commands(adapters, monitoring, ai, unit_of_work),
+            *self._finding_commands(adapters, monitoring, ai),
             *self._treatment_commands(adapters, treatment, monitoring),
             *self._targets_commands(adapters, monitoring, targets),
             *self._clinic_admin_commands(
@@ -2116,6 +2122,28 @@ class Container:
             ),
         ]
 
+    def _finding_commands(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        ai: AiAdapters,
+    ) -> list[Registration]:
+        """The doctor's dismissal of a pattern finding (P13), audited (P09)."""
+        return [
+            bind(
+                DismissPatternFindingCommand,
+                self._command_guard.wrap(
+                    DismissPatternFindingCommandHandler(
+                        assigned_gate=AssignedPatientGate(monitoring.patient_records),
+                        findings=ai.findings,
+                        reviews=ai.pattern_reviews,
+                        clock=self.clock,
+                        ids=adapters.ids,
+                    )
+                ),
+            ),
+        ]
+
     def _subscribe_alert_evaluation(
         self, adapters: IdentityAdapters, alerts: AlertsAdapters
     ) -> None:
@@ -2210,6 +2238,7 @@ class Container:
             findings=ListPatternFindingsUseCase(
                 uow=uow, assigned_gate=assigned, findings=ai.findings
             ),
+            commands=self.command_bus,
             create_summary=CreateClinicalSummaryUseCase(
                 uow=uow,
                 assigned_gate=assigned,
@@ -2225,9 +2254,16 @@ class Container:
                 uow=uow, assigned_gate=assigned, summaries=ai.summary_reads
             ),
             dropout=ListDropoutRisksUseCase(
-                uow=uow, assigned_gate=assigned, dropout=ai.dropout
+                uow=uow,
+                assigned_gate=assigned,
+                dropout=ai.dropout,
+                clinic_dropout=ai.dropout_clinic,
             ),
-            evaluations=ListAiEvaluationsUseCase(uow=uow, evaluations=ai.evaluations),
+            evaluations=ListAiEvaluationsUseCase(
+                uow=uow,
+                evaluations=ai.evaluations,
+                platform=ai.platform_evaluations,
+            ),
             messages=self.message_catalog,
             session_actor=self.full_session_actor,
         )
