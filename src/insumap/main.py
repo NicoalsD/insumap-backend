@@ -16,7 +16,15 @@ from insumap.container import Container
 from insumap.shared.field_limits import FieldLimits
 
 CORS_ALLOWED_METHODS: Final = ["GET", "POST", "PUT", "PATCH", "DELETE"]
-CORS_ALLOWED_HEADERS: Final = ["Authorization", "Content-Type", REQUEST_ID_HEADER]
+REQUESTED_WITH_HEADER: Final = "X-Requested-With"
+RETRY_AFTER_HEADER: Final = "Retry-After"
+CORS_ALLOWED_HEADERS: Final = [
+    "Authorization",
+    "Content-Type",
+    REQUESTED_WITH_HEADER,
+    REQUEST_ID_HEADER,
+]
+CORS_EXPOSED_HEADERS: Final = [REQUEST_ID_HEADER, RETRY_AFTER_HEADER]
 
 
 def create_app(container: Container | None = None) -> FastAPI:
@@ -44,10 +52,11 @@ def create_app(container: Container | None = None) -> FastAPI:
             allow_credentials=True,
             allow_methods=CORS_ALLOWED_METHODS,
             allow_headers=CORS_ALLOWED_HEADERS,
-            expose_headers=[REQUEST_ID_HEADER],
+            expose_headers=CORS_EXPOSED_HEADERS,
         )
     app.include_router(container.health_router.router)
     app.include_router(container.meta_router.router)
+    app.include_router(container.auth_router.router)
     return app
 
 

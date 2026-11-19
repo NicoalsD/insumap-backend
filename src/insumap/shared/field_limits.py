@@ -29,6 +29,9 @@ class FieldLimits:
     EMAIL_MAX_LENGTH: ClassVar[int] = 254
     """Maximum length of an email address (RFC 5321 path limit)."""
 
+    EMAIL_PATTERN: ClassVar[str] = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+    """Shape of an email typed by a person (use fullmatch); not a delivery check."""
+
     PASSWORD_MIN_LENGTH: ClassVar[int] = 12
     """Minimum length of a new password."""
 

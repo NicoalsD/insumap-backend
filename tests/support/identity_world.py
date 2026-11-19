@@ -47,6 +47,7 @@ from insumap.domain.identity.password_policy import PasswordPolicy
 from insumap.domain.identity.refresh_token import RefreshTokenLifetime
 from insumap.domain.identity.roles import Role
 from insumap.domain.identity.user import ClinicSummary, UserAccount
+from insumap.infrastructure.identity_adapters import IdentityAdapters
 from tests.support.fixed_clock import FixedClock
 from tests.support.identity_fakes import (
     HASH_PREFIX,
@@ -346,4 +347,28 @@ class IdentityWorld:
             rate_limit=check,
             ids=self.ids,
             clock=self.clock,
+        )
+
+    def adapters(self) -> IdentityAdapters:
+        """The doubles as the adapters a ``Container`` is built from."""
+        return IdentityAdapters(
+            unit_of_work=self.uow,
+            users=self.users,
+            permissions=self.permissions,
+            password_history=self.history,
+            refresh_tokens=self.refresh_tokens,
+            challenges=self.challenge_repo,
+            mfa_factors=self.factors,
+            activations=self.activations,
+            consents=self.consents,
+            security_events=self.events,
+            password_hasher=self.hasher,
+            tokens=self.tokens,
+            opaque_tokens=self.opaque,
+            totp=self.totp,
+            cipher=self.cipher,
+            code_hasher=self.code_hasher,
+            recovery_codes=FakeRecoveryCodes(),
+            rate_limiter=self.limiter,
+            ids=self.ids,
         )
