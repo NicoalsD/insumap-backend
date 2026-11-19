@@ -11,7 +11,14 @@ from tests.support.settings import (
     make_settings,
 )
 
-ENV_VARS = ("APP_ENV", "LOG_LEVEL", "DATABASE_URL", "CORS_ORIGINS", "API_DOCS_ENABLED")
+ENV_VARS = (
+    "APP_ENV",
+    "LOG_LEVEL",
+    "DATABASE_URL",
+    "CORS_ORIGINS",
+    "API_DOCS_ENABLED",
+    "ALLOWED_HOSTS",
+)
 URL_WITH_CREDENTIALS = (
     "postgresql://insumap_app:not-a-real-secret@db.example.test/insumap"
 )
@@ -52,9 +59,11 @@ def test_reads_every_variable_from_the_environment(
     clean_env.setenv("DATABASE_URL", TEST_DATABASE_URL)
     clean_env.setenv("CORS_ORIGINS", "http://localhost:5173, https://app.example.test")
     clean_env.setenv("API_DOCS_ENABLED", "false")
+    clean_env.setenv("ALLOWED_HOSTS", "API.example.test, *.example.test")
 
     settings = Settings(_env_file=None)
 
+    assert settings.allowed_hosts == ["api.example.test", "*.example.test"]
     assert settings.app_env == "production"
     assert settings.log_level == "WARNING"
     assert settings.cors_origins == [
@@ -139,6 +148,7 @@ def test_get_settings_loads_once_until_reset(
     clean_env.setenv("APP_ENV", "test")
 
     first = get_settings()
+    clean_env.setenv("ALLOWED_HOSTS", "api.example.test")
     clean_env.setenv("APP_ENV", "production")
     second = get_settings()
     SettingsHolder.reset()
@@ -194,3 +204,46 @@ def test_security_defaults_follow_the_policy() -> None:
     assert settings.mfa_challenge_ttl_seconds == 300
     assert settings.activation_session_ttl_minutes == 15
     assert Settings.model_fields["argon2_memory_kib"].default == 19456
+
+
+@pytest.mark.parametrize("app_env", ["local", "test"])
+def test_allowed_hosts_default_to_the_development_hosts(
+    clean_env: pytest.MonkeyPatch, app_env: str
+) -> None:
+    clean_env.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    clean_env.setenv("APP_ENV", app_env)
+
+    settings = Settings(_env_file=None)
+
+    assert settings.allowed_hosts == ["localhost", "127.0.0.1", "testserver"]
+
+
+def test_blank_allowed_hosts_fall_back_to_the_development_hosts(
+    clean_env: pytest.MonkeyPatch,
+) -> None:
+    clean_env.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    clean_env.setenv("ALLOWED_HOSTS", " , ")
+
+    assert Settings(_env_file=None).allowed_hosts == [
+        "localhost",
+        "127.0.0.1",
+        "testserver",
+    ]
+
+
+def test_production_does_not_start_without_allowed_hosts(
+    clean_env: pytest.MonkeyPatch,
+) -> None:
+    clean_env.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    clean_env.setenv("APP_ENV", "production")
+
+    with pytest.raises(ValidationError, match="ALLOWED_HOSTS"):
+        Settings(_env_file=None)
+
+
+def test_a_bare_wildcard_host_is_rejected(clean_env: pytest.MonkeyPatch) -> None:
+    clean_env.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    clean_env.setenv("ALLOWED_HOSTS", "*")
+
+    with pytest.raises(ValidationError, match="wildcard"):
+        Settings(_env_file=None)

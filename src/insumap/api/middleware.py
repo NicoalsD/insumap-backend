@@ -1,11 +1,12 @@
-"""ASGI middleware of the API: correlation id, body size limit and cache policy."""
+"""ASGI middleware of the API: hosts, security headers, correlation id, body size."""
 
 from __future__ import annotations
 
 import contextlib
 import re
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from http import HTTPStatus
 from typing import Final, final
 
 from starlette.datastructures import Headers, MutableHeaders
@@ -13,6 +14,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from insumap.api.correlation import REQUEST_ID_HEADER, REQUEST_ID_STATE_KEY
 from insumap.api.errors import ErrorResponseFactory
+from insumap.api.openapi import DOCS_URL, OPENAPI_URL
 from insumap.api.paths import API_V1_PREFIX
 from insumap.shared.errors import ErrorCode
 from insumap.shared.field_limits import FieldLimits
@@ -27,14 +29,35 @@ NO_STORE: Final = "no-store"
 EMPTY_BODY: Final = b""
 STATE_SCOPE_KEY: Final = "state"
 SAFE_REQUEST_ID: Final = re.compile(FieldLimits.REQUEST_ID_PATTERN)
+HOST_HEADER: Final = "host"
+SERVER_HEADER: Final = "server"
+INVALID_HOST_MESSAGE_KEY: Final = "validation.invalid_host"
+HOST_PORT_SEPARATOR: Final = ":"
+IPV6_CLOSE_BRACKET: Final = "]"
+SUBDOMAIN_WILDCARD: Final = "*."
+HSTS_MAX_AGE_SECONDS: Final = 31_536_000
+DOCS_PATHS: Final = frozenset({DOCS_URL, OPENAPI_URL})
+"""Documentation routes: Swagger loads scripts and styles the strict CSP blocks."""
+API_CONTENT_SECURITY_POLICY: Final = (
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+)
+HSTS_VALUE: Final = f"max-age={HSTS_MAX_AGE_SECONDS}; includeSubDomains"
+FIXED_SECURITY_HEADERS: Final[Mapping[str, str]] = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": (
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    ),
+    "Cross-Origin-Resource-Policy": "same-site",
+}
 
 
 @final
 class RequestIdMiddleware:
     """Gives every request a correlation id and echoes it in ``X-Request-ID``.
 
-    A client supplied id is kept only if it fits ``REQUEST_ID_MAX_LENGTH`` and
-    matches ``REQUEST_ID_PATTERN``; otherwise a new UUID4 replaces it. The id is
+    A client supplied id is kept only if it is a valid UUID (``REQUEST_ID_PATTERN``,
+    Seguridad 11.2); otherwise a new UUID4 replaces it. The id is
     bound for the logs and stored in ``request.state``, where the handler of
     unexpected errors (which runs outside the user middleware) finds it.
     """
@@ -182,3 +205,94 @@ class NoStoreCacheMiddleware:
             await send(message)
 
         await self._app(scope, receive, send_with_cache_policy)
+
+
+@final
+class TrustedHostMiddleware:
+    """Rejects a ``Host`` outside ``ALLOWED_HOSTS`` with the canonical error format.
+
+    Starlette's own middleware answers in plain text. The code is
+    ``400 VALIDATION_ERROR`` (the policy fixes none; open decision). Entries are
+    exact hosts or ``*.example.test``, which matches any subdomain but not the
+    bare domain. The port is ignored and the comparison is case insensitive.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        responses: ErrorResponseFactory,
+        allowed_hosts: Iterable[str],
+    ) -> None:
+        self._app = app
+        self._responses = responses
+        self._allowed_hosts = tuple(host.lower() for host in allowed_hosts)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != HTTP_SCOPE or self._is_allowed(
+            Headers(scope=scope).get(HOST_HEADER, "")
+        ):
+            await self._app(scope, receive, send)
+            return
+        response = self._responses.create(
+            ErrorCode.VALIDATION_ERROR, message_key=INVALID_HOST_MESSAGE_KEY
+        )
+        response.status_code = HTTPStatus.BAD_REQUEST
+        await response(scope, receive, send)
+
+    def _is_allowed(self, host_header: str) -> bool:
+        host = self._hostname(host_header)
+        return any(
+            host == allowed
+            or (
+                allowed.startswith(SUBDOMAIN_WILDCARD)
+                and host.endswith(allowed[1:])
+                and len(host) > len(allowed) - 1
+            )
+            for allowed in self._allowed_hosts
+        )
+
+    @staticmethod
+    def _hostname(host_header: str) -> str:
+        host = host_header.strip().lower()
+        if host.startswith("["):
+            return host[: host.find(IPV6_CLOSE_BRACKET) + 1]
+        return host.partition(HOST_PORT_SEPARATOR)[0]
+
+
+@final
+class SecurityHeadersMiddleware:
+    """Adds the security headers of Seguridad 13.1 to every HTTP response.
+
+    A route that needs another value sets it itself: ``setdefault`` never
+    overwrites. HSTS is sent only in production, where TLS ends before the app.
+    ``Swagger`` routes get no CSP, because the strict one blocks its scripts
+    (relaxed policy pending). ``Server`` is removed.
+    """
+
+    def __init__(self, app: ASGIApp, *, hsts: bool) -> None:
+        self._app = app
+        self._hsts = hsts
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != HTTP_SCOPE:
+            await self._app(scope, receive, send)
+            return
+        path = str(scope.get("path", ""))
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == HTTP_RESPONSE_START_MESSAGE:
+                headers = MutableHeaders(scope=message)
+                for name, value in FIXED_SECURITY_HEADERS.items():
+                    headers.setdefault(name, value)
+                if self._hsts:
+                    headers.setdefault("Strict-Transport-Security", HSTS_VALUE)
+                if path not in DOCS_PATHS:
+                    headers.setdefault(
+                        "Content-Security-Policy", API_CONTENT_SECURITY_POLICY
+                    )
+                if SERVER_HEADER in headers:
+                    del headers[SERVER_HEADER]
+            await send(message)
+
+        await self._app(scope, receive, send_with_headers)
