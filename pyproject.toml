@@ -41,7 +41,8 @@ select = ["E", "W", "F", "I", "B", "UP", "N", "PL", "S", "SIM", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 # Asserts and magic numbers are idiomatic in tests; PLR2004 stays active in src/.
-"tests/**" = ["S101", "PLR2004"]
+# Tests also hold fake passwords and token hashes on purpose (S105, S106).
+"tests/**" = ["S101", "PLR2004", "S105", "S106"]
 
 [tool.ruff.format]
 quote-style = "double"
