@@ -194,3 +194,9 @@ class FieldLimits:
 
     SMALLINT_MAX: ClassVar[int] = 32767
     """Largest value of a ``smallint`` column (``min_days`` and the minutes)."""
+
+    TARGET_MG_DL_MAX: ClassVar[int] = 9999
+    """Largest glucose threshold of a profile: ``numeric(5,1)`` columns."""
+
+    INTEGER_MAX: ClassVar[int] = 2147483647
+    """Largest value of an ``integer`` column (minimum readings for the CV)."""
