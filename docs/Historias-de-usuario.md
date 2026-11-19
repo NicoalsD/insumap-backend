@@ -616,8 +616,8 @@ Escenario: gráfica del día
   Cuando abre su inicio
   Entonces ve la gráfica con su rango objetivo y sus dosis, comidas y actividad sobre la línea de tiempo
 
-Escenario: legibilidad en celular
-  Dado una pantalla de 360 px de ancho
+Escenario: legibilidad en escritorio y en celular
+  Dado una pantalla de escritorio de 1440 px de ancho o, como criterio secundario, una de 360 px
   Cuando abre la gráfica
   Entonces se ve completa sin desplazamiento horizontal y no depende solo del color
 
