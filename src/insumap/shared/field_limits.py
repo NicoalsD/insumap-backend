@@ -181,6 +181,26 @@ class FieldLimits:
     """Longest pagination cursor accepted (the records cursor carries a time and
     an id); a longer one is invalid."""
 
+    # Treatment plans and protocol templates (care schema).
+
+    TEMPLATE_NAME_MAX_LENGTH: ClassVar[int] = 120
+    """Maximum length of a protocol template name (``protocol_templates.name``)."""
+
+    TEMPLATE_CODE_MAX_LENGTH: ClassVar[int] = 40
+    """Maximum length of a protocol template code (``protocol_templates.code``)."""
+
+    PLAN_ITEM_NAME_MAX_LENGTH: ClassVar[int] = 120
+    """Maximum length of a plan item name (``treatment_plan_items.name``)."""
+
+    INSTRUCTIONS_MAX_LENGTH: ClassVar[int] = 500
+    """Maximum length of the instructions of an item or of a template's description."""
+
+    PLAN_NOTES_MAX_LENGTH: ClassVar[int] = 1000
+    """Maximum length of the notes of a plan (``care.treatment_plans.notes``)."""
+
+    PLAN_ITEMS_MAX_ITEMS: ClassVar[int] = 100
+    """Most items one plan or template may list (a technical bound of the request)."""
+
     # Plan de tratamiento, metas y recordatorios (API.md 8.7). Columnas:
     # care.target_profiles.code, label, source_reference; care.reminder_schedules.
     TARGET_PROFILE_CODE_MAX_LENGTH: ClassVar[int] = 40

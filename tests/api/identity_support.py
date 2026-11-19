@@ -15,6 +15,7 @@ from insumap.infrastructure.credentials_adapters import CredentialsAdapters
 from insumap.infrastructure.patient_adapters import PatientAdapters
 from insumap.infrastructure.platform_adapters import PlatformAdapters
 from insumap.infrastructure.targets_adapters import TargetsAdapters
+from insumap.infrastructure.treatment_adapters import TreatmentAdapters
 from insumap.main import create_app
 from tests.support.access_fakes import FakeDirectory, InMemoryDataAccessLog
 from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
@@ -52,6 +53,12 @@ from tests.support.targets_fakes import (
     FakeTargetAssignments,
     FakeTargetCatalog,
 )
+from tests.support.treatment_fakes import (
+    FakePlans,
+    FakeSnapshots,
+    FakeTargets,
+    FakeTemplates,
+)
 from tests.support.users_fakes import (
     FakeLoginLockouts,
     FakeStaffDirectory,
@@ -61,6 +68,7 @@ from tests.support.users_fakes import (
 ORIGIN = "https://app.example.test"
 CSRF_HEADERS = {"X-Requested-With": "insumap-web"}
 FACTOR_ID_OFFSET: Final = 1000
+TREATMENT_TARGET: Final = UUID(int=4040)
 
 
 class IdentityApi:
@@ -81,6 +89,10 @@ class IdentityApi:
         self.staff_directory = FakeStaffDirectory(self.world.users, self.world.factors)
         self.staff_invitations = FakeStaffInvitations()
         self.login_lockouts = FakeLoginLockouts()
+        self.templates = FakeTemplates()
+        self.plans = FakePlans()
+        self.snapshots = FakeSnapshots()
+        self.targets = FakeTargets(TREATMENT_TARGET)
         self.catalog = FakeTargetCatalog()
         self.target_assignments = FakeTargetAssignments()
         self.reminders = FakeReminders()
@@ -115,6 +127,12 @@ class IdentityApi:
                 activation_codes=DistinctActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
+            treatment_adapters=TreatmentAdapters(
+                templates=self.templates,
+                plans=self.plans,
+                snapshots=self.snapshots,
+                targets=self.targets,
+            ),
             targets_adapters=TargetsAdapters(
                 catalog=self.catalog,
                 assignments=self.target_assignments,

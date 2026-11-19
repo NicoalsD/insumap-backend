@@ -23,9 +23,9 @@ from insumap.domain.monitoring.validation import ValidationParams
 from insumap.infrastructure.persistence.monitoring_orm import (
     ReadingValidationSettingsOrm,
     SymptomCatalogOrm,
-    TreatmentPlanOrm,
 )
 from insumap.infrastructure.persistence.transactions import CurrentSession
+from insumap.infrastructure.persistence.treatment_orm import TreatmentPlanOrm
 from insumap.shared.errors import ErrorCode, InsumapError
 
 ACTIVE: Final = "ACTIVE"

@@ -21,6 +21,7 @@ from insumap.api.routers.records import RecordsRouter
 from insumap.api.routers.reminders import ReminderRouter
 from insumap.api.routers.sites import SiteRouter
 from insumap.api.routers.targets import TargetProfileRouter
+from insumap.api.routers.treatment import TreatmentRouter
 from insumap.api.routers.users import UserRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
 from insumap.application.care_team.commands import (
@@ -224,6 +225,36 @@ from insumap.application.targets.queries import (
     GetTargetProfileUseCase,
     ListTargetProfilesUseCase,
 )
+from insumap.application.treatment.plan_commands import (
+    ActivateTreatmentPlanCommand,
+    ActivateTreatmentPlanCommandHandler,
+    CreateTreatmentPlanCommand,
+    CreateTreatmentPlanCommandHandler,
+    CreateTreatmentPlanVersionCommand,
+    CreateTreatmentPlanVersionCommandHandler,
+    RestoreTreatmentPlanCommand,
+    RestoreTreatmentPlanCommandHandler,
+    UpdateTreatmentPlanCommand,
+    UpdateTreatmentPlanCommandHandler,
+    make_scope,
+)
+from insumap.application.treatment.queries import (
+    GetOwnTreatmentPlanUseCase,
+    GetProtocolTemplateUseCase,
+    GetTreatmentPlanUseCase,
+    ListProtocolTemplatesUseCase,
+    ListTreatmentPlanSnapshotsUseCase,
+    ListTreatmentPlansUseCase,
+)
+from insumap.application.treatment.snapshots import PlanSnapshotCaretaker
+from insumap.application.treatment.template_commands import (
+    CreateProtocolTemplateCommand,
+    CreateProtocolTemplateCommandHandler,
+    CreateProtocolTemplateVersionCommand,
+    CreateProtocolTemplateVersionCommandHandler,
+    RetireProtocolTemplateCommand,
+    RetireProtocolTemplateCommandHandler,
+)
 from insumap.application.users.commands import (
     CreateStaffUserCommand,
     CreateStaffUserCommandHandler,
@@ -280,6 +311,10 @@ from insumap.infrastructure.targets_adapters import (
     TargetsAdapters,
     build_targets_adapters,
 )
+from insumap.infrastructure.treatment_adapters import (
+    TreatmentAdapters,
+    build_treatment_adapters,
+)
 from insumap.shared.config import Settings, get_settings
 from insumap.shared.field_limits import FieldLimits
 from insumap.shared.i18n import MessageCatalog
@@ -309,6 +344,14 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     DeactivateStaffUserCommand,
     UnlockStaffUserCommand,
     ResetStaffMfaCommand,
+    CreateProtocolTemplateCommand,
+    CreateProtocolTemplateVersionCommand,
+    RetireProtocolTemplateCommand,
+    CreateTreatmentPlanCommand,
+    UpdateTreatmentPlanCommand,
+    ActivateTreatmentPlanCommand,
+    CreateTreatmentPlanVersionCommand,
+    RestoreTreatmentPlanCommand,
     CreateTargetProfileCommand,
     CreateTargetProfileVersionCommand,
     AssignTargetProfileCommand,
@@ -395,6 +438,7 @@ class Container:
         targets_adapters: TargetsAdapters | None = None,
         credentials_adapters: CredentialsAdapters | None = None,
         email_channel: NotificationChannel | None = None,
+        treatment_adapters: TreatmentAdapters | None = None,
         notification_adapters: NotificationAdapters | None = None,
         clinic_admin_adapters: ClinicAdminAdapters | None = None,
         patient_adapters: PatientAdapters | None = None,
@@ -442,6 +486,9 @@ class Container:
         )
         if email_channel is not None:
             platform = replace(platform, email_channel=email_channel)
+        treatment = treatment_adapters or build_treatment_adapters(
+            current=current, metrics_targets=monitoring.targets
+        )
         notifications = notification_adapters or build_notification_adapters(
             current=current,
             unit_of_work=adapters.unit_of_work,
@@ -465,6 +512,7 @@ class Container:
             *self._clinic_commands(adapters, platform),
             *self._site_commands(adapters, platform),
             *self._users_commands(adapters, platform, unit_of_work),
+            *self._treatment_commands(adapters, treatment, monitoring),
             *self._targets_commands(adapters, monitoring, targets),
             *self._clinic_admin_commands(
                 adapters, platform, clinic_admins, unit_of_work
@@ -539,6 +587,135 @@ class Container:
         )
         self.patient_router = self._build_patient_router(
             adapters, monitoring, patient_ports
+        )
+        self.treatment_router = self._build_treatment_router(
+            adapters, monitoring, treatment
+        )
+
+    def _treatment_commands(
+        self,
+        adapters: IdentityAdapters,
+        treatment: TreatmentAdapters,
+        monitoring: MonitoringAdapters,
+    ) -> list[Registration]:
+        """The treatment decisions (P13), each behind transaction and audit (P09)."""
+        guard, clock, ids = self._command_guard, self.clock, adapters.ids
+        gate = AssignedPatientGate(monitoring.patient_records)
+        scope = make_scope(treatment.plans, gate)
+        caretaker = PlanSnapshotCaretaker(treatment.snapshots)
+        plans, templates = treatment.plans, treatment.templates
+        return [
+            bind(
+                CreateProtocolTemplateCommand,
+                guard.wrap(
+                    CreateProtocolTemplateCommandHandler(
+                        templates=templates, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                CreateProtocolTemplateVersionCommand,
+                guard.wrap(
+                    CreateProtocolTemplateVersionCommandHandler(
+                        templates=templates, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                RetireProtocolTemplateCommand,
+                guard.wrap(RetireProtocolTemplateCommandHandler(templates=templates)),
+            ),
+            bind(
+                CreateTreatmentPlanCommand,
+                guard.wrap(
+                    CreateTreatmentPlanCommandHandler(
+                        gate=gate,
+                        plans=plans,
+                        templates=templates,
+                        targets=treatment.targets,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                UpdateTreatmentPlanCommand,
+                guard.wrap(
+                    UpdateTreatmentPlanCommandHandler(
+                        scope=scope,
+                        plans=plans,
+                        snapshots=caretaker,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                ActivateTreatmentPlanCommand,
+                guard.wrap(
+                    ActivateTreatmentPlanCommandHandler(
+                        scope=scope,
+                        plans=plans,
+                        templates=templates,
+                        snapshots=caretaker,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                CreateTreatmentPlanVersionCommand,
+                guard.wrap(
+                    CreateTreatmentPlanVersionCommandHandler(
+                        scope=scope, plans=plans, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                RestoreTreatmentPlanCommand,
+                guard.wrap(
+                    RestoreTreatmentPlanCommandHandler(
+                        scope=scope,
+                        plans=plans,
+                        snapshots=treatment.snapshots,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+        ]
+
+    def _build_treatment_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        treatment: TreatmentAdapters,
+    ) -> TreatmentRouter:
+        """Wire the treatment reads (API.md 8.7); the writes go through the bus."""
+        uow = adapters.unit_of_work
+        gate = AssignedPatientGate(monitoring.patient_records)
+        own = OwnPatientGate(adapters.consents)
+        return TreatmentRouter(
+            commands=self.command_bus,
+            list_templates=ListProtocolTemplatesUseCase(
+                uow=uow, templates=treatment.templates
+            ),
+            get_template=GetProtocolTemplateUseCase(
+                uow=uow, templates=treatment.templates
+            ),
+            list_plans=ListTreatmentPlansUseCase(
+                uow=uow, gate=gate, plans=treatment.plans
+            ),
+            get_plan=GetTreatmentPlanUseCase(uow=uow, gate=gate, plans=treatment.plans),
+            list_snapshots=ListTreatmentPlanSnapshotsUseCase(
+                uow=uow,
+                gate=gate,
+                plans=treatment.plans,
+                snapshots=treatment.snapshots,
+            ),
+            get_own_plan=GetOwnTreatmentPlanUseCase(
+                uow=uow, gate=own, plans=treatment.plans
+            ),
+            staff_actor=self.full_session_actor,
         )
 
     def _build_identity_services(
