@@ -24,7 +24,7 @@ from sqlalchemy import (
     Uuid,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, CIDR, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 IAM = {"schema": "iam"}
@@ -197,6 +197,7 @@ class SecurityEventOrm(Base):
     severity: Mapped[str] = mapped_column(String(8))
     user_id: Mapped[UUID | None] = mapped_column(Uuid)
     clinic_id: Mapped[UUID | None] = mapped_column(Uuid)
+    ip_truncated: Mapped[Any | None] = mapped_column(CIDR)
     details: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'"))
 
 
@@ -451,3 +452,56 @@ class AlertStatusHistoryOrm(Base):
     actor_type: Mapped[str] = mapped_column(String(6))
     note: Mapped[str | None] = mapped_column(String(500))
     occurred_at: Mapped[datetime] = _timestamp()
+
+
+AUDIT = {"schema": "audit"}
+
+
+class AuditLogOrm(Base):
+    """``audit.audit_log``: hash chained actions. The database computes the chain."""
+
+    __tablename__ = "audit_log"
+    __table_args__ = AUDIT
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    chain_seq: Mapped[int] = mapped_column(BigInteger)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=NOW
+    )
+    actor_user_id: Mapped[UUID | None] = mapped_column(Uuid)
+    actor_role: Mapped[str | None] = mapped_column(String(14))
+    actor_type: Mapped[str] = mapped_column(String(6))
+    action: Mapped[str] = mapped_column(String(60))
+    entity_type: Mapped[str] = mapped_column(String(40))
+    entity_id: Mapped[UUID | None] = mapped_column(Uuid)
+    entity_version: Mapped[int | None] = mapped_column(Integer)
+    reason: Mapped[str | None] = mapped_column(String(500))
+    changed_fields: Mapped[list[str]] = mapped_column(ARRAY(String(80)))
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    ip_hmac: Mapped[str | None] = mapped_column(CHAR(64))
+    prev_hash: Mapped[str] = mapped_column(CHAR(64))
+    row_hash: Mapped[str] = mapped_column(CHAR(64))
+
+
+class DataAccessLogOrm(Base):
+    """``audit.data_access_log``: one row per read of clinical data (P09)."""
+
+    __tablename__ = "data_access_log"
+    __table_args__ = AUDIT
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID | None] = mapped_column(Uuid)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=NOW
+    )
+    actor_user_id: Mapped[UUID | None] = mapped_column(Uuid)
+    actor_role: Mapped[str | None] = mapped_column(String(14))
+    actor_type: Mapped[str] = mapped_column(String(6))
+    resource_type: Mapped[str] = mapped_column(String(24))
+    action: Mapped[str] = mapped_column(String(7))
+    outcome: Mapped[str] = mapped_column(String(7))
+    purpose: Mapped[str] = mapped_column(String(14))
+    request_id: Mapped[str | None] = mapped_column(String(64))
+    ip_hmac: Mapped[str | None] = mapped_column(CHAR(64))
