@@ -12,8 +12,10 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from insumap.application.ai.assessments import EscalationLevel
 from insumap.application.metrics.forecast import FallbackReason
 from insumap.domain.ai.linear_fallback import Trend
+from insumap.domain.ai.risk import RiskTier
 from insumap.shared.field_limits import FieldLimits
 
 
@@ -24,6 +26,8 @@ class _Model(BaseModel):
 class FactorModel(_Model):
     name: str
     direction: str
+    value: float | str | None = None
+    unit: str | None = None
     contribution: float = Field(ge=0, le=1, allow_inf_nan=False)
 
 
@@ -83,3 +87,73 @@ class GlucoseForecastResponse(_Model):
         if self.is_fallback != (self.fallback_reason is not None):
             raise ValueError("is_fallback and fallback_reason disagree")
         return self
+
+
+class _OutputModel(_Model):
+    """The common fields of every ``200`` (Contrato-IA 4.3) and their consistency."""
+
+    model_name: str = Field(min_length=1, max_length=80)
+    model_version: str = Field(min_length=1, max_length=80)
+    input_hash: str = Field(
+        min_length=FieldLimits.AI_HASH_LENGTH, max_length=FieldLimits.AI_HASH_LENGTH
+    )
+    generated_at: datetime
+    is_fallback: bool
+    fallback_reason: FallbackReason | None = None
+    explanation: ExplanationModel
+
+    @model_validator(mode="after")
+    def fallback_reason_matches_flag(self) -> Self:
+        if self.is_fallback != (self.fallback_reason is not None):
+            raise ValueError("is_fallback and fallback_reason disagree")
+        return self
+
+
+class RiskAssessmentResponse(_OutputModel):
+    """``POST /v1/risk-assessments`` (IA2): the probability and the tier, if any."""
+
+    assessment_type: str = Field(pattern="^(DETERIORATION|DROPOUT)$")
+    risk_probability: float | None = Field(
+        default=None, ge=0, le=1, allow_inf_nan=False
+    )
+    calibrated: bool
+    risk_tier: RiskTier | None = None
+
+
+class SummarySectionModel(_Model):
+    title: str = Field(min_length=1, max_length=FieldLimits.AI_SUMMARY_TEXT_MAX_LENGTH)
+    text: str = Field(min_length=1, max_length=FieldLimits.AI_SUMMARY_TEXT_MAX_LENGTH)
+    refs: list[str] = Field(default_factory=list)
+
+
+class NumericCheckModel(_Model):
+    all_matched: bool
+
+
+class ClinicalSummaryResponse(_OutputModel):
+    """``POST /v1/clinical-summaries`` (IA5): the text, its sections and the check."""
+
+    summary_text: str = Field(
+        min_length=1, max_length=FieldLimits.AI_SUMMARY_TEXT_MAX_LENGTH
+    )
+    sections: list[SummarySectionModel] = Field(default_factory=list)
+    numeric_check: NumericCheckModel
+
+
+class EscalationModel(_Model):
+    level: EscalationLevel
+    message: str | None = Field(
+        default=None, max_length=FieldLimits.AI_SUMMARY_TEXT_MAX_LENGTH
+    )
+
+
+class AssistantReplyResponse(_OutputModel):
+    """``POST /v1/assistant-replies`` (IA6): a reply no longer than the stored
+    column."""
+
+    reply_text: str = Field(
+        min_length=1, max_length=FieldLimits.AI_ASSISTANT_MESSAGE_MAX_LENGTH
+    )
+    citations: list[str] = Field(default_factory=list)
+    escalation: EscalationModel
+    guardrails_triggered: list[str] = Field(default_factory=list)

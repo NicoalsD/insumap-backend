@@ -588,6 +588,163 @@ class RecommendationDecisionOrm(Base):
     applied_plan_id: Mapped[UUID | None] = mapped_column(Uuid)
 
 
+class RiskAssessmentOrm(Base):
+    """``ai.risk_assessments``: append only (IA2 and IA7)."""
+
+    __tablename__ = "risk_assessments"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    assessment_type: Mapped[str] = mapped_column(String(13))
+    risk_probability: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    risk_tier: Mapped[str | None] = mapped_column(String(8))
+    calibrated: Mapped[bool] = mapped_column(Boolean)
+    window_days: Mapped[int] = mapped_column(SmallInteger)
+    metric_snapshot_id: Mapped[UUID | None] = mapped_column(Uuid)
+    target_profile_id: Mapped[UUID] = mapped_column(Uuid)
+    model_name: Mapped[str] = mapped_column(String(80))
+    model_version: Mapped[str] = mapped_column(String(80))
+    input_hash: Mapped[str] = mapped_column(CHAR(64))
+    explanation: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    is_fallback: Mapped[bool] = mapped_column(Boolean)
+    fallback_reason: Mapped[str | None] = mapped_column(String(17))
+    is_shadow: Mapped[bool] = mapped_column(Boolean)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PatternFindingOrm(Base):
+    """``ai.pattern_findings``: append only (IA3)."""
+
+    __tablename__ = "pattern_findings"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    pattern_type: Mapped[str] = mapped_column(String(24))
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    model_name: Mapped[str] = mapped_column(String(80))
+    model_version: Mapped[str] = mapped_column(String(80))
+    input_hash: Mapped[str] = mapped_column(CHAR(64))
+    explanation: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    is_fallback: Mapped[bool] = mapped_column(Boolean)
+    fallback_reason: Mapped[str | None] = mapped_column(String(17))
+    is_shadow: Mapped[bool] = mapped_column(Boolean)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PatternFindingReviewOrm(Base):
+    """``ai.pattern_finding_reviews``: append only, the doctor dismisses a finding."""
+
+    __tablename__ = "pattern_finding_reviews"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    finding_id: Mapped[UUID] = mapped_column(Uuid)
+    action: Mapped[str] = mapped_column(String(9))
+    reason: Mapped[str] = mapped_column(String(500))
+    reviewed_by: Mapped[UUID] = mapped_column(Uuid)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ClinicalSummaryOrm(Base):
+    """``ai.clinical_summaries``: append only (IA5)."""
+
+    __tablename__ = "clinical_summaries"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    sections: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    numeric_check_matched: Mapped[bool | None] = mapped_column(Boolean)
+    requested_by: Mapped[UUID] = mapped_column(Uuid)
+    model_name: Mapped[str] = mapped_column(String(80))
+    model_version: Mapped[str] = mapped_column(String(80))
+    input_hash: Mapped[str] = mapped_column(CHAR(64))
+    explanation: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    is_fallback: Mapped[bool] = mapped_column(Boolean)
+    fallback_reason: Mapped[str | None] = mapped_column(String(17))
+    is_shadow: Mapped[bool] = mapped_column(Boolean)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AssistantMessageOrm(Base):
+    """``ai.assistant_messages``: the patient's turns and the replies (IA6)."""
+
+    __tablename__ = "assistant_messages"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    conversation_id: Mapped[UUID] = mapped_column(Uuid)
+    sender: Mapped[str] = mapped_column(String(9))
+    content: Mapped[str] = mapped_column(String(1000))
+    escalation_level: Mapped[str | None] = mapped_column(String(14))
+    guardrails_triggered: Mapped[list[str]] = mapped_column(ARRAY(String(40)))
+    context_doc_ids: Mapped[list[UUID]] = mapped_column(ARRAY(Uuid))
+    external_consent_id: Mapped[UUID | None] = mapped_column(Uuid)
+    model_name: Mapped[str | None] = mapped_column(String(80))
+    model_version: Mapped[str | None] = mapped_column(String(80))
+    input_hash: Mapped[str | None] = mapped_column(CHAR(64))
+    explanation: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    is_fallback: Mapped[bool] = mapped_column(Boolean)
+    fallback_reason: Mapped[str | None] = mapped_column(String(17))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class KnowledgeDocumentOrm(Base):
+    """``ai.knowledge_documents``: clinic material; only APPROVED is used as context."""
+
+    __tablename__ = "knowledge_documents"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    title: Mapped[str] = mapped_column(String(160))
+    body: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(8))
+    approved_by: Mapped[UUID | None] = mapped_column(Uuid)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AiEvaluationOrm(Base):
+    """``ai.ai_evaluations``: each use case against its fallback (read only here)."""
+
+    __tablename__ = "ai_evaluations"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID | None] = mapped_column(Uuid)
+    use_case: Mapped[str] = mapped_column(String(3))
+    model_name: Mapped[str] = mapped_column(String(80))
+    model_version: Mapped[str] = mapped_column(String(80))
+    baseline_name: Mapped[str] = mapped_column(String(80))
+    cohort_ref: Mapped[str] = mapped_column(String(80))
+    sample_size: Mapped[int] = mapped_column(Integer)
+    model_metrics: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    baseline_metrics: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    fallback_usage_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class PrivacyRequestOrm(Base):
     """``clinic.privacy_requests``: requests of a patient, with status and deadline."""
 

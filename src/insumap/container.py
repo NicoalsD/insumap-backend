@@ -8,7 +8,9 @@ from datetime import timedelta
 from typing import Final, Never, final
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
+from insumap.api.routers.ai_assessments import AiAssessmentRouter
 from insumap.api.routers.alerts import AlertRouter
+from insumap.api.routers.assistant import AssistantRouter
 from insumap.api.routers.audit import AuditRouter
 from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.care_team import CareTeamRouter
@@ -36,6 +38,12 @@ from insumap.api.routers.targets import TargetProfileRouter
 from insumap.api.routers.treatment import TreatmentRouter
 from insumap.api.routers.users import UserRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
+from insumap.application.ai.assessment_reads import (
+    ListAiEvaluationsUseCase,
+    ListDropoutRisksUseCase,
+    ListPatternFindingsUseCase,
+)
+from insumap.application.ai.assistant import SendAssistantMessageUseCase
 from insumap.application.ai.commands import (
     ApproveRecommendationCommand,
     ApproveRecommendationCommandHandler,
@@ -44,9 +52,18 @@ from insumap.application.ai.commands import (
     RejectRecommendationCommand,
     RejectRecommendationCommandHandler,
 )
+from insumap.application.ai.finding_dismissal import (
+    DismissPatternFindingCommand,
+    DismissPatternFindingCommandHandler,
+)
 from insumap.application.ai.queries import (
     GetRecommendationUseCase,
     ListRecommendationsUseCase,
+)
+from insumap.application.ai.risk import GetPatientRiskUseCase
+from insumap.application.ai.summaries import (
+    CreateClinicalSummaryUseCase,
+    GetClinicalSummaryUseCase,
 )
 from insumap.application.alerts.commands import (
     AcknowledgeAlertCommand,
@@ -132,6 +149,7 @@ from insumap.application.consents.commands import (
     WithdrawConsentCommandHandler,
 )
 from insumap.application.consents.gate import OwnConsentGate
+from insumap.application.consents.ports import ConsentHistoryPort
 from insumap.application.consents.privacy_requests import (
     CreatePrivacyRequestCommand,
     CreatePrivacyRequestCommandHandler,
@@ -520,6 +538,7 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     ApproveRecommendationCommand,
     ModifyRecommendationCommand,
     RejectRecommendationCommand,
+    DismissPatternFindingCommand,
     ResetClinicAdminAccessCommand,
     SuspendPatientCommand,
     ReactivatePatientCommand,
@@ -653,6 +672,7 @@ class Container:
             transactions=SqlTransactionFactory(engine, current),
             ids=adapters.ids,
             app_hmac_key=decode_key(self.settings.app_hmac_key.get_secret_value()),
+            messages=self.message_catalog,
         )
         monitoring = monitoring_adapters or build_monitoring_adapters(
             current=current,
@@ -716,6 +736,7 @@ class Container:
             *self._onboarding_commands(adapters, onboarding, unit_of_work),
             *self._alert_commands(adapters, monitoring, alerts),
             *self._recommendation_commands(adapters, monitoring, ai, unit_of_work),
+            *self._finding_commands(adapters, monitoring, ai),
             *self._treatment_commands(adapters, treatment, monitoring),
             *self._targets_commands(adapters, monitoring, targets),
             *self._clinic_admin_commands(
@@ -788,6 +809,12 @@ class Container:
         self.alerts_router = self._build_alerts_router(adapters, monitoring, alerts)
         self.recommendation_router = self._build_recommendation_router(
             adapters, monitoring, ai
+        )
+        self.ai_assessment_router = self._build_ai_assessment_router(
+            adapters, monitoring, ai
+        )
+        self.assistant_router = self._build_assistant_router(
+            adapters, ai, consents.history
         )
         self.target_profile_router = self._build_target_profile_router(
             adapters, targets
@@ -2122,6 +2149,28 @@ class Container:
             ),
         ]
 
+    def _finding_commands(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        ai: AiAdapters,
+    ) -> list[Registration]:
+        """The doctor's dismissal of a pattern finding (P13), audited (P09)."""
+        return [
+            bind(
+                DismissPatternFindingCommand,
+                self._command_guard.wrap(
+                    DismissPatternFindingCommandHandler(
+                        assigned_gate=AssignedPatientGate(monitoring.patient_records),
+                        findings=ai.findings,
+                        reviews=ai.pattern_reviews,
+                        clock=self.clock,
+                        ids=adapters.ids,
+                    )
+                ),
+            ),
+        ]
+
     def _subscribe_alert_evaluation(
         self, adapters: IdentityAdapters, alerts: AlertsAdapters
     ) -> None:
@@ -2181,6 +2230,101 @@ class Container:
             ),
             get_recommendation=GetRecommendationUseCase(
                 uow=uow, assigned_gate=assigned, recommendations=ai.recommendations
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_ai_assessment_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        ai: AiAdapters,
+    ) -> AiAssessmentRouter:
+        """Wire the risk, findings, summaries, dropout and evaluation reads (API.md
+        8.10)."""
+        uow, clock = adapters.unit_of_work, self.clock
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        summary_limit = RateLimitCheck(
+            adapters.rate_limiter,
+            RateLimitRule(
+                family="summary_doctor",
+                limit=self.settings.rate_limit_summary_per_doctor_per_hour,
+                window=timedelta(hours=1),
+            ),
+        )
+        return AiAssessmentRouter(
+            risk=GetPatientRiskUseCase(
+                uow=uow,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                profiles=ai.patient_profiles,
+                risks=ai.risks,
+                clock=clock,
+            ),
+            findings=ListPatternFindingsUseCase(
+                uow=uow, assigned_gate=assigned, findings=ai.findings
+            ),
+            commands=self.command_bus,
+            create_summary=CreateClinicalSummaryUseCase(
+                uow=uow,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                profiles=ai.patient_profiles,
+                summaries=ai.summaries,
+                rate_limit=summary_limit,
+                llm_real_data_allowed=self.settings.llm_real_data_allowed,
+                clock=clock,
+            ),
+            get_summary=GetClinicalSummaryUseCase(
+                uow=uow, assigned_gate=assigned, summaries=ai.summary_reads
+            ),
+            dropout=ListDropoutRisksUseCase(
+                uow=uow,
+                assigned_gate=assigned,
+                dropout=ai.dropout,
+                clinic_dropout=ai.dropout_clinic,
+            ),
+            evaluations=ListAiEvaluationsUseCase(
+                uow=uow,
+                evaluations=ai.evaluations,
+                platform=ai.platform_evaluations,
+            ),
+            messages=self.message_catalog,
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_assistant_router(
+        self,
+        adapters: IdentityAdapters,
+        ai: AiAdapters,
+        consent_history: ConsentHistoryPort,
+    ) -> AssistantRouter:
+        """Wire the patient's assistant (IA6): own patient, C3 and the rate limits."""
+        assistant_limit = RateLimitCheck(
+            adapters.rate_limiter,
+            RateLimitRule(
+                family="assistant_patient_hour",
+                limit=self.settings.rate_limit_assistant_per_patient_per_hour,
+                window=timedelta(hours=1),
+            ),
+            RateLimitRule(
+                family="assistant_patient_day",
+                limit=self.settings.rate_limit_assistant_per_patient_per_day,
+                window=timedelta(days=1),
+            ),
+        )
+        return AssistantRouter(
+            send=SendAssistantMessageUseCase(
+                uow=adapters.unit_of_work,
+                own_gate=OwnPatientGate(adapters.consents, rate_limit=assistant_limit),
+                consents=consent_history,
+                conversations=ai.conversations,
+                knowledge=ai.knowledge,
+                assistant=ai.assistant,
+                ids=adapters.ids,
+                clock=self.clock,
             ),
             session_actor=self.full_session_actor,
         )

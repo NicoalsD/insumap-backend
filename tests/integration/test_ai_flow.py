@@ -13,9 +13,16 @@ from insumap.application.common.unit_of_work import TransactionContext
 from insumap.infrastructure.ai.output_store import SYSTEM_ACCESS_LOG
 from insumap.infrastructure.identity_adapters import build_engine
 from insumap.infrastructure.persistence.orm import (
+    AiEvaluationOrm,
+    AssistantMessageOrm,
+    ClinicalSummaryOrm,
     GlucoseForecastOrm,
+    KnowledgeDocumentOrm,
+    PatternFindingOrm,
+    PatternFindingReviewOrm,
     RecommendationDecisionOrm,
     RecommendationOrm,
+    RiskAssessmentOrm,
 )
 from insumap.infrastructure.persistence.transactions import (
     CurrentSession,
@@ -46,6 +53,13 @@ def test_the_ai_orm_maps_every_column_of_the_migrated_tables(migrated_url: str) 
             ("glucose_forecasts", GlucoseForecastOrm),
             ("recommendations", RecommendationOrm),
             ("recommendation_decisions", RecommendationDecisionOrm),
+            ("risk_assessments", RiskAssessmentOrm),
+            ("pattern_findings", PatternFindingOrm),
+            ("pattern_finding_reviews", PatternFindingReviewOrm),
+            ("clinical_summaries", ClinicalSummaryOrm),
+            ("assistant_messages", AssistantMessageOrm),
+            ("knowledge_documents", KnowledgeDocumentOrm),
+            ("ai_evaluations", AiEvaluationOrm),
         ):
             assert _mapped(model) == _columns(conn, table), table
 

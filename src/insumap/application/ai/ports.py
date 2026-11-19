@@ -13,6 +13,16 @@ from decimal import Decimal
 from typing import final
 from uuid import UUID
 
+from insumap.application.ai.assessments import (
+    AiExplanation,
+    ApprovedFragment,
+    AssistantResult,
+    AssistantTurn,
+    EscalationLevel,
+    RiskResult,
+    SummaryResult,
+    SummarySection,
+)
 from insumap.application.metrics.forecast import (
     FallbackReason,
     ForecastExplanation,
@@ -21,6 +31,8 @@ from insumap.application.metrics.forecast import (
     ForecastRisk,
 )
 from insumap.domain.ai.linear_fallback import Trend
+from insumap.domain.ai.risk import RiskFeatures, RiskTier
+from insumap.domain.metrics.glycemic_metrics import GlycemicMetrics
 
 
 @final
@@ -74,12 +86,115 @@ class RemoteForecast:
     explanation: ForecastExplanation | None
 
 
+@final
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RiskCall:
+    """The minimized input of IA2 (Contrato-IA 8.2). Built only by the proxy."""
+
+    subject_ref: str
+    window_days: int
+    diabetes_type: str
+    """The contract value (``T1D``, ``T2D`` or ``GESTATIONAL``)."""
+    target_tir_pct: Decimal
+    features: RiskFeatures
+
+
+@final
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SummaryCall:
+    """The minimized input of IA5 (Contrato-IA 8.5): figures and enums, no free text."""
+
+    subject_ref: str
+    period_start: datetime
+    period_end: datetime
+    diabetes_type: str
+    metrics: GlycemicMetrics
+    target_tir_pct: Decimal
+    readings_per_day: Decimal | None
+
+
+@final
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AssistantCall:
+    """The minimized input of IA6 (Contrato-IA 8.6): the pseudonym and the turn."""
+
+    subject_ref: str
+    message: str
+    history: tuple[AssistantTurn, ...]
+    fragments: tuple[ApprovedFragment, ...]
+
+
+@final
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RemoteRisk:
+    """What the service answered for IA2 (or what its own fallback answered)."""
+
+    model_name: str
+    model_version: str
+    input_hash: str
+    generated_at: datetime
+    is_fallback: bool
+    fallback_reason: FallbackReason | None
+    risk_probability: Decimal | None
+    risk_tier: RiskTier | None
+    calibrated: bool
+    explanation: AiExplanation
+
+
+@final
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RemoteSummary:
+    """What the service answered for IA5."""
+
+    model_name: str
+    model_version: str
+    input_hash: str
+    generated_at: datetime
+    is_fallback: bool
+    fallback_reason: FallbackReason | None
+    summary_text: str
+    sections: tuple[SummarySection, ...]
+    numeric_all_matched: bool
+    explanation: AiExplanation
+
+
+@final
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RemoteAssistant:
+    """What the service answered for IA6. ``citations`` are the ids it echoed."""
+
+    model_name: str
+    model_version: str
+    input_hash: str
+    generated_at: datetime
+    is_fallback: bool
+    fallback_reason: FallbackReason | None
+    reply_text: str
+    citations: tuple[str, ...]
+    escalation: EscalationLevel
+    escalation_message: str | None
+    guardrails_triggered: tuple[str, ...]
+    explanation: AiExplanation
+
+
 class AiServicePort(ABC):
     """``insumap-ai`` as the backend uses it (Contrato-IA)."""
 
     @abstractmethod
     def glucose_forecast(self, call: ForecastCall) -> RemoteForecast:
         """IA1. Raises ``AiCallError`` when the service did not answer usably."""
+
+    @abstractmethod
+    def risk_assessment(self, call: RiskCall) -> RemoteRisk:
+        """IA2. Raises ``AiCallError`` when the service did not answer usably."""
+
+    @abstractmethod
+    def clinical_summary(self, call: SummaryCall) -> RemoteSummary:
+        """IA5. Raises ``AiCallError`` when the service did not answer usably."""
+
+    @abstractmethod
+    def assistant_reply(self, call: AssistantCall) -> RemoteAssistant:
+        """IA6. Raises ``AiCallError`` when the service did not answer usably."""
 
 
 @final
@@ -102,3 +217,57 @@ class AiOutputStorePort(ABC):
         self, record: ForecastRecord, *, request_id: str | None, occurred_at: datetime
     ) -> None:
         """Write the output and its ``AI_PROCESSING`` audit row in one transaction."""
+
+    @abstractmethod
+    def store_risk(
+        self, record: RiskRecord, *, request_id: str | None, occurred_at: datetime
+    ) -> None:
+        """Write an IA2 assessment and its audit row in one transaction."""
+
+    @abstractmethod
+    def store_summary(
+        self, record: SummaryRecord, *, request_id: str | None, occurred_at: datetime
+    ) -> None:
+        """Write an IA5 summary and its audit row in one transaction."""
+
+    @abstractmethod
+    def store_assistant_reply(
+        self, record: AssistantRecord, *, request_id: str | None, occurred_at: datetime
+    ) -> None:
+        """Write an IA6 reply and its audit row in one transaction."""
+
+
+@final
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RiskRecord:
+    """One IA2 assessment ready for ``ai.risk_assessments`` (DETERIORATION)."""
+
+    clinic_id: UUID
+    patient_id: UUID
+    target_profile_id: UUID
+    window_days: int
+    output: RiskResult
+
+
+@final
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SummaryRecord:
+    """One IA5 summary ready for ``ai.clinical_summaries`` (the id is in the output)."""
+
+    clinic_id: UUID
+    patient_id: UUID
+    requested_by: UUID
+    output: SummaryResult
+
+
+@final
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AssistantRecord:
+    """One IA6 reply ready for ``ai.assistant_messages`` (sender ``ASSISTANT``)."""
+
+    reply_id: UUID
+    clinic_id: UUID
+    patient_id: UUID
+    output: AssistantResult
+    context_doc_ids: tuple[UUID, ...]
+    external_consent_id: UUID | None

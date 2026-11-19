@@ -13,9 +13,18 @@ from insumap.application.ai.ports import (
     AiCallError,
     AiOutputStorePort,
     AiServicePort,
+    AssistantCall,
+    AssistantRecord,
     ForecastCall,
     ForecastRecord,
+    RemoteAssistant,
     RemoteForecast,
+    RemoteRisk,
+    RemoteSummary,
+    RiskCall,
+    RiskRecord,
+    SummaryCall,
+    SummaryRecord,
 )
 from insumap.application.metrics.forecast import (
     FallbackReason,
@@ -29,11 +38,14 @@ from insumap.domain.ai.circuit_breaker import (
     CircuitStatus,
 )
 from insumap.domain.ai.linear_fallback import FALLBACK_MODEL_VERSION
+from insumap.domain.ai.risk import RuleBasedRiskStrategy
 from insumap.domain.metrics.window import GlucosePoint
 from insumap.infrastructure.ai.proxy import RemoteAiServiceProxy
 from insumap.infrastructure.ai.pseudonymizer import HmacPseudonymizer
 from insumap.infrastructure.security.subkey_hasher import Subkey, SubkeyHasher
+from insumap.shared.i18n.message_catalog import MessageCatalog
 from tests.support.fixed_clock import FixedClock
+from tests.support.identity_fakes import FakeIds
 
 NOW = datetime(2026, 11, 14, 21, 45, tzinfo=UTC)
 PATIENT = UUID("0192f4b2-7c1a-7d00-8a31-5e9f0c2b6a10")
@@ -66,6 +78,15 @@ class FakeService(AiServicePort):
             raise self.error
         return self.answer
 
+    def risk_assessment(self, call: RiskCall) -> RemoteRisk:
+        raise AiCallError(FallbackReason.AI_ERROR, counts_as_failure=True)
+
+    def clinical_summary(self, call: SummaryCall) -> RemoteSummary:
+        raise AiCallError(FallbackReason.AI_ERROR, counts_as_failure=True)
+
+    def assistant_reply(self, call: AssistantCall) -> RemoteAssistant:
+        raise AiCallError(FallbackReason.AI_ERROR, counts_as_failure=True)
+
 
 class FakeStore(AiOutputStorePort):
     def __init__(self) -> None:
@@ -76,6 +97,21 @@ class FakeStore(AiOutputStorePort):
     ) -> None:
         del request_id, occurred_at
         self.records.append(record)
+
+    def store_risk(
+        self, record: RiskRecord, *, request_id: str | None, occurred_at: datetime
+    ) -> None:
+        del record, request_id, occurred_at
+
+    def store_summary(
+        self, record: SummaryRecord, *, request_id: str | None, occurred_at: datetime
+    ) -> None:
+        del record, request_id, occurred_at
+
+    def store_assistant_reply(
+        self, record: AssistantRecord, *, request_id: str | None, occurred_at: datetime
+    ) -> None:
+        del record, request_id, occurred_at
 
 
 def series(values: list[float]) -> tuple[GlucosePoint, ...]:
@@ -125,6 +161,9 @@ class Harness:
             ),
             store=self.store,
             clock=self.clock,
+            ids=FakeIds(),
+            risk_strategy=RuleBasedRiskStrategy(),
+            messages=MessageCatalog.load_spanish(),
         )
 
 
