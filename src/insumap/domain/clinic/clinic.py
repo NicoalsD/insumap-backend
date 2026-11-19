@@ -17,6 +17,8 @@ from insumap.shared.field_limits import FieldLimits
 
 MACHINE_NAME: Final = "clinic"
 INVALID_TIMEZONE: Final = "invalid_timezone"
+DEFAULT_TIMEZONE: Final = "America/Bogota"
+"""Zone of a new clinic when the request does not give one (API.md 8.3)."""
 
 
 class ClinicStatus(StrEnum):
