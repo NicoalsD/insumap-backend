@@ -72,13 +72,17 @@ class ScriptedAiService(AiServicePort):
     """
 
     def __init__(self) -> None:
-        self.calls: list[object] = []
+        self.calls: list[ForecastCall | RiskCall | SummaryCall | AssistantCall] = []
         self.fail: FallbackReason | None = None
         self.risk: RemoteRisk | None = None
         self.summary: RemoteSummary | None = None
         self.reply: RemoteAssistant | None = None
 
-    def _answer[T](self, call: object, scripted: T | None) -> T:
+    def _answer[T](
+        self,
+        call: ForecastCall | RiskCall | SummaryCall | AssistantCall,
+        scripted: T | None,
+    ) -> T:
         self.calls.append(call)
         if self.fail is not None:
             raise AiCallError(self.fail, counts_as_failure=True)
@@ -112,6 +116,10 @@ class RecordingAiStore(AiOutputStorePort):
     risks: list[RiskRecord] = field(default_factory=list)
     summaries: list[SummaryRecord] = field(default_factory=list)
     replies: list[AssistantRecord] = field(default_factory=list)
+    on_summary: Callable[[SummaryRecord], None] | None = None
+    """Where a stored summary is also visible to the reads, as in the database."""
+    on_reply: Callable[[AssistantRecord], None] | None = None
+    """Where a stored reply joins the conversation history, as in the database."""
 
     @override
     def store_forecast(
@@ -130,12 +138,16 @@ class RecordingAiStore(AiOutputStorePort):
         self, record: SummaryRecord, *, request_id: str | None, occurred_at: datetime
     ) -> None:
         self.summaries.append(record)
+        if self.on_summary is not None:
+            self.on_summary(record)
 
     @override
     def store_assistant_reply(
         self, record: AssistantRecord, *, request_id: str | None, occurred_at: datetime
     ) -> None:
         self.replies.append(record)
+        if self.on_reply is not None:
+            self.on_reply(record)
 
 
 def _page[T](rows: Sequence[T], key: Callable[[T], UUID], page: PageRequest) -> Page[T]:
@@ -182,6 +194,25 @@ class FakeDropoutRisks(DropoutRiskReadPort):
 @dataclass
 class FakeSummaryReads(ClinicalSummaryReadPort):
     items: dict[UUID, ClinicalSummaryView] = field(default_factory=dict)
+
+    def remember(self, record: SummaryRecord) -> None:
+        """Make a stored summary readable, as the row is in the table."""
+        output = record.output
+        self.items[output.summary_id] = ClinicalSummaryView(
+            summary_id=output.summary_id,
+            patient_id=record.patient_id,
+            period_start=output.period_start,
+            period_end=output.period_end,
+            summary_text=output.summary_text,
+            sections=output.sections,
+            numeric_check_matched=output.numeric_check_matched,
+            model_version=output.model_version,
+            is_fallback=output.is_fallback,
+            fallback_reason=None
+            if output.fallback_reason is None
+            else output.fallback_reason.value,
+            generated_at=output.generated_at,
+        )
 
     @override
     def get(self, summary_id: UUID) -> ClinicalSummaryView | None:
@@ -284,10 +315,13 @@ class AiWorld:
 
     def __init__(self, *, clock: Any, ids: Any, app_hmac_key: str) -> None:
         self.service = ScriptedAiService()
-        self.store = RecordingAiStore()
+        self.summary_reads = FakeSummaryReads()
+        self.store = RecordingAiStore(
+            on_summary=self.summary_reads.remember,
+            on_reply=self._remember_reply,
+        )
         self.findings = FakePatternFindings()
         self.dropout = FakeDropoutRisks()
-        self.summary_reads = FakeSummaryReads()
         self.evaluations = FakeEvaluations()
         self.profiles = FakePatientProfiles()
         self.conversations = FakeConversations()
@@ -307,6 +341,18 @@ class AiWorld:
             ids=ids,
             risk_strategy=RuleBasedRiskStrategy(),
             messages=messages,
+        )
+
+    def _remember_reply(self, record: AssistantRecord) -> None:
+        output = record.output
+        self.conversations.rows.append(
+            (
+                record.patient_id,
+                output.conversation_id,
+                "ASSISTANT",
+                output.reply_text,
+                output.generated_at,
+            )
         )
 
     def adapters(
