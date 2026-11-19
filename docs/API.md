@@ -722,9 +722,9 @@ Endpoints por sección. Post-MVP son los que atienden requisitos de las fases 10
 
 #### `POST /users/{user_id}/deactivate`
 - Operación: `deactivate_user` · Permiso: `users.manage` · Ruta: P · Trazabilidad: HU-05, RF-13 · Patrón: P13, P09 · Éxito: 200
-- Solicitud: sin cuerpo. Revoca todas las sesiones del usuario (`tv + 1`) y sus asignaciones de pacientes quedan pendientes de reasignar.
+- Solicitud: `reason` (10 a 500 caracteres). Revoca todas las sesiones del usuario (`tv + 1`) y termina su membresía. Sus asignaciones de pacientes siguen abiertas y quedan pendientes de reasignar. La base exige el motivo al desactivar (`status_reason`). Nadie se desactiva a sí mismo.
 - Respuesta: el personal con `is_active: false` y `patients_pending_reassignment` (cantidad). La lista de esos pacientes sale de `GET /patients?without_doctor=true`.
-- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (ya desactivado).
+- Errores: C1, C2, C4, C5; `409 INVALID_STATE_TRANSITION` (ya desactivado), `403 FORBIDDEN` (quien lo pide es el propio titular), `422 REASON_REQUIRED`.
 
 #### `POST /users/{user_id}/unlock`
 - Operación: `unlock_user` · Permiso: `users.manage` · Ruta: F · Trazabilidad: RF-05, HU-01 · Patrón: P09 · Éxito: 204
