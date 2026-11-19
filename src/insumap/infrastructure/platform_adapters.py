@@ -6,8 +6,10 @@ from dataclasses import dataclass
 
 from insumap.application.access.ports import PatientDirectoryPort
 from insumap.application.care_team.ports import CareTeamRepositoryPort, StaffLookupPort
+from insumap.application.clinics.ports import ClinicRepositoryPort
 from insumap.application.commands.auditing import AuditLogPort
 from insumap.application.notifications.notification import NotificationChannel
+from insumap.application.sites.ports import SiteRepositoryPort, StaffSitesRepositoryPort
 from insumap.application.users.ports import (
     ActivationCodeGeneratorPort,
     LoginLockoutPort,
@@ -21,6 +23,8 @@ from insumap.infrastructure.persistence.care_team_repository import (
     PatientDirectoryRepository,
     StaffLookupRepository,
 )
+from insumap.infrastructure.persistence.clinic_repository import ClinicRepository
+from insumap.infrastructure.persistence.site_repository import SiteRepository
 from insumap.infrastructure.persistence.staff_repositories import (
     LoginLockoutRepository,
     StaffDirectoryRepository,
@@ -45,6 +49,9 @@ class PlatformAdapters:
     care_teams: CareTeamRepositoryPort
     patients: PatientDirectoryPort
     staff: StaffLookupPort
+    clinics: ClinicRepositoryPort
+    sites: SiteRepositoryPort
+    staff_sites: StaffSitesRepositoryPort
     staff_directory: StaffDirectoryPort
     staff_invitations: StaffInvitationPort
     login_lockouts: LoginLockoutPort
@@ -61,6 +68,9 @@ def build_platform_adapters(
         care_teams=CareTeamRepository(current),
         patients=PatientDirectoryRepository(current),
         staff=StaffLookupRepository(current),
+        clinics=ClinicRepository(current),
+        sites=SiteRepository(current),
+        staff_sites=SiteRepository(current),
         staff_directory=StaffDirectoryRepository(current),
         staff_invitations=StaffInvitationRepository(current),
         login_lockouts=LoginLockoutRepository(

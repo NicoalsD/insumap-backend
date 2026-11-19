@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import re
 import uuid
+from collections.abc import Mapping
 from typing import Final, final
 
 from starlette.datastructures import Headers, MutableHeaders
@@ -81,6 +82,9 @@ class _BodyTooLargeError(Exception):
 class BodySizeLimitMiddleware:
     """Rejects request bodies larger than the limit with ``413 PAYLOAD_TOO_LARGE``.
 
+    ``path_limits`` gives a route its own limit by exact path, above or below the
+    general one (offline batches and CGM files, API.md section 5).
+
     The declared ``Content-Length`` is checked before the app runs. Bodies sent
     without it (chunked) are counted while they are read: past the limit, any
     response the app tries to send is dropped and the 413 is sent instead,
@@ -88,18 +92,25 @@ class BodySizeLimitMiddleware:
     """
 
     def __init__(
-        self, app: ASGIApp, *, responses: ErrorResponseFactory, max_body_bytes: int
+        self,
+        app: ASGIApp,
+        *,
+        responses: ErrorResponseFactory,
+        max_body_bytes: int,
+        path_limits: Mapping[str, int] | None = None,
     ) -> None:
         self._app = app
         self._responses = responses
         self._max_body_bytes = max_body_bytes
+        self._path_limits = dict(path_limits or {})
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != HTTP_SCOPE:
             await self._app(scope, receive, send)
             return
-        if self._declared_size_exceeds_limit(scope):
-            await self._reject(scope, receive, send)
+        limit = self._path_limits.get(str(scope.get("path", "")), self._max_body_bytes)
+        if self._declared_size_exceeds_limit(scope, limit):
+            await self._reject(scope, receive, send, limit)
             return
 
         received_bytes = 0
@@ -111,7 +122,7 @@ class BodySizeLimitMiddleware:
             message = await receive()
             if message["type"] == HTTP_REQUEST_MESSAGE:
                 received_bytes += len(message.get("body", EMPTY_BODY))
-                if received_bytes > self._max_body_bytes:
+                if received_bytes > limit:
                     body_too_large = True
                     raise _BodyTooLargeError
             return message
@@ -129,19 +140,18 @@ class BodySizeLimitMiddleware:
         with contextlib.suppress(_BodyTooLargeError):
             await self._app(scope, limited_receive, guarded_send)
         if body_too_large and not response_started:
-            await self._reject(scope, receive, send)
+            await self._reject(scope, receive, send, limit)
 
-    def _declared_size_exceeds_limit(self, scope: Scope) -> bool:
+    @staticmethod
+    def _declared_size_exceeds_limit(scope: Scope, limit: int) -> bool:
         declared = Headers(scope=scope).get(CONTENT_LENGTH_HEADER)
-        return (
-            declared is not None
-            and declared.isdigit()
-            and int(declared) > self._max_body_bytes
-        )
+        return declared is not None and declared.isdigit() and int(declared) > limit
 
-    async def _reject(self, scope: Scope, receive: Receive, send: Send) -> None:
+    async def _reject(
+        self, scope: Scope, receive: Receive, send: Send, limit: int
+    ) -> None:
         response = self._responses.create(
-            ErrorCode.PAYLOAD_TOO_LARGE, detail={"max_bytes": self._max_body_bytes}
+            ErrorCode.PAYLOAD_TOO_LARGE, detail={"max_bytes": limit}
         )
         await response(scope, receive, send)
 

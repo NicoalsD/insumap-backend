@@ -238,6 +238,7 @@ class PatientOrm(Base):
     user_id: Mapped[UUID] = mapped_column(Uuid)
     full_name: Mapped[str] = mapped_column(String(120))
     birth_date: Mapped[date] = mapped_column(Date)
+    diabetes_type: Mapped[str] = mapped_column(String(5))
     contact_email: Mapped[str | None] = mapped_column(String(254))
 
 

@@ -10,8 +10,12 @@ from typing import Final, Never, final
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
 from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.care_team import CareTeamRouter
+from insumap.api.routers.clinics import ClinicRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.meta import MetaRouter
+from insumap.api.routers.metrics import MetricsRouter
+from insumap.api.routers.records import RecordsRouter
+from insumap.api.routers.sites import SiteRouter
 from insumap.api.routers.users import UserRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
 from insumap.application.care_team.commands import (
@@ -26,6 +30,21 @@ from insumap.application.care_team.commands import (
 )
 from insumap.application.care_team.list_assignments import (
     ListCareTeamAssignmentsUseCase,
+)
+from insumap.application.clinics.commands import (
+    CreateClinicCommand,
+    CreateClinicCommandHandler,
+    ReactivateClinicCommand,
+    ReactivateClinicCommandHandler,
+    SuspendClinicCommand,
+    SuspendClinicCommandHandler,
+    UpdateClinicCommand,
+    UpdateClinicCommandHandler,
+)
+from insumap.application.clinics.queries import (
+    GetClinicUseCase,
+    GetCurrentClinicUseCase,
+    ListClinicsUseCase,
 )
 from insumap.application.commands.auditing import (
     AuditingCommandHandler,
@@ -91,6 +110,36 @@ from insumap.application.identity.sessions import (
     LogoutUseCase,
     RefreshSessionUseCase,
 )
+from insumap.application.metrics.forecast import GetForecastUseCase
+from insumap.application.metrics.metrics import (
+    ComputeGlycemicMetricsUseCase,
+    GetAgpUseCase,
+)
+from insumap.application.monitoring.corrections import (
+    AnnulRecordUseCase,
+    CorrectRecordUseCase,
+)
+from insumap.application.monitoring.gate import AssignedPatientGate, OwnPatientGate
+from insumap.application.monitoring.glucose import (
+    GlucoseReadingRecorder,
+    ImportCgmReadingsUseCase,
+    RecordGlucoseReadingsBatchUseCase,
+    RecordGlucoseReadingUseCase,
+)
+from insumap.application.monitoring.queries import (
+    ExportTimelineUseCase,
+    GetTimelineUseCase,
+    ListRecordsUseCase,
+)
+from insumap.application.monitoring.records import (
+    RecordActivityUseCase,
+    RecordInsulinDoseUseCase,
+    RecordMealUseCase,
+    RecordOwnLabResultUseCase,
+    RecordPatientLabResultUseCase,
+    RecordSymptomUseCase,
+    RecordWriter,
+)
 from insumap.application.notifications.notification import NotificationChannel
 from insumap.application.readiness import (
     AlwaysReadyProbe,
@@ -98,6 +147,15 @@ from insumap.application.readiness import (
     ReadinessProbe,
 )
 from insumap.application.security.rate_limit import RateLimitCheck, RateLimitRule
+from insumap.application.sites.commands import (
+    CreateSiteCommand,
+    CreateSiteCommandHandler,
+    SetUserSitesCommand,
+    SetUserSitesCommandHandler,
+    UpdateSiteCommand,
+    UpdateSiteCommandHandler,
+)
+from insumap.application.sites.list_sites import ListSitesUseCase
 from insumap.application.users.commands import (
     CreateStaffUserCommand,
     CreateStaffUserCommandHandler,
@@ -113,6 +171,8 @@ from insumap.application.users.commands import (
 from insumap.application.users.queries import GetStaffUseCase, ListStaffUseCase
 from insumap.domain.identity.password_policy import PasswordPolicy
 from insumap.domain.identity.refresh_token import RefreshTokenLifetime
+from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistry
+from insumap.domain.monitoring.validation import build_validation_chain
 from insumap.infrastructure.identity_adapters import (
     IdentityAdapters,
     build_engine,
@@ -120,7 +180,14 @@ from insumap.infrastructure.identity_adapters import (
     load_common_passwords,
 )
 from insumap.infrastructure.logging import JsonLoggingConfigurator
-from insumap.infrastructure.persistence.transactions import CurrentSession
+from insumap.infrastructure.monitoring_adapters import (
+    MonitoringAdapters,
+    build_monitoring_adapters,
+)
+from insumap.infrastructure.persistence.transactions import (
+    CurrentSession,
+    SqlTransactionFactory,
+)
 from insumap.infrastructure.platform_adapters import (
     PlatformAdapters,
     build_platform_adapters,
@@ -142,6 +209,13 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     SetPrimaryDoctorCommand,
     ReassignDoctorCommand,
     EndAssignmentCommand,
+    CreateClinicCommand,
+    UpdateClinicCommand,
+    SuspendClinicCommand,
+    ReactivateClinicCommand,
+    CreateSiteCommand,
+    UpdateSiteCommand,
+    SetUserSitesCommand,
     CreateStaffUserCommand,
     UpdateStaffUserCommand,
     DeactivateStaffUserCommand,
@@ -217,6 +291,7 @@ class Container:
         identity_adapters: IdentityAdapters | None = None,
         event_publisher: DomainEventPublisher | None = None,
         platform_adapters: PlatformAdapters | None = None,
+        monitoring_adapters: MonitoringAdapters | None = None,
         email_channel: NotificationChannel | None = None,
     ) -> None:
         self.settings: Settings = settings or get_settings()
@@ -236,16 +311,22 @@ class Container:
             event_publisher or InProcessDomainEventPublisher()
         )
         current = CurrentSession()
+        engine = build_engine(self.settings)
         adapters = identity_adapters or build_identity_adapters(
             self.settings,
             clock=self.clock,
             publisher=self.event_publisher,
-            engine=build_engine(self.settings),
+            engine=engine,
             current=current,
         )
         platform = platform_adapters or build_platform_adapters(
             current=current,
             app_hmac_key=decode_key(self.settings.app_hmac_key.get_secret_value()),
+        )
+        monitoring = monitoring_adapters or build_monitoring_adapters(
+            current=current,
+            clock=self.clock,
+            transactions=SqlTransactionFactory(engine, current),
         )
         if email_channel is not None:
             platform = replace(platform, email_channel=email_channel)
@@ -260,6 +341,8 @@ class Container:
         registrations = [
             *self._identity_commands(adapters, services),
             *self._care_team_commands(adapters, platform),
+            *self._clinic_commands(adapters, platform),
+            *self._site_commands(adapters, platform),
             *self._users_commands(adapters, platform, unit_of_work),
         ]
         self.command_bus: CommandBus = InMemoryCommandBus(
@@ -273,6 +356,26 @@ class Container:
             ),
             staff_actor=self.full_session_actor,
         )
+        self.clinic_router = ClinicRouter(
+            commands=self.command_bus,
+            list_clinics=ListClinicsUseCase(
+                uow=adapters.unit_of_work, clinics=platform.clinics
+            ),
+            get_clinic=GetClinicUseCase(
+                uow=adapters.unit_of_work, clinics=platform.clinics
+            ),
+            get_current_clinic=GetCurrentClinicUseCase(
+                uow=adapters.unit_of_work, clinics=platform.clinics
+            ),
+            staff_actor=self.full_session_actor,
+        )
+        self.site_router = SiteRouter(
+            commands=self.command_bus,
+            list_sites=ListSitesUseCase(
+                uow=adapters.unit_of_work, sites=platform.sites
+            ),
+            staff_actor=self.full_session_actor,
+        )
         self.user_router = UserRouter(
             commands=self.command_bus,
             list_staff=ListStaffUseCase(
@@ -283,6 +386,8 @@ class Container:
             ),
             staff_actor=self.full_session_actor,
         )
+        self.records_router = self._build_records_router(adapters, monitoring)
+        self.metrics_router = self._build_metrics_router(adapters, monitoring)
 
     def _build_identity_services(
         self, adapters: IdentityAdapters, platform: PlatformAdapters
@@ -434,6 +539,63 @@ class Container:
             bind(
                 EndAssignmentCommand,
                 guard.wrap(EndAssignmentCommandHandler(teams=teams, clock=clock)),
+            ),
+        ]
+
+    def _clinic_commands(
+        self, adapters: IdentityAdapters, platform: PlatformAdapters
+    ) -> list[Registration]:
+        """The clinic decisions (P13, P18), each behind transaction and audit (P09)."""
+        guard, clock, clinics = self._command_guard, self.clock, platform.clinics
+        return [
+            bind(
+                CreateClinicCommand,
+                guard.wrap(
+                    CreateClinicCommandHandler(
+                        clinics=clinics, ids=adapters.ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                UpdateClinicCommand,
+                guard.wrap(UpdateClinicCommandHandler(clinics=clinics, clock=clock)),
+            ),
+            bind(
+                SuspendClinicCommand,
+                guard.wrap(SuspendClinicCommandHandler(clinics=clinics, clock=clock)),
+            ),
+            bind(
+                ReactivateClinicCommand,
+                guard.wrap(
+                    ReactivateClinicCommandHandler(clinics=clinics, clock=clock)
+                ),
+            ),
+        ]
+
+    def _site_commands(
+        self, adapters: IdentityAdapters, platform: PlatformAdapters
+    ) -> list[Registration]:
+        """The site decisions (P13), each behind transaction and audit (P09)."""
+        guard, clock = self._command_guard, self.clock
+        sites, staff_sites = platform.sites, platform.staff_sites
+        return [
+            bind(
+                CreateSiteCommand,
+                guard.wrap(
+                    CreateSiteCommandHandler(sites=sites, ids=adapters.ids, clock=clock)
+                ),
+            ),
+            bind(
+                UpdateSiteCommand,
+                guard.wrap(UpdateSiteCommandHandler(sites=sites, clock=clock)),
+            ),
+            bind(
+                SetUserSitesCommand,
+                guard.wrap(
+                    SetUserSitesCommandHandler(
+                        sites=sites, staff_sites=staff_sites, clock=clock
+                    )
+                ),
             ),
         ]
 
@@ -738,4 +900,177 @@ class Container:
                     events=adapters.security_events,
                 )
             ),
+        )
+
+    def _build_records_router(
+        self, adapters: IdentityAdapters, monitoring: MonitoringAdapters
+    ) -> RecordsRouter:
+        """Wire the patient record use cases (API.md 8.6) over ``monitoring``.
+
+        Writes share the per-user records limit; exports have their own hourly
+        limit. Reads are not rate limited by this slice.
+        """
+        settings, clock = self.settings, self.clock
+        uow, ids, consents = adapters.unit_of_work, adapters.ids, adapters.consents
+        limiter = adapters.rate_limiter
+        writes = OwnPatientGate(
+            consents,
+            RateLimitCheck(
+                limiter,
+                RateLimitRule(
+                    family="records_user_minute",
+                    limit=settings.rate_limit_records_per_user_per_minute,
+                    window=timedelta(minutes=1),
+                ),
+            ),
+        )
+        exports = OwnPatientGate(
+            consents,
+            RateLimitCheck(
+                limiter,
+                RateLimitRule(
+                    family="exports_user_hour",
+                    limit=settings.rate_limit_exports_per_user_per_hour,
+                    window=timedelta(hours=1),
+                ),
+            ),
+        )
+        reads = OwnPatientGate(consents)
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        writer = RecordWriter(monitoring.clinical_records)
+        chain = build_validation_chain()
+        recorder = GlucoseReadingRecorder(
+            readings=monitoring.readings,
+            chain=chain,
+            settings=monitoring.validation,
+            targets=monitoring.targets,
+            ids=ids,
+            clock=clock,
+        )
+        return RecordsRouter(
+            record_reading=RecordGlucoseReadingUseCase(
+                uow=uow, gate=writes, recorder=recorder
+            ),
+            record_batch=RecordGlucoseReadingsBatchUseCase(
+                uow=uow,
+                gate=writes,
+                recorder=recorder,
+                batches=monitoring.sync_batches,
+                ids=ids,
+                clock=clock,
+            ),
+            import_cgm=ImportCgmReadingsUseCase(
+                uow=uow,
+                gate=writes,
+                recorder=recorder,
+                batches=monitoring.sync_batches,
+                source=monitoring.cgm,
+                ids=ids,
+                clock=clock,
+            ),
+            record_dose=RecordInsulinDoseUseCase(
+                uow=uow,
+                gate=writes,
+                writer=writer,
+                plans=monitoring.active_plans,
+                ids=ids,
+                clock=clock,
+            ),
+            record_meal=RecordMealUseCase(
+                uow=uow, gate=writes, writer=writer, ids=ids, clock=clock
+            ),
+            record_activity=RecordActivityUseCase(
+                uow=uow, gate=writes, writer=writer, ids=ids, clock=clock
+            ),
+            record_symptom=RecordSymptomUseCase(
+                uow=uow,
+                gate=writes,
+                writer=writer,
+                catalog=monitoring.symptoms,
+                ids=ids,
+                clock=clock,
+            ),
+            record_own_lab=RecordOwnLabResultUseCase(
+                uow=uow, gate=writes, writer=writer, ids=ids, clock=clock
+            ),
+            record_patient_lab=RecordPatientLabResultUseCase(
+                uow=uow, gate=assigned, writer=writer, ids=ids, clock=clock
+            ),
+            correct=CorrectRecordUseCase(
+                uow=uow,
+                gate=writes,
+                readings=monitoring.readings,
+                records=monitoring.clinical_records,
+                catalog=monitoring.symptoms,
+                recorder=recorder,
+                chain=chain,
+                ids=ids,
+                clock=clock,
+            ),
+            annul=AnnulRecordUseCase(
+                uow=uow,
+                gate=writes,
+                readings=monitoring.readings,
+                records=monitoring.clinical_records,
+                ids=ids,
+                clock=clock,
+            ),
+            list_records=ListRecordsUseCase(
+                uow=uow,
+                own_gate=reads,
+                assigned_gate=assigned,
+                readings=monitoring.readings,
+                records=monitoring.clinical_records,
+            ),
+            timeline=GetTimelineUseCase(
+                uow=uow,
+                own_gate=reads,
+                assigned_gate=assigned,
+                timeline=monitoring.timeline,
+            ),
+            export_timeline=ExportTimelineUseCase(
+                uow=uow,
+                own_gate=exports,
+                assigned_gate=assigned,
+                timeline=monitoring.timeline,
+                exporters=monitoring.exporters,
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_metrics_router(
+        self, adapters: IdentityAdapters, monitoring: MonitoringAdapters
+    ) -> MetricsRouter:
+        """Wire the glycemic metrics, AGP and forecast use cases (API.md 8.8)."""
+        uow, clock = adapters.unit_of_work, self.clock
+        own = OwnPatientGate(adapters.consents)
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        return MetricsRouter(
+            metrics=ComputeGlycemicMetricsUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                strategies=GlycemicTargetStrategyRegistry(),
+                clock=clock,
+            ),
+            agp=GetAgpUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                clock=clock,
+            ),
+            forecast=GetForecastUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                forecasts=monitoring.forecasts,
+                clock=clock,
+            ),
+            session_actor=self.full_session_actor,
         )
