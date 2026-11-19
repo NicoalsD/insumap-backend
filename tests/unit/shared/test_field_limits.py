@@ -29,10 +29,12 @@ def test_request_id_pattern_accepts_a_uuid4() -> None:
     assert re.fullmatch(FieldLimits.REQUEST_ID_PATTERN, str(uuid.uuid4()))
 
 
-def test_request_id_pattern_accepts_the_maximum_length() -> None:
-    value = "a" * FieldLimits.REQUEST_ID_MAX_LENGTH
+def test_request_id_pattern_accepts_an_uppercase_uuid() -> None:
+    assert re.fullmatch(FieldLimits.REQUEST_ID_PATTERN, str(uuid.uuid4()).upper())
 
-    assert re.fullmatch(FieldLimits.REQUEST_ID_PATTERN, value)
+
+def test_request_id_maximum_length_is_a_uuid() -> None:
+    assert len(str(uuid.uuid4())) == FieldLimits.REQUEST_ID_MAX_LENGTH
 
 
 @pytest.mark.parametrize(
@@ -41,6 +43,8 @@ def test_request_id_pattern_accepts_the_maximum_length() -> None:
         "",
         "a" * (FieldLimits.REQUEST_ID_MAX_LENGTH + 1),
         "abc def",
+        "front-42.a_b",
+        "0123456789abcdef0123456789abcdef",
         "abc\n",
         "<script>",
         "id;drop",

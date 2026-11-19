@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 
+from insumap.domain.monitoring.injection_sites import SiteCode
 from insumap.domain.treatment.builder import (
     PlanViolation,
     TreatmentPlanBuilder,
@@ -191,3 +192,16 @@ def test_the_builder_does_not_mutate_the_draft() -> None:
 
     assert plan.items == before
     assert plan.created_at == AT
+
+
+def test_injection_sites_are_only_for_insulin_and_never_empty() -> None:
+    allowed = replace(insulin("A", at="08:00"), injection_sites=(SiteCode.ARM_LEFT,))
+    empty = replace(insulin("B", at="12:00"), injection_sites=())
+    on_measure = replace(measure("18:00"), injection_sites=(SiteCode.ARM_LEFT,))
+
+    found = violations_of(draft(*plan_items(allowed, empty, on_measure)))
+
+    assert found == (
+        PlanViolation("items[1].injection_sites", "sites_empty"),
+        PlanViolation("items[2].injection_sites", "sites_not_allowed"),
+    )

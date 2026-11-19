@@ -12,7 +12,7 @@ from insumap.application.monitoring.corrections import (
     CorrectRecordInput,
     CorrectRecordUseCase,
 )
-from insumap.application.monitoring.data import GlucoseData, MealData
+from insumap.application.monitoring.data import GlucoseData, InsulinData, MealData
 from insumap.domain.identity.errors import (
     InvalidStateTransitionError,
     PermissionDeniedError,
@@ -24,10 +24,16 @@ from insumap.domain.monitoring.glucose import (
     IssueCode,
     ReadingSource,
 )
+from insumap.domain.monitoring.injection_sites import SiteCode
 from insumap.domain.monitoring.record import EntryType, RecordLifecycle, RecordType
-from insumap.domain.monitoring.records import Meal, MealType
+from insumap.domain.monitoring.records import InsulinDose, InsulinKind, Meal, MealType
 from insumap.shared.errors import ErrorCode, InsumapError
-from tests.support.monitoring_factories import NOW, make_meal, make_reading
+from tests.support.monitoring_factories import (
+    NOW,
+    make_dose,
+    make_meal,
+    make_reading,
+)
 from tests.support.monitoring_fakes import RecordsWorld, patient_actor
 
 REASON = "El sensor estaba mal calibrado"
@@ -272,3 +278,33 @@ def test_it_needs_the_correct_permission(world: RecordsWorld) -> None:
                 reason=REASON,
             )
         )
+
+
+def test_a_corrected_dose_carries_the_corrected_site_and_spot(
+    world: RecordsWorld,
+) -> None:
+    original = make_dose(1)
+    world.records.add(original)
+
+    fixed = correct(world).execute(
+        CorrectRecordInput(
+            actor=patient_actor(),
+            record_type=RecordType.INSULIN_DOSES,
+            record_id=original.id,
+            reason=REASON,
+            data=InsulinData(
+                administered_at=NOW,
+                insulin_kind=InsulinKind.BASAL,
+                product_name=original.product_name,
+                units=original.units,
+                injection_site=SiteCode.BUTTOCK_RIGHT,
+                injection_spot=4,
+            ),
+        )
+    )
+
+    assert isinstance(fixed, InsulinDose)
+    assert fixed.supersedes_id == original.id
+    assert fixed.injection_site is SiteCode.BUTTOCK_RIGHT
+    assert fixed.injection_spot == 4
+    assert original.injection_site is None

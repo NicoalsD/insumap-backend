@@ -22,12 +22,14 @@ from insumap.domain.monitoring.glucose import (
     ReadingSource,
     ReadingStatus,
 )
+from insumap.domain.monitoring.injection_sites import SiteCode
 from insumap.domain.monitoring.record import (
     EntryType,
     RecordLifecycle,
     require_reason,
 )
 from insumap.domain.monitoring.records import LabUnit, hba1c_to_percent
+from tests.support.monitoring_factories import make_dose
 
 NOW = datetime(2026, 11, 19, 12, 0, tzinfo=UTC)
 GOOD_REASON = "El sensor estaba mal calibrado"
@@ -176,3 +178,27 @@ def test_hba1c_percent_is_kept_and_mmol_per_mol_converted() -> None:
     assert hba1c_to_percent(Decimal("7.0"), LabUnit.PERCENT) == Decimal("7.0")
     # IFCC 53 mmol/mol is NGSP 7.0 %.
     assert hba1c_to_percent(Decimal(53), LabUnit.MMOL_PER_MOL) == Decimal("7.0")
+
+
+class TestInsulinDoseInjectionSite:
+    def test_a_dose_may_have_no_site_and_no_spot(self) -> None:
+        dose = make_dose()
+        assert dose.injection_site is None
+        assert dose.injection_spot is None
+
+    def test_a_spot_needs_a_site(self) -> None:
+        with pytest.raises(ValueError, match="needs an injection site"):
+            replace(make_dose(), injection_spot=2)
+
+    @pytest.mark.parametrize("spot", [0, 5])
+    def test_a_spot_outside_one_to_four_is_refused(self, spot: int) -> None:
+        with pytest.raises(ValueError, match="outside the catalog"):
+            replace(make_dose(), injection_site=SiteCode.ARM_LEFT, injection_spot=spot)
+
+    def test_the_site_is_content_of_the_dose(self) -> None:
+        base = replace(make_dose(), injection_site=SiteCode.ARM_LEFT, injection_spot=1)
+        assert base.has_same_content(base)
+        assert not base.has_same_content(replace(base, injection_spot=2))
+        assert not base.has_same_content(
+            replace(base, injection_site=SiteCode.ARM_RIGHT)
+        )

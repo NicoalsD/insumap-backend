@@ -112,7 +112,7 @@ Reglas:
 
 | Variable | Para qué sirve | Secreta | Valor por defecto o ejemplo seguro |
 |---|---|---|---|
-| `APP_ENV` | Entorno de ejecución: `development`, `test` o `production` | No | `development` |
+| `APP_ENV` | Entorno de ejecución: `local` (desarrollo), `test` o `production` | No | `local` |
 | `LOG_LEVEL` | Nivel de logs | No | `INFO` |
 | `DATABASE_URL` | URL de la app en Neon, con el pooler y el usuario `insumap_app`. Driver `postgresql+psycopg://` | Sí | `postgresql+psycopg://insumap_app:cambia-esto-password@localhost:5432/insumap` |
 | `DATABASE_URL_UNPOOLED` | Conexión directa de Neon, sin pooler. Es la conexión que necesitan las migraciones, que ejecuta `insumap-database`. La API no la usa en el tráfico normal. Con el rol `insumap_app`, nunca con `insumap_migrator` | Sí | `cambia-esto-url-directa-app` |
@@ -122,6 +122,7 @@ Reglas:
 | `JWT_ACCESS_MINUTES` | Vida del access token | No | `15` |
 | `REFRESH_TOKEN_DAYS` | Vida del refresh token opaco, en días | No | Entero fijado en `docs/Seguridad.md` (pendiente) |
 | `CORS_ORIGINS` | Orígenes permitidos de la PWA, separados por comas | No | `http://localhost:5173` |
+| `ALLOWED_HOSTS` | Valores de `Host` que acepta la API, separados por comas; `*.dominio` admite subdominios y `*` solo se rechaza. Un `Host` ajeno recibe `400 VALIDATION_ERROR`. En `local` y `test`, si falta, vale `localhost,127.0.0.1,testserver`; en `production` no tiene valor por defecto y la API no arranca sin ella | No | `localhost,127.0.0.1` |
 | `AI_SERVICE_URL` | URL base de `insumap-ai` | No | `http://localhost:8001` |
 | `AI_SERVICE_TOKEN` | Token de servicio para llamar a `insumap-ai` | Sí | `cambia-esto-token-ia` |
 | `AI_TIMEOUT_SECONDS` | Tiempo máximo de cada llamada a la IA antes de usar el respaldo | No | Decimal en segundos, acordado con el equipo de IA |
@@ -147,12 +148,13 @@ Notas:
 ### 6.2 Ejemplo de `.env.example`
 
 ```dotenv
-APP_ENV=development
+APP_ENV=local
 LOG_LEVEL=INFO
 DATABASE_URL=postgresql+psycopg://insumap_app:cambia-esto-password@localhost:5432/insumap
 JWT_SECRET=cambia-esto-jwt-secret
 JWT_ACCESS_MINUTES=15
 CORS_ORIGINS=http://localhost:5173
+ALLOWED_HOSTS=localhost,127.0.0.1
 AI_SERVICE_URL=http://localhost:8001
 AI_SERVICE_TOKEN=cambia-esto-token-ia
 SCHEDULER_ENABLED=false

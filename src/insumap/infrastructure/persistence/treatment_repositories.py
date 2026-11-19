@@ -22,6 +22,7 @@ from insumap.application.treatment.ports import (
     TreatmentPlanRepositoryPort,
     TreatmentPlanSnapshotPort,
 )
+from insumap.domain.monitoring.injection_sites import SiteCode
 from insumap.domain.treatment.content import (
     InsulinKind,
     ItemSpec,
@@ -103,6 +104,9 @@ def _item_of(row: TreatmentPlanItemOrm) -> PlanItem:
         days_of_week=None if row.days_of_week is None else tuple(row.days_of_week),
         instructions=row.instructions,
         sort_order=row.sort_order,
+        injection_sites=None
+        if row.injection_sites is None
+        else tuple(SiteCode(site) for site in row.injection_sites),
     )
     return PlanItem.of(row.id, spec)
 
@@ -121,6 +125,7 @@ def _item_row(plan: TreatmentPlan, index: int, item: PlanItem) -> TreatmentPlanI
         days_of_week=primitive["days_of_week"],
         instructions=primitive["instructions"],
         sort_order=index,
+        injection_sites=primitive["injection_sites"],
     )
 
 

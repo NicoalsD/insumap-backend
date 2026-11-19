@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from insumap.api.openapi import InsumapApi
 from insumap.container import Container
 from insumap.main import app, create_app
+from insumap.shared.field_limits import FieldLimits
 from tests.support.settings import make_settings
 
 FRONTEND_ORIGIN = "http://localhost:5173"
@@ -58,6 +59,47 @@ def test_cors_allows_configured_origins_and_exposes_the_request_id() -> None:
     assert "x-request-id" in response.headers["access-control-expose-headers"].lower()
 
 
+def test_cors_preflight_allows_the_policy_headers_and_caches_for_600_seconds() -> None:
+    settings = make_settings(cors_origins=FRONTEND_ORIGIN)
+    client = TestClient(create_app(Container(settings)))
+
+    preflight = client.options(
+        "/health",
+        headers={
+            "Origin": FRONTEND_ORIGIN,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": (
+                "Authorization, Content-Type, X-Requested-With, X-Request-ID, "
+                "Idempotency-Key"
+            ),
+        },
+    )
+    response = client.get("/health", headers={"Origin": FRONTEND_ORIGIN})
+
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-max-age"] == "600"
+    assert preflight.headers["access-control-allow-credentials"] == "true"
+    exposed = response.headers["access-control-expose-headers"].lower()
+    assert "x-request-id" in exposed
+    assert "retry-after" in exposed
+
+
+def test_cors_rejects_a_header_outside_the_policy() -> None:
+    settings = make_settings(cors_origins=FRONTEND_ORIGIN)
+    client = TestClient(create_app(Container(settings)))
+
+    preflight = client.options(
+        "/health",
+        headers={
+            "Origin": FRONTEND_ORIGIN,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "X-Custom",
+        },
+    )
+
+    assert preflight.status_code == 400
+
+
 def test_cors_ignores_unknown_origins() -> None:
     settings = make_settings(cors_origins=FRONTEND_ORIGIN)
     client = TestClient(create_app(Container(settings)))
@@ -73,3 +115,24 @@ def test_no_cors_headers_without_configured_origins() -> None:
     response = client.get("/health", headers={"Origin": FRONTEND_ORIGIN})
 
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_routes_with_big_bodies_keep_their_own_limit() -> None:
+    client = TestClient(create_app(Container(make_settings())))
+    over_general = b"x" * (FieldLimits.MAX_REQUEST_BODY_BYTES + 1)
+    cases = {
+        "/api/v1/imports/fhir": FieldLimits.FHIR_BUNDLE_MAX_BYTES,
+        "/api/v1/imports/csv": FieldLimits.PATIENT_CSV_MAX_BYTES,
+        "/api/v1/readings/batch": FieldLimits.READINGS_BATCH_MAX_BYTES,
+        "/api/v1/readings/cgm-import": FieldLimits.CGM_CSV_MAX_BYTES,
+    }
+
+    for path, own_limit in cases.items():
+        assert client.post(path, content=over_general).status_code != 413
+        too_big = client.post(path, content=b"x" * (own_limit + 1))
+        assert too_big.status_code == 413
+        assert too_big.json()["error"]["detail"] == {"max_bytes": own_limit}
+
+
+def test_general_body_limit_is_64_kib() -> None:
+    assert FieldLimits.MAX_REQUEST_BODY_BYTES == 64 * 1024

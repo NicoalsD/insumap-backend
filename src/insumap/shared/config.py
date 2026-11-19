@@ -27,6 +27,9 @@ DEFAULT_PUSH_ENDPOINT_HOSTS = (
     "*.notify.windows.com",
 )
 """Push services of the major browsers (verify before a production release)."""
+DEVELOPMENT_ALLOWED_HOSTS = ("localhost", "127.0.0.1", "testserver")
+"""``Host`` values of ``local`` and ``test`` when ``ALLOWED_HOSTS`` is unset."""
+WILDCARD_HOST = "*"
 
 
 class Settings(BaseSettings):
@@ -51,6 +54,13 @@ class Settings(BaseSettings):
     database_url: SecretStr
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     api_docs_enabled: bool = True
+    allowed_hosts: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    """``ALLOWED_HOSTS``: ``Host`` values the API answers (Seguridad 13.2).
+
+    ``*.example.test`` matches any subdomain. Unset, ``local`` and ``test`` accept
+    only ``DEVELOPMENT_ALLOWED_HOSTS``; ``production`` has no default and does not
+    start without it.
+    """
 
     # Keys (32 bytes in base64). No defaults: without them the API does not start.
     jwt_secret: SecretStr
@@ -143,6 +153,19 @@ class Settings(BaseSettings):
         default_factory=lambda: list(DEFAULT_PUSH_ENDPOINT_HOSTS)
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def default_allowed_hosts_outside_production(cls, data: object) -> object:
+        """Fill ``ALLOWED_HOSTS`` for ``local`` and ``test`` only, never production."""
+        if not isinstance(data, dict):
+            return data
+        configured = data.get("allowed_hosts")
+        if isinstance(configured, str):
+            configured = configured.replace(LIST_SEPARATOR, "").strip()
+        if configured or data.get("app_env", "local") == "production":
+            return data
+        return {**data, "allowed_hosts": list(DEVELOPMENT_ALLOWED_HOSTS)}
+
     @field_validator("log_level", mode="before")
     @classmethod
     def normalize_log_level(cls, value: object) -> object:
@@ -205,6 +228,33 @@ class Settings(BaseSettings):
                 if item.strip()
             ]
         return value
+
+    @field_validator("allowed_hosts", mode="before")
+    @classmethod
+    def split_allowed_hosts(cls, value: object) -> object:
+        """Read ``ALLOWED_HOSTS`` as a comma separated list, in lower case."""
+        if isinstance(value, str):
+            return [
+                item.strip().lower()
+                for item in value.split(LIST_SEPARATOR)
+                if item.strip()
+            ]
+        return value
+
+    @field_validator("allowed_hosts")
+    @classmethod
+    def reject_the_wildcard_host(cls, hosts: list[str]) -> list[str]:
+        """A bare ``*`` would accept any ``Host``, which is the hole to close."""
+        if WILDCARD_HOST in hosts:
+            raise ValueError("ALLOWED_HOSTS does not accept a bare wildcard")
+        return hosts
+
+    @model_validator(mode="after")
+    def require_allowed_hosts_in_production(self) -> Self:
+        """Production has no default host list (Seguridad 13.2)."""
+        if self.app_env == "production" and not self.allowed_hosts:
+            raise ValueError("ALLOWED_HOSTS is required in production")
+        return self
 
     @field_validator("cors_origins", mode="before")
     @classmethod

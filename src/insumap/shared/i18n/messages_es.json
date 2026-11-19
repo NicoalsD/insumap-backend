@@ -1,5 +1,6 @@
 {
   "validation.error": "La solicitud tiene campos no válidos. Revisa los datos enviados.",
+  "validation.invalid_host": "La solicitud no se dirige a un servidor permitido.",
   "not.found": "El recurso solicitado no existe.",
   "unauthenticated": "Necesitas iniciar sesión para continuar.",
   "forbidden": "No tienes permiso para realizar esta acción.",

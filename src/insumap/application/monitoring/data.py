@@ -7,6 +7,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from insumap.domain.monitoring.glucose import GlucoseUnit, ReadingContext, ReadingSource
+from insumap.domain.monitoring.injection_sites import SiteCode
 from insumap.domain.monitoring.records import (
     ActivityIntensity,
     InsulinKind,
@@ -33,6 +34,8 @@ class InsulinData:
     product_name: str
     units: Decimal
     note: str | None = None
+    injection_site: SiteCode | None = None
+    injection_spot: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -57,6 +60,7 @@ class SymptomData:
     symptom_code: str
     occurred_at: datetime
     note: str | None = None
+    injection_site: SiteCode | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

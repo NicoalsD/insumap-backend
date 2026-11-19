@@ -48,7 +48,7 @@ Referencia de la API REST del backend (`/api/v1`): convenciones, formato de erro
 | Cabecera | Dirección | Uso |
 |---|---|---|
 | `Authorization: Bearer <jwt>` | Petición | Access token. Más de 2.048 bytes se rechaza antes de decodificar. |
-| `X-Request-ID` | Petición y respuesta | Correlación. El código acepta un valor entrante de 1 a 64 caracteres `[A-Za-z0-9._-]` y, si no cumple, genera un UUID4. Toda respuesta lo devuelve, también las de error. El `request_id` **no** va en el cuerpo del error. |
+| `X-Request-ID` | Petición y respuesta | Correlación. El código acepta un valor entrante solo si es un UUID válido (36 caracteres) y, si no cumple, genera un UUID4. Toda respuesta lo devuelve, también las de error. El `request_id` **no** va en el cuerpo del error. |
 | `X-Requested-With: insumap-web` | Petición | Obligatoria en `POST /auth/refresh`, `/auth/logout` y `/auth/logout-all` (defensa CSRF). |
 | `Retry-After` | Respuesta | Segundos de espera en todo `429 RATE_LIMITED`. |
 | `Location` | Respuesta | URL del recurso creado en un `201`. |
@@ -56,7 +56,7 @@ Referencia de la API REST del backend (`/api/v1`): convenciones, formato de erro
 | `Idempotency-Key` | Petición | Permitida por la política de CORS, pero **ningún endpoint la usa** en esta versión: la idempotencia va en el cuerpo (sección 4). Ver G9. |
 | `Content-Type` en importaciones | Petición | `application/fhir+json` (FHIR) o `text/csv` (CSV). Otro tipo responde `415 UNSUPPORTED_MEDIA_TYPE`. |
 
-Política de CORS que exige [`Seguridad.md`](Seguridad.md): orígenes explícitos de `CORS_ORIGINS`, `allow_credentials=True`, métodos `GET`, `POST`, `PUT`, `PATCH` y `DELETE`, cabeceras `Authorization`, `Content-Type`, `X-Requested-With`, `X-Request-ID` e `Idempotency-Key`, y se exponen `X-Request-ID` y `Retry-After`. El código actual permite solo `Authorization`, `Content-Type` y `X-Request-ID` y expone solo `X-Request-ID`: hay que ampliarlo antes de la fase 3 (G26).
+Política de CORS que exige [`Seguridad.md`](Seguridad.md): orígenes explícitos de `CORS_ORIGINS`, `allow_credentials=True`, métodos `GET`, `POST`, `PUT`, `PATCH` y `DELETE`, cabeceras `Authorization`, `Content-Type`, `X-Requested-With`, `X-Request-ID` e `Idempotency-Key`, y se exponen `X-Request-ID` y `Retry-After`. El código ya los permite y expone, con `max_age=600` (G26).
 
 ## 2. Autenticación y sesión
 
@@ -157,7 +157,7 @@ Al excederlos: `429 RATE_LIMITED` con `Retry-After`, o `413 PAYLOAD_TOO_LARGE`. 
 
 | Límite de tamaño | Valor |
 |---|---|
-| Cuerpo JSON general | `FieldLimits.MAX_REQUEST_BODY_BYTES` (1 MiB en el código; la política pide 64 KiB, G5) |
+| Cuerpo JSON general | `FieldLimits.MAX_REQUEST_BODY_BYTES` (64 KiB) |
 | Lote de lecturas offline | 512 KiB y 500 elementos |
 | Bundle FHIR R4 | 10 MiB, 5.000 entradas y 32 niveles de profundidad |
 | CSV de pacientes | 2 MiB, 5.000 filas, 40 columnas y 1.000 caracteres por celda |
@@ -947,8 +947,8 @@ Las rutas de registro (`/readings`, `/insulin-doses`, `/meals`, `/activities`, `
 
 #### `POST /symptoms`
 - Operación: `record_symptoms` · Permiso: `records.write_own` · Ruta: P · Trazabilidad: HU-19, RF-37 · Patrón: P17 · Éxito: 201
-- Solicitud: `symptoms` (códigos de una lista, por ejemplo sed, mareo, sudoración, visión borrosa; G10), `occurred_at`, `note` (texto libre acotado por `FieldLimits`).
-- Respuesta: `id`, `symptoms`, `occurred_at`, `alarm_detected` (propuesto: `true` si algún síntoma es de alarma; la app muestra "contacta a tu equipo o a urgencias" y se crea una alerta para el equipo), `simulated`.
+- Solicitud: `symptoms` (códigos de una lista, por ejemplo sed, mareo, sudoración, visión borrosa; G10), `occurred_at`, `note` (texto libre acotado por `FieldLimits`) e `injection_site` (código del catálogo de sitios; **obligatorio** con el síntoma `LIPOHYPERTROPHY`, que responde `422 VALIDATION_ERROR` si falta: la regla de `GET /patients/own/injection-sites` evita ese sitio 90 días).
+- Respuesta: `id`, `symptoms`, `occurred_at`, `injection_site`, `alarm_detected` (propuesto: `true` si algún síntoma es de alarma; la app muestra "contacta a tu equipo o a urgencias" y se crea una alerta para el equipo), `simulated`.
 - Errores: C1, C3, C4 (nota más larga que el límite responde `422`).
 
 #### `GET /symptoms`
@@ -1026,13 +1026,13 @@ Las rutas de registro (`/readings`, `/insulin-doses`, `/meals`, `/activities`, `
 #### `GET /patients/own/overview`
 - Operación: `get_own_overview` · Permiso: `patients.read_own` · Ruta: P · Trazabilidad: HU-22, HU-29, RF-42 · Patrón: P10, P11 · Éxito: 200
 - Solicitud: `window` (`24h`, `7d`, `14d` o `30d`, por defecto `14d`).
-- Respuesta: el inicio del paciente: lecturas recientes con su rango objetivo, métricas propias de la ventana en lenguaje simple, plan activo y alertas abiertas propias. No llama a la IA.
+- Respuesta: el inicio del paciente: lecturas recientes con su rango objetivo, métricas propias de la ventana en lenguaje simple, plan activo y alertas abiertas propias, más `sex`, `bmi` (nulo si no se conoce) y `pregnancy_status` (`NONE`, `PREGNANT` o `UNKNOWN`). No llama a la IA.
 - Errores: C1, C3, C4.
 
 #### `GET /patients/{patient_id}/overview`
 - Operación: `get_patient_overview` · Permiso: `patients.read_assigned` · Ruta: F · Trazabilidad: HU-46, HU-14, RF-80, RF-30, RNF-07 · Patrón: P10, P11, P09 · Éxito: 200
 - Solicitud: `window` (`24h`, `7d`, `14d` o `30d`, por defecto `14d`).
-- Respuesta: `PatientOverviewResponse`: últimas lecturas, métricas de la ventana, plan activo, alertas abiertas, recomendaciones pendientes y el último pronóstico guardado. **Leer el expediente no llama a la IA.** Las glucosas salen en mg/dL. Incluye `simulated` y, en una clínica demo, `data_source: "SIMULATED"` (G6). `PatientOverviewFacade` abre una unidad de trabajo, usa el puerto envuelto por el decorador de auditoría y el proxy de asignación; la fila de auditoría se escribe en la misma transacción.
+- Respuesta: `PatientOverviewResponse`: últimas lecturas, métricas de la ventana, plan activo, alertas abiertas, recomendaciones pendientes y el último pronóstico guardado. **Leer el expediente no llama a la IA.** Las glucosas salen en mg/dL. Incluye `sex`, `bmi` y `pregnancy_status` del paciente, `simulated` y, en una clínica demo, `data_source: "SIMULATED"` (G6). `PatientOverviewFacade` abre una unidad de trabajo, usa el puerto envuelto por el decorador de auditoría y el proxy de asignación; la fila de auditoría se escribe en la misma transacción.
 - Errores: C1, C2, C4, C5 (el `CLINIC_ADMIN` recibe `403 FORBIDDEN`: no tiene el permiso).
 
 ### 8.7 Plan de tratamiento, metas y recordatorios (M6)
@@ -1596,7 +1596,7 @@ Cada fila es algo que falta o que no coincide. Esta tabla es la lista de trabajo
 | G2 | Estado de `VALIDATION_ERROR` | Las historias de usuario dicen `400`. `Seguridad.md`, `Arquitectura.md`, `AGENTS.md` y el código dicen `422`. | `422` | Documentación de historias |
 | G3 | Forma del cuerpo de error | Las historias (convenciones) dicen `{"error": {"code", "message", "details", "request_id"}}`. `AGENTS.md`, `Arquitectura.md` y el código dicen `detail` y el `request_id` solo en la cabecera `X-Request-ID`. | `detail` y cabecera | Documentación de historias |
 | G4 | Elemento de `detail.errors` | El código emite `field` y `type`. `api-documentation.md` propone `field` y `message`. `Seguridad.md` (decisión 17) propone agregar `code`. | Se documenta lo que emite el código | Drako Salazar (cambio en `api.errors` y en la guía) |
-| G5 | Tamaño del cuerpo | `Seguridad.md` dice 64 KiB (`BODY_MAX_BYTES`), `Arquitectura.md` usa `MAX_JSON_BODY_BYTES` y el código usa `MAX_REQUEST_BODY_BYTES` de 1 MiB. Los límites de importación (hasta 10 MiB) y de lotes superan el global, y `BodySizeLimitMiddleware` hoy los bloquearía. | 1 MiB global y excepción por ruta para importaciones y lotes | Drako Salazar |
+| G5 | Tamaño del cuerpo | `Seguridad.md` dice 64 KiB (`BODY_MAX_BYTES`), `Arquitectura.md` usa `MAX_JSON_BODY_BYTES` y el código usa `MAX_REQUEST_BODY_BYTES`, ya en 64 KiB. Los límites de importación (hasta 10 MiB) y de lotes superan el global, y `BodySizeLimitMiddleware` hoy los bloquearía. | 64 KiB global y tope propio por ruta (`path_limits`) para importaciones, `readings/batch` y `readings/cgm-import` | Drako Salazar |
 | G6 | Marca de datos simulados | `RF-96` y `HU-55`: `simulated: true`. `Arquitectura.md`: `data_source = "SIMULATED"`. `Datos-simulados.md`: `is_demo` y el texto "Datos simulados". | `simulated` en toda respuesta; `is_demo` en la clínica; `data_source` solo se menciona en el expediente. Elegir uno. | Nicolas Diaz |
 | G7 | Campos de una lectura de glucosa | `Arquitectura.md` (paso 4) usa `value` y `unit`. El ejemplo de `api-documentation.md` usa `value_mg_dl`. HU-15 exige aceptar mmol/L. | Entrada `value` y `unit`; salida `value_mg_dl` | Nicolas Mora |
 | G8 | Enumeraciones sin definir | Contexto de la glucosa (RF-31 lista valores sueltos), tipo de comida, tipo e intensidad de la actividad y tipo de recordatorio. Solo `FASTING` y `POST_MEAL` aparecen en `Metricas-clinicas.md`. | "Por definir" | Nicolas Mora |
@@ -1613,11 +1613,11 @@ Cada fila es algo que falta o que no coincide. Esta tabla es la lista de trabajo
 | G19 | Recomendaciones: `APPLIED` y falta de IA | RF-71 y `Modulo-IA.md` dicen que aprobar crea una versión `DRAFT` y que `APPLIED` ocurre al crearla, mientras HU-39 solo dice `APPROVED`. HU-40 pide informar el motivo cuando la IA no genera sugerencias, sin campo definido. Un vencimiento (`EXPIRED`) decidido responde `409 INVALID_STATE_TRANSITION` por analogía. | `status` de la aprobación más `draft_plan_id`; `unavailable_reason` propuesto | Nicolas Mora |
 | G20 | Errores de una lectura | HU-15 llama `VALIDATION_ERROR` a la fecha futura; `Arquitectura.md` usa `READING_IN_FUTURE` y `READING_TOO_OLD`. `api-documentation.md` da `DUPLICATE_READING` como ejemplo de `409`, y `Arquitectura.md` responde `409 CONFLICT`. El mensaje de `GLUCOSE_OUT_OF_RANGE` difiere entre `api-documentation.md` y `Arquitectura.md`. | Códigos de `Arquitectura.md`; mensaje de `Arquitectura.md` | Nicolas Mora |
 | G21 | Salud | `Seguridad.md` dice que `/health` devuelve `{"status": "ok"}` sin consultar la base de datos; RNF-18 pide el estado de la BD y la IA. `GET /ready` (código) no está en ningún documento de diseño. | Como el código: `/health` (vida) y `/ready` (disponibilidad con `503`) | Nicolas Diaz |
-| G22 | `X-Request-ID` | `Arquitectura.md` y `Contrato-IA.md` escriben `X-Request-Id`; `Seguridad.md` y el código `X-Request-ID`. `Seguridad.md` (sección 11) acepta solo UUID; el código acepta cualquier valor de 1 a 64 caracteres `[A-Za-z0-9._-]`. | Como el código | Drako Salazar |
+| G22 | `X-Request-ID` | `Arquitectura.md` y `Contrato-IA.md` escriben `X-Request-Id`; `Seguridad.md` y el código `X-Request-ID`. `Seguridad.md` (sección 11) acepta solo UUID, y el código ya lo exige. | Solo UUID | Drako Salazar |
 | G23 | Paginación | Solo `api-documentation.md` define `limit`, `cursor`, `items` y `next_cursor`. No hay convención de orden ni de filtros. | Se aplica a todos los listados; el orden por defecto es el más reciente primero salvo el triage, que va por riesgo | Drako Salazar |
 | G24 | Datos insuficientes en métricas | `Metricas-clinicas.md` (2.2) calcula igual y marca `LOW_CONFIDENCE`; RF-55 pide no mostrar un porcentaje engañoso. | La respuesta trae `is_sufficient` y `confidence`; el frontend decide qué mostrar | Drako Salazar |
 | G25 | Documentos y campos que faltan | No existen `Modelo-de-datos.md`, `Diccionario-de-datos.md`, `Cumplimiento-y-privacidad.md`, `Plan-de-commits.md`, `Roles-y-planeacion.md`, `.agents/security.md`, `.agents/input-validation.md` ni `.agents/design-patterns.md`, así que no hay nombres de campo de perfil ni longitudes. `FieldLimits` implementa 7 constantes (los límites de notas, nombres y lotes de las políticas aún no están). La forma de `GET /meta/field-limits` y el contenido FHIR de la exportación no están definidos. | Nombres de campo propuestos en `snake_case`; longitudes "de `FieldLimits`" | Drako Salazar |
-| G26 | CORS | `Seguridad.md` exige las cabeceras `X-Requested-With` e `Idempotency-Key` y exponer `Retry-After`. El código (`main.py`) permite solo `Authorization`, `Content-Type` y `X-Request-ID` y expone solo `X-Request-ID`. El refresh desde un navegador fallaría en el preflight. | Se documenta lo que exige la política | Drako Salazar |
+| G26 | CORS | `Seguridad.md` exige las cabeceras `X-Requested-With` e `Idempotency-Key` y exponer `Retry-After`. El código (`main.py`) ya las incluye. | Se sigue la política | Drako Salazar |
 | G27 | Textos y listas configurables por la clínica | HU-15 (aviso de acción inmediata ante hipoglucemia), RF-37 (síntomas de alarma configurados) y IA6 (material educativo aprobado) hablan de contenido configurado por la clínica, sin permiso ni endpoint para gestionarlo. | No se agregan endpoints | Nicolas Mora |
 | G28 | `403` o `404` para mensajes y notas | `Actores-y-permisos.md` (V8) dice `404` para el administrador que lee mensajes o notas; HU-46 y HU-49 dicen `403`; `Seguridad.md` (6.5) decide `403` porque se decide antes de buscar el recurso. | `403 FORBIDDEN` | Documentación de actores |
 | G29 | Tareas de contacto | RF-87 y HU-43 piden que la clínica cree tareas de contacto, pero `follow_ups.manage` es solo del médico y el `CLINIC_ADMIN` no tiene permiso para crearlas ni leerlas sin ver datos clínicos. | Sin endpoint | Nicolas Diaz |
@@ -1626,3 +1626,4 @@ Cada fila es algo que falta o que no coincide. Esta tabla es la lista de trabajo
 | G32 | Mensajes de error propuestos | Solo ocho códigos tienen mensaje en `messages_es.json`. Los de la sección 6.3 marcados "propuesto" son texto de este archivo. | Texto propuesto | Drako Salazar |
 | G33 | Palabras de alarma en mensajes (RF-85) | `Modulo-IA.md` (7) lista los síntomas de alarma del asistente; ningún catálogo ni semilla de `care.symptom_catalog` tiene `is_alarm = true` para texto libre. `alarm_keywords_detected` es propuesto. | Lista corta en `ALARM_KEYWORDS` (dominio): confusión, pérdida de conocimiento, convulsión, desmayo, dificultad para respirar, cetonas. La lista es **decisión abierta: validación clínica pendiente**. El criterio compuesto "glucosa muy baja con síntomas" no es una palabra y queda en las alertas de glucosa. Se devuelve una lista (no un booleano) porque el nombre del campo es plural. El aviso al equipo solo sale por mensajes del paciente. El correo del aviso queda pendiente: no hay canal de correo conectado a mensajería ni dirección de los médicos. | Drako Salazar |
 | G33 | Pronóstico: lectura o llamada | `Modulo-IA.md` (sección 14) muestra que `GET /patients/{id}/forecast` llama a la IA por el proxy y guarda el resultado. `Arquitectura.md` dice que leer el expediente no llama a la IA y que el pronóstico se refresca como máximo una vez por intervalo tras una lectura. | `GET .../forecast` pasa por `RemoteAiServiceProxy` (con respaldo); `overview` devuelve el último guardado | Nicolas Mora |
+| G34 | Host y cabeceras de seguridad | `Seguridad.md` 13.1 y 13.2 piden `TrustedHostMiddleware` y las cabeceras de seguridad, pero no fijan el código del error de un `Host` ajeno. | Un `Host` fuera de `ALLOWED_HOSTS` responde `400 VALIDATION_ERROR` en el formato canónico (decisión abierta). Toda respuesta lleva las cabeceras de 13.1; `/docs` y `/openapi.json` no llevan CSP hasta definir la relajada, y HSTS solo en `production` | Drako Salazar |
