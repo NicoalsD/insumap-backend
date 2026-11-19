@@ -26,9 +26,6 @@ from insumap.infrastructure.access.patient_record_repository import (
     PatientRecordRepository,
 )
 from insumap.infrastructure.access.sql_data_access_log import SqlDataAccessLog
-from insumap.infrastructure.ai.unconfigured_forecast import (
-    UnconfiguredGlucoseForecastAdapter,
-)
 from insumap.infrastructure.integration.cgm.adapter import CgmCsvAdapter
 from insumap.infrastructure.monitoring.exporters import (
     CsvTimelineExporter,
@@ -86,11 +83,13 @@ def build_monitoring_adapters(
     current: CurrentSession,
     clock: Clock,
     transactions: TransactionFactory,
+    forecasts: GlucoseForecastPort,
 ) -> MonitoringAdapters:
     """Build the production adapters: PostgreSQL, the access chain and the exporters.
 
     ``transactions`` writes the denied-access rows in their own short transaction;
-    the granted ones join the transaction of the read.
+    the granted ones join the transaction of the read. ``forecasts`` is the AI client
+    (``RemoteAiServiceProxy`` in production).
     """
     patients = PatientDirectoryRepository(current)
     assignments = CareTeamRepository(current)
@@ -116,7 +115,7 @@ def build_monitoring_adapters(
         validation=ValidationSettingsRepository(current),
         targets=TargetProfileRepository(current),
         series=GlucoseSeriesRepository(current),
-        forecasts=UnconfiguredGlucoseForecastAdapter(),
+        forecasts=forecasts,
         symptoms=SymptomCatalogRepository(current),
         active_plans=ActivePlanRepository(current),
         cgm=CgmCsvAdapter(),

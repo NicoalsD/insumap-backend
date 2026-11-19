@@ -1,10 +1,8 @@
 """Forecast: the AI is optional, the answer is never a 5xx and never a dose."""
 
 from dataclasses import fields
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
-from uuid import UUID
-from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -15,11 +13,12 @@ from insumap.application.metrics.forecast import (
     ForecastInput,
     ForecastMode,
     ForecastPoint,
+    ForecastRequest,
     GetForecastUseCase,
     GlucoseForecast,
     GlucoseForecastPort,
-    Trend,
 )
+from insumap.domain.ai.linear_fallback import Trend
 from insumap.domain.identity.errors import PermissionDeniedError
 from insumap.domain.monitoring.glucose import ReadingSource
 from insumap.infrastructure.ai.unconfigured_forecast import (
@@ -41,12 +40,12 @@ class FakeForecasts(GlucoseForecastPort):
         self.calls = 0
         self.error: AiUnavailableError | None = None
 
-    def forecast(
-        self, patient_id: UUID, mode: ForecastMode, now: datetime, zone: ZoneInfo
-    ) -> GlucoseForecast:
+    def forecast(self, request: ForecastRequest) -> GlucoseForecast:
         self.calls += 1
         if self.error is not None:
             raise self.error
+        mode = request.mode
+        now = request.now
         return GlucoseForecast(
             mode=mode,
             generated_at=now,

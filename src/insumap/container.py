@@ -9,16 +9,20 @@ from typing import Final, Never, final
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
 from insumap.api.routers.alerts import AlertRouter
+from insumap.api.routers.audit import AuditRouter
 from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.care_team import CareTeamRouter
 from insumap.api.routers.clinics import ClinicRouter
+from insumap.api.routers.consents import ConsentRouter
 from insumap.api.routers.credentials import CredentialRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.imports import ImportRouter
+from insumap.api.routers.messaging import MessagingRouter
 from insumap.api.routers.meta import MetaRouter
 from insumap.api.routers.metrics import MetricsRouter
 from insumap.api.routers.notifications import NotificationRouter
 from insumap.api.routers.patients import PatientRouter
+from insumap.api.routers.recommendations import RecommendationRouter
 from insumap.api.routers.records import RecordsRouter
 from insumap.api.routers.reminders import ReminderRouter
 from insumap.api.routers.reports import ReportRouter
@@ -27,6 +31,18 @@ from insumap.api.routers.targets import TargetProfileRouter
 from insumap.api.routers.treatment import TreatmentRouter
 from insumap.api.routers.users import UserRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
+from insumap.application.ai.commands import (
+    ApproveRecommendationCommand,
+    ApproveRecommendationCommandHandler,
+    ModifyRecommendationCommand,
+    ModifyRecommendationCommandHandler,
+    RejectRecommendationCommand,
+    RejectRecommendationCommandHandler,
+)
+from insumap.application.ai.queries import (
+    GetRecommendationUseCase,
+    ListRecommendationsUseCase,
+)
 from insumap.application.alerts.commands import (
     AcknowledgeAlertCommand,
     AcknowledgeAlertCommandHandler,
@@ -45,6 +61,12 @@ from insumap.application.alerts.queries import (
     ListAlertRulesUseCase,
     ListAlertsUseCase,
 )
+from insumap.application.audit.queries import (
+    ListAuditLogUseCase,
+    ListDataAccessUseCase,
+    ListSecurityEventsUseCase,
+)
+from insumap.application.audit.verification import VerifyAuditChainUseCase
 from insumap.application.care_team.commands import (
     AssignDoctorCommand,
     AssignDoctorCommandHandler,
@@ -61,6 +83,8 @@ from insumap.application.care_team.list_assignments import (
 from insumap.application.clinic_admins.commands import (
     CreateClinicAdminCommand,
     CreateClinicAdminCommandHandler,
+    ResetClinicAdminAccessCommand,
+    ResetClinicAdminAccessCommandHandler,
 )
 from insumap.application.clinics.commands import (
     CreateClinicCommand,
@@ -93,7 +117,28 @@ from insumap.application.commands.transactional import (
     CurrentUnitOfWork,
     TransactionalCommandHandler,
 )
+from insumap.application.common.patient_scope import PatientScope
 from insumap.application.common.unit_of_work import UnitOfWorkPort
+from insumap.application.consents.commands import (
+    AcceptConsentCommand,
+    AcceptConsentCommandHandler,
+    WithdrawConsentCommand,
+    WithdrawConsentCommandHandler,
+)
+from insumap.application.consents.gate import OwnConsentGate
+from insumap.application.consents.privacy_requests import (
+    CreatePrivacyRequestCommand,
+    CreatePrivacyRequestCommandHandler,
+    ExportPrivacyRequestUseCase,
+    ListPrivacyRequestsUseCase,
+    ResolvePrivacyRequestCommand,
+    ResolvePrivacyRequestCommandHandler,
+)
+from insumap.application.consents.queries import (
+    GetOwnConsentUseCase,
+    GetPrivacyNoticeUseCase,
+    ListConsentStatusesUseCase,
+)
 from insumap.application.credentials.commands import (
     IssueCredentialsCommand,
     IssueCredentialsCommandHandler,
@@ -108,6 +153,13 @@ from insumap.application.events.publisher import (
     DomainEventPublisher,
     InProcessDomainEventPublisher,
 )
+from insumap.application.follow_ups.commands import (
+    CloseFollowUpCommand,
+    CloseFollowUpCommandHandler,
+    CreateFollowUpCommand,
+    CreateFollowUpCommandHandler,
+)
+from insumap.application.follow_ups.queries import ListFollowUpsUseCase
 from insumap.application.identity.activation import (
     ActivationPolicy,
     CompleteActivationUseCase,
@@ -151,6 +203,8 @@ from insumap.application.identity.sessions import (
     LogoutUseCase,
     RefreshSessionUseCase,
 )
+from insumap.application.messaging.list_messages import ListMessagesUseCase
+from insumap.application.messaging.send_message import SendMessageUseCase
 from insumap.application.metrics.forecast import GetForecastUseCase
 from insumap.application.metrics.metrics import (
     ComputeGlycemicMetricsUseCase,
@@ -315,13 +369,25 @@ from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistr
 from insumap.domain.monitoring.events import GlucoseReadingRecorded
 from insumap.domain.monitoring.validation import build_validation_chain
 from insumap.domain.onboarding.vocabulary import SourceFormat
+from insumap.infrastructure.ai_adapters import (
+    AiAdapters,
+    build_ai_adapters,
+)
 from insumap.infrastructure.alerts_adapters import (
     AlertsAdapters,
     build_alerts_adapters,
 )
+from insumap.infrastructure.audit_adapters import (
+    AuditAdapters,
+    build_audit_adapters,
+)
 from insumap.infrastructure.clinic_admin_adapters import (
     ClinicAdminAdapters,
     build_clinic_admin_adapters,
+)
+from insumap.infrastructure.consents_adapters import (
+    ConsentsAdapters,
+    build_consents_adapters,
 )
 from insumap.infrastructure.credentials_adapters import (
     CredentialsAdapters,
@@ -336,6 +402,10 @@ from insumap.infrastructure.identity_adapters import (
 from insumap.infrastructure.integration.csv.pipeline import CsvPatientImportPipeline
 from insumap.infrastructure.integration.fhir.pipeline import FhirPatientImportPipeline
 from insumap.infrastructure.logging import JsonLoggingConfigurator
+from insumap.infrastructure.messaging_adapters import (
+    MessagingAdapters,
+    build_messaging_adapters,
+)
 from insumap.infrastructure.monitoring_adapters import (
     MonitoringAdapters,
     build_monitoring_adapters,
@@ -381,6 +451,10 @@ VERIFY_EMAIL_PATH: Final = "verify-email"
 """Routes of the web app the emailed links point at (``<base>/<path>#token=...``)."""
 
 ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
+    AcceptConsentCommand,
+    WithdrawConsentCommand,
+    CreatePrivacyRequestCommand,
+    ResolvePrivacyRequestCommand,
     RegenerateMfaRecoveryCodesCommand,
     ChangePasswordCommand,
     AssignDoctorCommand,
@@ -420,11 +494,17 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     UpdatePatientReminderCommand,
     UpdateOwnReminderCommand,
     CreateClinicAdminCommand,
+    ApproveRecommendationCommand,
+    ModifyRecommendationCommand,
+    RejectRecommendationCommand,
+    ResetClinicAdminAccessCommand,
     SuspendPatientCommand,
     ReactivatePatientCommand,
     DeactivatePatientCommand,
     IssueCredentialsCommand,
     RevokeCredentialInvitationCommand,
+    CreateFollowUpCommand,
+    CloseFollowUpCommand,
 )
 """Every command of the API: a missing handler fails when the container is built."""
 
@@ -486,7 +566,7 @@ class Container:
     them. Tests pass their own settings, clock or probe through the constructor.
     """
 
-    def __init__(  # noqa: PLR0913 - composition root: one optional adapter set per module
+    def __init__(  # noqa: PLR0913, PLR0915 - composition root wires every module
         self,
         settings: Settings | None = None,
         *,
@@ -505,6 +585,10 @@ class Container:
         notification_adapters: NotificationAdapters | None = None,
         clinic_admin_adapters: ClinicAdminAdapters | None = None,
         patient_adapters: PatientAdapters | None = None,
+        ai_adapters: AiAdapters | None = None,
+        consents_adapters: ConsentsAdapters | None = None,
+        audit_adapters: AuditAdapters | None = None,
+        messaging_adapters: MessagingAdapters | None = None,
     ) -> None:
         self.settings: Settings = settings or get_settings()
         self.clock: Clock = clock or SystemClock.instance()
@@ -536,16 +620,28 @@ class Container:
             app_hmac_key=decode_key(self.settings.app_hmac_key.get_secret_value()),
         )
         targets = targets_adapters or build_targets_adapters(current=current)
+        ai = ai_adapters or build_ai_adapters(
+            settings=self.settings,
+            clock=self.clock,
+            current=current,
+            transactions=SqlTransactionFactory(engine, current),
+            ids=adapters.ids,
+            app_hmac_key=decode_key(self.settings.app_hmac_key.get_secret_value()),
+        )
         monitoring = monitoring_adapters or build_monitoring_adapters(
             current=current,
             clock=self.clock,
             transactions=SqlTransactionFactory(engine, current),
+            forecasts=ai.forecasts,
         )
         patient_ports = patient_adapters or build_patient_adapters(
             current=current, transactions=SqlTransactionFactory(engine, current)
         )
         clinic_admins = clinic_admin_adapters or build_clinic_admin_adapters(
             current=current
+        )
+        consents = consents_adapters or build_consents_adapters(
+            current=current, transactions=SqlTransactionFactory(engine, current)
         )
         if email_channel is not None:
             platform = replace(platform, email_channel=email_channel)
@@ -571,6 +667,8 @@ class Container:
         credentials = credentials_adapters or build_credentials_adapters(
             current=current
         )
+        messaging = messaging_adapters or build_messaging_adapters(current=current)
+        audit = audit_adapters or build_audit_adapters(current=current)
         services = self._build_identity_services(adapters, platform)
         unit_of_work = CurrentUnitOfWork()
         self._command_guard = CommandGuard(
@@ -582,11 +680,13 @@ class Container:
         registrations = [
             *self._identity_commands(adapters, services),
             *self._care_team_commands(adapters, platform),
+            *self._messaging_commands(adapters, monitoring, messaging),
             *self._clinic_commands(adapters, platform),
             *self._site_commands(adapters, platform),
             *self._users_commands(adapters, platform, unit_of_work),
             *self._onboarding_commands(adapters, onboarding, unit_of_work),
             *self._alert_commands(adapters, monitoring, alerts),
+            *self._recommendation_commands(adapters, monitoring, ai, unit_of_work),
             *self._treatment_commands(adapters, treatment, monitoring),
             *self._targets_commands(adapters, monitoring, targets),
             *self._clinic_admin_commands(
@@ -594,6 +694,7 @@ class Container:
             ),
             *self._patient_commands(adapters, platform, patient_ports),
             *self._credential_commands(adapters, platform, unit_of_work, credentials),
+            *self._consent_commands(adapters, consents, unit_of_work),
         ]
         self.command_bus: CommandBus = InMemoryCommandBus(
             registrations, required=ALL_COMMAND_TYPES
@@ -606,6 +707,7 @@ class Container:
             ),
             staff_actor=self.full_session_actor,
         )
+        self.consent_router = self._build_consent_router(adapters, consents, monitoring)
         self.clinic_router = ClinicRouter(
             commands=self.command_bus,
             list_clinics=ListClinicsUseCase(
@@ -654,6 +756,9 @@ class Container:
         self.import_router = self._build_import_router(adapters, onboarding)
         self._subscribe_alert_evaluation(adapters, alerts)
         self.alerts_router = self._build_alerts_router(adapters, monitoring, alerts)
+        self.recommendation_router = self._build_recommendation_router(
+            adapters, monitoring, ai
+        )
         self.target_profile_router = self._build_target_profile_router(
             adapters, targets
         )
@@ -671,6 +776,10 @@ class Container:
         )
         self.reports_router = self._build_reports_router(
             adapters, monitoring, treatment, alerts, patient_ports, platform
+        )
+        self.audit_router = self._build_audit_router(adapters, audit)
+        self.messaging_router = self._build_messaging_router(
+            adapters, monitoring, messaging, notifications
         )
 
     def _treatment_commands(
@@ -1178,6 +1287,24 @@ class Container:
                     )
                 ),
             ),
+            bind(
+                ResetClinicAdminAccessCommand,
+                guard.wrap(
+                    ResetClinicAdminAccessCommandHandler(
+                        clinics=platform.clinics,
+                        provisioning=clinic_admins.provisioning,
+                        codes=platform.activation_codes,
+                        code_hasher=adapters.code_hasher,
+                        channel=platform.email_channel,
+                        messages=self.message_catalog,
+                        clock=clock,
+                        current=current,
+                        invitation_ttl=timedelta(
+                            days=self.settings.staff_invitation_days
+                        ),
+                    )
+                ),
+            ),
         ]
 
     def _site_commands(
@@ -1328,6 +1455,99 @@ class Container:
                 ),
             ),
         ]
+
+    def _consent_commands(
+        self,
+        adapters: IdentityAdapters,
+        ports: ConsentsAdapters,
+        events: CurrentUnitOfWork,
+    ) -> list[Registration]:
+        """The consent and privacy decisions (P13), behind transaction and audit."""
+        guard, clock = self._command_guard, self.clock
+        own_consent = OwnConsentGate()
+        return [
+            bind(
+                AcceptConsentCommand,
+                guard.wrap(
+                    AcceptConsentCommandHandler(
+                        gate=own_consent,
+                        consents=adapters.consents,
+                        history=ports.history,
+                        ids=adapters.ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                WithdrawConsentCommand,
+                guard.wrap(
+                    WithdrawConsentCommandHandler(
+                        gate=own_consent,
+                        consents=adapters.consents,
+                        history=ports.history,
+                        ids=adapters.ids,
+                        clock=clock,
+                        events=events,
+                    )
+                ),
+            ),
+            bind(
+                CreatePrivacyRequestCommand,
+                guard.wrap(
+                    CreatePrivacyRequestCommandHandler(
+                        gate=OwnPatientGate(adapters.consents),
+                        requests=ports.requests,
+                        ids=adapters.ids,
+                        clock=clock,
+                        due_days=self.settings.privacy_request_due_days,
+                    )
+                ),
+            ),
+            bind(
+                ResolvePrivacyRequestCommand,
+                guard.wrap(
+                    ResolvePrivacyRequestCommandHandler(
+                        requests=ports.requests, clock=clock
+                    )
+                ),
+            ),
+        ]
+
+    def _build_consent_router(
+        self,
+        adapters: IdentityAdapters,
+        ports: ConsentsAdapters,
+        monitoring: MonitoringAdapters,
+    ) -> ConsentRouter:
+        """Wire the consent and privacy routes (API.md 8.13) over ``ports``."""
+        uow, clock = adapters.unit_of_work, self.clock
+        return ConsentRouter(
+            commands=self.command_bus,
+            notice=GetPrivacyNoticeUseCase(uow=uow, notices=ports.notices),
+            own_consent=GetOwnConsentUseCase(
+                uow=uow,
+                gate=OwnConsentGate(),
+                consents=adapters.consents,
+                history=ports.history,
+            ),
+            list_statuses=ListConsentStatusesUseCase(
+                uow=uow,
+                history=ports.history,
+                access_log=ports.access_log,
+                clock=clock,
+            ),
+            list_requests=ListPrivacyRequestsUseCase(uow=uow, requests=ports.requests),
+            export_request=ExportPrivacyRequestUseCase(
+                uow=uow,
+                gate=OwnPatientGate(adapters.consents),
+                requests=ports.requests,
+                history=ports.history,
+                timeline=monitoring.timeline,
+                access_log=ports.access_log,
+                clock=clock,
+            ),
+            session_actor=self.full_session_actor,
+        )
 
     def _credential_issue_limit(self, adapters: IdentityAdapters) -> RateLimitCheck:
         """300 code issues per clinic and hour (API.md section 5)."""
@@ -1673,6 +1893,58 @@ class Container:
             ),
         ]
 
+    def _recommendation_commands(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        ai: AiAdapters,
+        unit_of_work: CurrentUnitOfWork,
+    ) -> list[Registration]:
+        """The doctor's decisions on recommendations (P13), audited (P09)."""
+        guard, clock, ids = self._command_guard, self.clock, adapters.ids
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        recommendations = ai.recommendations
+        return [
+            bind(
+                ApproveRecommendationCommand,
+                guard.wrap(
+                    ApproveRecommendationCommandHandler(
+                        recommendations=recommendations,
+                        assigned_gate=assigned,
+                        drafts=ai.drafts,
+                        clock=clock,
+                        current=unit_of_work,
+                        ids=ids,
+                    )
+                ),
+            ),
+            bind(
+                ModifyRecommendationCommand,
+                guard.wrap(
+                    ModifyRecommendationCommandHandler(
+                        recommendations=recommendations,
+                        assigned_gate=assigned,
+                        drafts=ai.drafts,
+                        clock=clock,
+                        current=unit_of_work,
+                        ids=ids,
+                    )
+                ),
+            ),
+            bind(
+                RejectRecommendationCommand,
+                guard.wrap(
+                    RejectRecommendationCommandHandler(
+                        recommendations=recommendations,
+                        assigned_gate=assigned,
+                        clock=clock,
+                        current=unit_of_work,
+                        ids=ids,
+                    )
+                ),
+            ),
+        ]
+
     def _subscribe_alert_evaluation(
         self, adapters: IdentityAdapters, alerts: AlertsAdapters
     ) -> None:
@@ -1712,6 +1984,26 @@ class Container:
             get_summary=GetAlertSummaryUseCase(uow=uow, summary=alerts.summary),
             get_alert=GetAlertUseCase(
                 uow=uow, own_gate=own, assigned_gate=assigned, alerts=alerts.alerts
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_recommendation_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        ai: AiAdapters,
+    ) -> RecommendationRouter:
+        """Wire the recommendation reads (API.md 8.10) over the assigned gate."""
+        uow = adapters.unit_of_work
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        return RecommendationRouter(
+            commands=self.command_bus,
+            list_recommendations=ListRecommendationsUseCase(
+                uow=uow, assigned_gate=assigned, recommendations=ai.recommendations
+            ),
+            get_recommendation=GetRecommendationUseCase(
+                uow=uow, assigned_gate=assigned, recommendations=ai.recommendations
             ),
             session_actor=self.full_session_actor,
         )
@@ -2066,6 +2358,98 @@ class Container:
                 gate=OwnPatientGate(adapters.consents),
                 users=adapters.users,
                 targets=monitoring.targets,
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_audit_router(
+        self, adapters: IdentityAdapters, audit: AuditAdapters
+    ) -> AuditRouter:
+        """Wire the audit reads and the chain check (API.md 8.13) over the session."""
+        uow = adapters.unit_of_work
+        return AuditRouter(
+            list_audit_log=ListAuditLogUseCase(uow=uow, reader=audit.audit_log),
+            list_data_access=ListDataAccessUseCase(uow=uow, reader=audit.data_access),
+            list_security_events=ListSecurityEventsUseCase(
+                uow=uow, reader=audit.security_events
+            ),
+            verify_chain=VerifyAuditChainUseCase(
+                uow=uow, chain=audit.chain, events=adapters.security_events
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _messaging_commands(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        messaging: MessagingAdapters,
+    ) -> list[Registration]:
+        """The follow-up decisions (P13), each behind transaction and audit (P09)."""
+        guard, clock, ids = self._command_guard, self.clock, adapters.ids
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        return [
+            bind(
+                CreateFollowUpCommand,
+                guard.wrap(
+                    CreateFollowUpCommandHandler(
+                        gate=assigned,
+                        follow_ups=messaging.follow_ups,
+                        ids=ids,
+                        clock=clock,
+                        catalog=self.message_catalog,
+                    )
+                ),
+            ),
+            bind(
+                CloseFollowUpCommand,
+                guard.wrap(
+                    CloseFollowUpCommandHandler(
+                        gate=assigned, follow_ups=messaging.follow_ups, clock=clock
+                    )
+                ),
+            ),
+        ]
+
+    def _build_messaging_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        messaging: MessagingAdapters,
+        notifications: NotificationAdapters,
+    ) -> MessagingRouter:
+        """Wire the thread (API.md 8.12) over one patient scope and the P07 channel."""
+        uow = adapters.unit_of_work
+        scope = PatientScope(
+            assigned=AssignedPatientGate(monitoring.patient_records),
+            own=OwnPatientGate(adapters.consents),
+        )
+        return MessagingRouter(
+            commands=self.command_bus,
+            list_messages=ListMessagesUseCase(
+                uow=uow,
+                scope=scope,
+                threads=messaging.threads,
+                messages=messaging.messages,
+                read_marks=messaging.read_marks,
+                clock=self.clock,
+                catalog=self.message_catalog,
+            ),
+            send_message=SendMessageUseCase(
+                uow=uow,
+                scope=scope,
+                threads=messaging.threads,
+                messages=messaging.messages,
+                read_marks=messaging.read_marks,
+                care_teams=messaging.care_teams,
+                patients=messaging.patients,
+                ids=adapters.ids,
+                clock=self.clock,
+                in_app=notifications.in_app,
+                catalog=self.message_catalog,
+            ),
+            list_follow_ups=ListFollowUpsUseCase(
+                uow=uow, scope=scope, follow_ups=messaging.follow_ups
             ),
             session_actor=self.full_session_actor,
         )
