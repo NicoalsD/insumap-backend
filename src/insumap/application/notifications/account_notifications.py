@@ -112,3 +112,60 @@ class PasswordChangedNotification(Notification):
             self._messages.render("notification.password_changed.subject"),
             self._messages.render("notification.password_changed.external"),
         )
+
+
+class StaffActivationNotification(Notification):
+    """The one-time activation code of a new staff account (external channels only).
+
+    The code is a single-use secret: it never goes in-app and never reaches a log.
+
+    Pattern: P07 Bridge
+    """
+
+    def __init__(
+        self,
+        channel: NotificationChannel,
+        messages: MessageCatalog,
+        *,
+        code: str,
+        days: int,
+    ) -> None:
+        super().__init__(channel, messages)
+        self._code = code
+        self._days = days
+
+    @override
+    def compose_in_app(self) -> tuple[str, str]:
+        raise ChannelNotSupportedError("notification.staff_activation")
+
+    @override
+    def compose_external(self) -> tuple[str, str]:
+        return (
+            self._messages.render("notification.staff_activation.subject"),
+            self._messages.render(
+                "notification.staff_activation.external",
+                code=self._code,
+                days=self._days,
+            ),
+        )
+
+
+class MfaResetNotification(Notification):
+    """The notice that the second factor was reset (no code, no link).
+
+    Pattern: P07 Bridge
+    """
+
+    @override
+    def compose_in_app(self) -> tuple[str, str]:
+        return self._compose()
+
+    @override
+    def compose_external(self) -> tuple[str, str]:
+        return self._compose()
+
+    def _compose(self) -> tuple[str, str]:
+        return (
+            self._messages.render("notification.mfa_reset.subject"),
+            self._messages.render("notification.mfa_reset.external"),
+        )

@@ -149,7 +149,9 @@ def test_get_settings_loads_once_until_reset(
     assert third.app_env == "production"
 
 
-@pytest.mark.parametrize("name", ["JWT_SECRET", "MFA_ENCRYPTION_KEY", "CODE_HMAC_KEY"])
+@pytest.mark.parametrize(
+    "name", ["JWT_SECRET", "MFA_ENCRYPTION_KEY", "CODE_HMAC_KEY", "APP_HMAC_KEY"]
+)
 def test_missing_key_stops_the_startup(
     clean_env: pytest.MonkeyPatch, name: str
 ) -> None:

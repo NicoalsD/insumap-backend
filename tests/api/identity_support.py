@@ -28,6 +28,12 @@ from tests.support.monitoring_fakes import RecordsWorld, records_adapters
 from tests.support.notifications import InMemoryChannel
 from tests.support.settings import make_settings
 from tests.support.sites_fakes import FakeSites
+from tests.support.users_fakes import (
+    FakeActivationCodes,
+    FakeLoginLockouts,
+    FakeStaffDirectory,
+    FakeStaffInvitations,
+)
 
 ORIGIN = "https://app.example.test"
 CSRF_HEADERS = {"X-Requested-With": "insumap-web"}
@@ -49,6 +55,9 @@ class IdentityApi:
         self.records = RecordsWorld(
             clock=self.world.clock, uow=self.world.uow, ids=self.world.ids
         )
+        self.staff_directory = FakeStaffDirectory(self.world.users, self.world.factors)
+        self.staff_invitations = FakeStaffInvitations()
+        self.login_lockouts = FakeLoginLockouts()
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -63,6 +72,10 @@ class IdentityApi:
                 clinics=self.clinics,
                 sites=self.sites,
                 staff_sites=self.sites,
+                staff_directory=self.staff_directory,
+                staff_invitations=self.staff_invitations,
+                login_lockouts=self.login_lockouts,
+                activation_codes=FakeActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
         )

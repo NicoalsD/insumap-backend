@@ -113,6 +113,7 @@ class UserRepository(UserRepositoryPort):
             ),
             patient_id=patient_id,
             email_verified=user.email_verified_at is not None,
+            status_reason=user.status_reason,
         )
 
     @override
@@ -138,6 +139,7 @@ class UserRepository(UserRepositoryPort):
             .where(UserOrm.id == account.user_id)
             .values(
                 status=account.status.value,
+                status_reason=account.status_reason,
                 status_changed_at=case(
                     (UserOrm.status != account.status.value, now),
                     else_=UserOrm.status_changed_at,

@@ -16,6 +16,7 @@ from insumap.api.routers.meta import MetaRouter
 from insumap.api.routers.metrics import MetricsRouter
 from insumap.api.routers.records import RecordsRouter
 from insumap.api.routers.sites import SiteRouter
+from insumap.api.routers.users import UserRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
 from insumap.application.care_team.commands import (
     AssignDoctorCommand,
@@ -155,6 +156,19 @@ from insumap.application.sites.commands import (
     UpdateSiteCommandHandler,
 )
 from insumap.application.sites.list_sites import ListSitesUseCase
+from insumap.application.users.commands import (
+    CreateStaffUserCommand,
+    CreateStaffUserCommandHandler,
+    DeactivateStaffUserCommand,
+    DeactivateStaffUserCommandHandler,
+    ResetStaffMfaCommand,
+    ResetStaffMfaCommandHandler,
+    UnlockStaffUserCommand,
+    UnlockStaffUserCommandHandler,
+    UpdateStaffUserCommand,
+    UpdateStaffUserCommandHandler,
+)
+from insumap.application.users.queries import GetStaffUseCase, ListStaffUseCase
 from insumap.domain.identity.password_policy import PasswordPolicy
 from insumap.domain.identity.refresh_token import RefreshTokenLifetime
 from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistry
@@ -181,6 +195,7 @@ from insumap.infrastructure.platform_adapters import (
 from insumap.shared.config import Settings, get_settings
 from insumap.shared.field_limits import FieldLimits
 from insumap.shared.i18n import MessageCatalog
+from insumap.shared.key_material import decode_key
 from insumap.shared.time import Clock, SystemClock
 
 RESET_PASSWORD_PATH: Final = "reset-password"  # noqa: S105 - web route, not a secret
@@ -201,6 +216,11 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     CreateSiteCommand,
     UpdateSiteCommand,
     SetUserSitesCommand,
+    CreateStaffUserCommand,
+    UpdateStaffUserCommand,
+    DeactivateStaffUserCommand,
+    UnlockStaffUserCommand,
+    ResetStaffMfaCommand,
 )
 """Every command of the API: a missing handler fails when the container is built."""
 
@@ -299,7 +319,10 @@ class Container:
             engine=engine,
             current=current,
         )
-        platform = platform_adapters or build_platform_adapters(current=current)
+        platform = platform_adapters or build_platform_adapters(
+            current=current,
+            app_hmac_key=decode_key(self.settings.app_hmac_key.get_secret_value()),
+        )
         monitoring = monitoring_adapters or build_monitoring_adapters(
             current=current,
             clock=self.clock,
@@ -308,10 +331,11 @@ class Container:
         if email_channel is not None:
             platform = replace(platform, email_channel=email_channel)
         services = self._build_identity_services(adapters, platform)
+        unit_of_work = CurrentUnitOfWork()
         self._command_guard = CommandGuard(
             uow=adapters.unit_of_work,
             audit_log=platform.audit_log,
-            current=CurrentUnitOfWork(),
+            current=unit_of_work,
             clock=self.clock,
         )
         registrations = [
@@ -319,6 +343,7 @@ class Container:
             *self._care_team_commands(adapters, platform),
             *self._clinic_commands(adapters, platform),
             *self._site_commands(adapters, platform),
+            *self._users_commands(adapters, platform, unit_of_work),
         ]
         self.command_bus: CommandBus = InMemoryCommandBus(
             registrations, required=ALL_COMMAND_TYPES
@@ -348,6 +373,16 @@ class Container:
             commands=self.command_bus,
             list_sites=ListSitesUseCase(
                 uow=adapters.unit_of_work, sites=platform.sites
+            ),
+            staff_actor=self.full_session_actor,
+        )
+        self.user_router = UserRouter(
+            commands=self.command_bus,
+            list_staff=ListStaffUseCase(
+                uow=adapters.unit_of_work, directory=platform.staff_directory
+            ),
+            get_staff=GetStaffUseCase(
+                uow=adapters.unit_of_work, directory=platform.staff_directory
             ),
             staff_actor=self.full_session_actor,
         )
@@ -559,6 +594,82 @@ class Container:
                 guard.wrap(
                     SetUserSitesCommandHandler(
                         sites=sites, staff_sites=staff_sites, clock=clock
+                    )
+                ),
+            ),
+        ]
+
+    def _users_commands(
+        self,
+        adapters: IdentityAdapters,
+        platform: PlatformAdapters,
+        current: CurrentUnitOfWork,
+    ) -> list[Registration]:
+        """The staff decisions (P13), each behind transaction and audit (P09)."""
+        guard, clock = self._command_guard, self.clock
+        directory, users = platform.staff_directory, adapters.users
+        return [
+            bind(
+                CreateStaffUserCommand,
+                guard.wrap(
+                    CreateStaffUserCommandHandler(
+                        users=users,
+                        directory=directory,
+                        invitations=platform.staff_invitations,
+                        codes=platform.activation_codes,
+                        code_hasher=adapters.code_hasher,
+                        channel=platform.email_channel,
+                        messages=self.message_catalog,
+                        ids=adapters.ids,
+                        clock=clock,
+                        current=current,
+                        invitation_ttl=timedelta(
+                            days=self.settings.staff_invitation_days
+                        ),
+                    )
+                ),
+            ),
+            bind(
+                UpdateStaffUserCommand,
+                guard.wrap(
+                    UpdateStaffUserCommandHandler(directory=directory, clock=clock)
+                ),
+            ),
+            bind(
+                DeactivateStaffUserCommand,
+                guard.wrap(
+                    DeactivateStaffUserCommandHandler(
+                        users=users,
+                        directory=directory,
+                        refresh_tokens=adapters.refresh_tokens,
+                        care_teams=platform.care_teams,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                UnlockStaffUserCommand,
+                guard.wrap(
+                    UnlockStaffUserCommandHandler(
+                        users=users,
+                        lockouts=platform.login_lockouts,
+                        events=adapters.security_events,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                ResetStaffMfaCommand,
+                guard.wrap(
+                    ResetStaffMfaCommandHandler(
+                        users=users,
+                        factors=adapters.mfa_factors,
+                        refresh_tokens=adapters.refresh_tokens,
+                        events=adapters.security_events,
+                        channel=platform.email_channel,
+                        messages=self.message_catalog,
+                        current=current,
+                        clock=clock,
                     )
                 ),
             ),

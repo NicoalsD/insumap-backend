@@ -42,6 +42,8 @@ class UserAccount:
     clinic: ClinicSummary | None
     patient_id: UUID | None = None
     email_verified: bool = False
+    status_reason: str | None = None
+    """Why the account was last suspended or deactivated (``status_reason``)."""
 
     @property
     def state(self) -> PatientAccountState:
@@ -66,6 +68,14 @@ class UserAccount:
     def with_revoked_sessions(self) -> UserAccount:
         """This account with ``token_version + 1``: every access token dies."""
         return replace(self, token_version=self.token_version + 1)
+
+    def deactivated(self, *, reason: str) -> UserAccount:
+        """This account closed for good (``-> DEACTIVATED``), with its reason.
+
+        The state object refuses it when the account is already deactivated.
+        """
+        next_state = self.state.deactivate()
+        return replace(self, status=next_state.status, status_reason=reason)
 
     def with_password_hash(self, password_hash: str) -> UserAccount:
         """This account with a new password hash (rehash or change)."""
