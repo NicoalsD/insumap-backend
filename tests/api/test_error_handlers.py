@@ -23,7 +23,11 @@ class SignUpRequest(BaseModel):
 def build_app() -> FastAPI:
     catalog = MessageCatalog(
         {
-            **{key: SPANISH.render(key) for key in SPANISH.message_keys()},
+            **{
+                key: SPANISH.render(key)
+                for key in SPANISH.message_keys()
+                if not SPANISH.placeholders(key)
+            },
             "patient.duplicated": "El paciente {name} ya existe.",
         }
     )
