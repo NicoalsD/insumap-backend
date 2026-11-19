@@ -110,7 +110,10 @@ class RiskScore:
 
 
 class RiskScoringStrategy(ABC):
-    """How a risk is scored: the service or the rules (P19 Strategy)."""
+    """How a risk is scored: the service or the rules.
+
+    Pattern: P19 Strategy
+    """
 
     @abstractmethod
     def score(self, features: RiskFeatures, limits: RiskLimits) -> RiskScore:

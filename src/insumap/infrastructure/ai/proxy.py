@@ -67,7 +67,7 @@ from insumap.domain.ai.linear_fallback import (
     LinearForecastResult,
     linear_forecast,
 )
-from insumap.domain.ai.risk import RiskScore, RiskScoringStrategy
+from insumap.domain.ai.risk import FactorDirection, RiskScore, RiskScoringStrategy
 from insumap.domain.ai.summary_template import (
     SummaryNumbers,
     SummaryTemplate,
@@ -262,6 +262,7 @@ class RemoteAiServiceProxy(
         )
 
     def _insufficient_risk(self, request: RiskRequest, digest: str) -> RiskResult:
+        sufficiency = request.features.data_sufficiency_pct
         return RiskResult(
             model_name=RULES_MODEL_NAME,
             model_version=RULES_MODEL_VERSION,
@@ -274,7 +275,16 @@ class RemoteAiServiceProxy(
             calibrated=False,
             window_days=request.window_days,
             explanation=AiExplanation(
-                summary=self._messages.render(RISK_INSUFFICIENT_TEXT)
+                summary=self._messages.render(RISK_INSUFFICIENT_TEXT),
+                factors=(
+                    {
+                        "name": "data_sufficiency_pct",
+                        "direction": FactorDirection.NEUTRAL.value,
+                        "value": 0.0 if sufficiency is None else float(sufficiency),
+                        "unit": "%",
+                        "contribution": 0.0,
+                    },
+                ),
             ),
         )
 

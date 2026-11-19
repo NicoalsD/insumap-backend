@@ -175,6 +175,8 @@ def test_risk_without_enough_data_is_insufficient_and_never_calls_the_service() 
     assert harness.service.calls == []
     assert result.fallback_reason is FallbackReason.INSUFFICIENT_DATA
     assert result.risk_probability is None
+    (factor,) = result.explanation.factors
+    assert factor["name"] == "data_sufficiency_pct"
     (record,) = harness.store.risks
     assert record.output is result
     assert record.window_days == 14
