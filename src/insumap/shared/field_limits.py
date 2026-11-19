@@ -145,3 +145,5 @@ class FieldLimits:
     EXPORT_MAX_EVENTS: ClassVar[int] = 50_000
     """Events one timeline export may contain."""
 
+    AGP_DAYS_MAX: ClassVar[int] = 90
+    """Most days an AGP request may superimpose."""
