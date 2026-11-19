@@ -9,6 +9,7 @@ from typing import Final, Never, final
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
 from insumap.api.routers.alerts import AlertRouter
+from insumap.api.routers.audit import AuditRouter
 from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.care_team import CareTeamRouter
 from insumap.api.routers.clinics import ClinicRouter
@@ -44,6 +45,12 @@ from insumap.application.alerts.queries import (
     ListAlertRulesUseCase,
     ListAlertsUseCase,
 )
+from insumap.application.audit.queries import (
+    ListAuditLogUseCase,
+    ListDataAccessUseCase,
+    ListSecurityEventsUseCase,
+)
+from insumap.application.audit.verification import VerifyAuditChainUseCase
 from insumap.application.care_team.commands import (
     AssignDoctorCommand,
     AssignDoctorCommandHandler,
@@ -312,6 +319,10 @@ from insumap.infrastructure.alerts_adapters import (
     AlertsAdapters,
     build_alerts_adapters,
 )
+from insumap.infrastructure.audit_adapters import (
+    AuditAdapters,
+    build_audit_adapters,
+)
 from insumap.infrastructure.clinic_admin_adapters import (
     ClinicAdminAdapters,
     build_clinic_admin_adapters,
@@ -497,6 +508,7 @@ class Container:
         notification_adapters: NotificationAdapters | None = None,
         clinic_admin_adapters: ClinicAdminAdapters | None = None,
         patient_adapters: PatientAdapters | None = None,
+        audit_adapters: AuditAdapters | None = None,
     ) -> None:
         self.settings: Settings = settings or get_settings()
         self.clock: Clock = clock or SystemClock.instance()
@@ -563,6 +575,7 @@ class Container:
         credentials = credentials_adapters or build_credentials_adapters(
             current=current
         )
+        audit = audit_adapters or build_audit_adapters(current=current)
         services = self._build_identity_services(adapters, platform)
         unit_of_work = CurrentUnitOfWork()
         self._command_guard = CommandGuard(
@@ -661,6 +674,7 @@ class Container:
         self.treatment_router = self._build_treatment_router(
             adapters, monitoring, treatment
         )
+        self.audit_router = self._build_audit_router(adapters, audit)
 
     def _treatment_commands(
         self,
@@ -1958,6 +1972,23 @@ class Container:
                 gate=OwnPatientGate(adapters.consents),
                 users=adapters.users,
                 targets=monitoring.targets,
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_audit_router(
+        self, adapters: IdentityAdapters, audit: AuditAdapters
+    ) -> AuditRouter:
+        """Wire the audit reads and the chain check (API.md 8.13) over the session."""
+        uow = adapters.unit_of_work
+        return AuditRouter(
+            list_audit_log=ListAuditLogUseCase(uow=uow, reader=audit.audit_log),
+            list_data_access=ListDataAccessUseCase(uow=uow, reader=audit.data_access),
+            list_security_events=ListSecurityEventsUseCase(
+                uow=uow, reader=audit.security_events
+            ),
+            verify_chain=VerifyAuditChainUseCase(
+                uow=uow, chain=audit.chain, events=adapters.security_events
             ),
             session_actor=self.full_session_actor,
         )
