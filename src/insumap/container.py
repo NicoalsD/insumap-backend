@@ -9,9 +9,23 @@ from typing import Final, Never, final
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
 from insumap.api.routers.auth import AuthRouter
+from insumap.api.routers.care_team import CareTeamRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.meta import MetaRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
+from insumap.application.care_team.commands import (
+    AssignDoctorCommand,
+    AssignDoctorCommandHandler,
+    EndAssignmentCommand,
+    EndAssignmentCommandHandler,
+    ReassignDoctorCommand,
+    ReassignDoctorCommandHandler,
+    SetPrimaryDoctorCommand,
+    SetPrimaryDoctorCommandHandler,
+)
+from insumap.application.care_team.list_assignments import (
+    ListCareTeamAssignmentsUseCase,
+)
 from insumap.application.commands.auditing import (
     AuditingCommandHandler,
     AuditLogPort,
@@ -109,6 +123,10 @@ VERIFY_EMAIL_PATH: Final = "verify-email"
 ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     RegenerateMfaRecoveryCodesCommand,
     ChangePasswordCommand,
+    AssignDoctorCommand,
+    SetPrimaryDoctorCommand,
+    ReassignDoctorCommand,
+    EndAssignmentCommand,
 )
 """Every command of the API: a missing handler fails when the container is built."""
 
@@ -217,11 +235,19 @@ class Container:
         )
         registrations = [
             *self._identity_commands(adapters, services),
+            *self._care_team_commands(adapters, platform),
         ]
         self.command_bus: CommandBus = InMemoryCommandBus(
             registrations, required=ALL_COMMAND_TYPES
         )
         self.auth_router = self._build_auth_router(adapters, services, platform)
+        self.care_team_router = CareTeamRouter(
+            commands=self.command_bus,
+            list_assignments=ListCareTeamAssignmentsUseCase(
+                uow=adapters.unit_of_work, teams=platform.care_teams
+            ),
+            staff_actor=self.full_session_actor,
+        )
 
     def _build_identity_services(
         self, adapters: IdentityAdapters, platform: PlatformAdapters
@@ -339,6 +365,43 @@ class Container:
             ),
         )
 
+    def _care_team_commands(
+        self, adapters: IdentityAdapters, platform: PlatformAdapters
+    ) -> list[Registration]:
+        """The care team decisions (P13), each behind transaction and audit (P09)."""
+        guard, clock = self._command_guard, self.clock
+        teams, staff = platform.care_teams, platform.staff
+        return [
+            bind(
+                AssignDoctorCommand,
+                guard.wrap(
+                    AssignDoctorCommandHandler(
+                        patients=platform.patients,
+                        staff=staff,
+                        teams=teams,
+                        ids=adapters.ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                SetPrimaryDoctorCommand,
+                guard.wrap(SetPrimaryDoctorCommandHandler(teams=teams)),
+            ),
+            bind(
+                ReassignDoctorCommand,
+                guard.wrap(
+                    ReassignDoctorCommandHandler(
+                        staff=staff, teams=teams, ids=adapters.ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                EndAssignmentCommand,
+                guard.wrap(EndAssignmentCommandHandler(teams=teams, clock=clock)),
+            ),
+        ]
+
     def _identity_commands(
         self, adapters: IdentityAdapters, services: IdentityServices
     ) -> list[Registration]:
@@ -397,6 +460,8 @@ class Container:
             users=adapters.users,
             permissions=adapters.permissions,
         )
+        self.full_session_actor = ActorGuard(authenticate, SessionScope.FULL)
+        """Actor of every route but enrollment and the own session (C1, C2)."""
         login = LoginUseCase(
             uow=adapters.unit_of_work,
             users=adapters.users,
@@ -552,7 +617,7 @@ class Container:
                 rate_limit=services.reset_complete_limit,
                 clock=clock,
             ),
-            session_actor=ActorGuard(authenticate, SessionScope.FULL),
+            session_actor=self.full_session_actor,
             enrollment_actor=ActorGuard(authenticate, SessionScope.ENROLLMENT),
             any_actor=ActorGuard(authenticate, SessionScope.ANY),
             csrf_guard=RefreshCsrfGuard(
