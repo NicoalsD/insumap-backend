@@ -24,6 +24,7 @@ from tests.support.identity_world import (
     IdentityWorld,
     make_account,
 )
+from tests.support.monitoring_fakes import RecordsWorld, records_adapters
 from tests.support.notifications import InMemoryChannel
 from tests.support.settings import make_settings
 from tests.support.sites_fakes import FakeSites
@@ -45,6 +46,9 @@ class IdentityApi:
         self.staff = FakeStaff()
         self.clinics = FakeClinics()
         self.sites = FakeSites(clinic_id=CLINIC.clinic_id)
+        self.records = RecordsWorld(
+            clock=self.world.clock, uow=self.world.uow, ids=self.world.ids
+        )
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -60,6 +64,7 @@ class IdentityApi:
                 sites=self.sites,
                 staff_sites=self.sites,
             ),
+            monitoring_adapters=records_adapters(self.records),
         )
         self.app = create_app(container)
         self.client = TestClient(

@@ -24,5 +24,9 @@
   "notification.email_verification.external": "Confirma tu correo con este enlace en las próximas {lifetime} horas: {link} Si no creaste esta cuenta, ignora este mensaje.",
   "notification.password_changed.subject": "Tu contraseña de Insumap cambió",
   "notification.password_changed.external": "La contraseña de tu cuenta de Insumap se restableció. Si no fuiste tú, comunícate con tu clínica.",
-  "reason.required": "Indica un motivo de 10 a 500 caracteres."
+  "reason.required": "Indica un motivo de 10 a 500 caracteres.",
+  "glucose.out_of_range": "La glucosa está fuera del rango medible.",
+  "reading.in_future": "La lectura tiene una fecha futura.",
+  "reading.too_old": "La lectura es más antigua que el máximo permitido.",
+  "unsupported.media_type": "El tipo de contenido no es compatible con este endpoint."
 }

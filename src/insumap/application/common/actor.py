@@ -24,6 +24,7 @@ class Actor:
     permissions: frozenset[PermissionCode] = field(default=frozenset())
     patient_id: UUID | None = None
     session_id: UUID | None = None
+    clinic_is_demo: bool = False
     requires_mfa: bool = False
     mfa_verified: bool = False
 

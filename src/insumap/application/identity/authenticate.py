@@ -82,6 +82,7 @@ class AuthenticateActorUseCase:
             permissions=permissions,
             patient_id=account.patient_id,
             session_id=claims.session_id,
+            clinic_is_demo=account.clinic is not None and account.clinic.is_demo,
             requires_mfa=account.requires_mfa,
             mfa_verified=mfa_verified,
         )

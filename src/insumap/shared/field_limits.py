@@ -117,5 +117,63 @@ class FieldLimits:
     PAGE_SIZE_MAX: ClassVar[int] = 100
     """Largest page size a client may ask for."""
 
-    CURSOR_MAX_LENGTH: ClassVar[int] = 128
-    """Longest pagination cursor accepted; a longer one is invalid."""
+    # Patient records (monitoring schema).
+
+    GLUCOSE_NOTE_MAX_LENGTH: ClassVar[int] = 500
+    """Maximum length of the note of a glucose reading."""
+
+    RECORD_NOTE_MAX_LENGTH: ClassVar[int] = 500
+    """Maximum length of the note of an insulin dose, meal, activity or symptom."""
+
+    INSULIN_PRODUCT_NAME_MAX_LENGTH: ClassVar[int] = 80
+    """Maximum length of an insulin product name."""
+
+    ACTIVITY_TYPE_MAX_LENGTH: ClassVar[int] = 40
+    """Maximum length of a physical activity type."""
+
+    SYMPTOM_CODE_MAX_LENGTH: ClassVar[int] = 32
+    """Maximum length of a symptom catalog code."""
+
+    GLUCOSE_VALUE_INPUT_MAX: ClassVar[int] = 9999
+    """Largest glucose number accepted as input (the column is numeric(5,1)).
+
+    The measurable range of the clinic is a clinical parameter in the database;
+    this only protects the column.
+    """
+
+    INSULIN_UNITS_INPUT_MAX: ClassVar[int] = 1000
+    """Largest number of insulin units accepted in one record."""
+
+    CARBS_G_INPUT_MAX: ClassVar[int] = 1000
+    """Largest carbohydrate estimate, in grams, accepted in one meal."""
+
+    ACTIVITY_DURATION_MINUTES_MAX: ClassVar[int] = 1440
+    """Longest physical activity accepted, in minutes (one day)."""
+
+    LAB_VALUE_INPUT_MAX: ClassVar[int] = 1000
+    """Largest laboratory number accepted as input, in the unit sent."""
+
+    READINGS_BATCH_MAX_ITEMS: ClassVar[int] = 500
+    """Readings in one offline batch (Seguridad 13.3)."""
+
+    READINGS_BATCH_MAX_BYTES: ClassVar[int] = 512 * 1024
+    """Body size of one offline batch (512 KiB)."""
+
+    CGM_CSV_MAX_BYTES: ClassVar[int] = 10 * 1024 * 1024
+    """Body size of one CGM CSV import (10 MiB)."""
+
+    CGM_CSV_MAX_ROWS: ClassVar[int] = 100_000
+    """Rows of one CGM CSV import."""
+
+    TIMELINE_EVENT_TYPES_MAX: ClassVar[int] = 5
+    """Event types a timeline filter may list."""
+
+    EXPORT_MAX_EVENTS: ClassVar[int] = 50_000
+    """Events one timeline export may contain."""
+
+    AGP_DAYS_MAX: ClassVar[int] = 90
+    """Most days an AGP request may superimpose."""
+
+    CURSOR_MAX_LENGTH: ClassVar[int] = 512
+    """Longest pagination cursor accepted (the records cursor carries a time and
+    an id); a longer one is invalid."""
