@@ -122,6 +122,7 @@ class CredentialInvitationOrm(Base):
     used_at: Mapped[datetime | None] = _timestamp(nullable=True)
     revoked_at: Mapped[datetime | None] = _timestamp(nullable=True)
     revoked_by: Mapped[UUID | None] = mapped_column(Uuid)
+    replaced_by_id: Mapped[UUID | None] = mapped_column(Uuid)
     delivery_status: Mapped[str] = mapped_column(String(14))
 
 

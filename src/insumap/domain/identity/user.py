@@ -93,6 +93,21 @@ class UserAccount:
         next_state = self.state.deactivate()
         return replace(self, status=next_state.status, status_reason=reason)
 
+    def invited(self) -> UserAccount:
+        """The patient account after an activation code was issued (P18).
+
+        ``IMPORTED -> INVITED``; re-issuing keeps ``INVITED``. The state object
+        refuses it for any other status.
+        """
+        return replace(self, status=self.state.issue_credentials().status)
+
+    def reverted_to_imported(self) -> UserAccount:
+        """The patient account once its invitation was revoked.
+
+        ``INVITED -> IMPORTED``.
+        """
+        return replace(self, status=self.state.revoke_invitation().status)
+
     def with_password_hash(self, password_hash: str) -> UserAccount:
         """This account with a new password hash (rehash or change)."""
         return replace(self, password_hash=password_hash)

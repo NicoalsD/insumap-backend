@@ -159,6 +159,9 @@ class FieldLimits:
     READINGS_BATCH_MAX_BYTES: ClassVar[int] = 512 * 1024
     """Body size of one offline batch (512 KiB)."""
 
+    CREDENTIAL_BATCH_MAX_ITEMS: ClassVar[int] = 100
+    """Patients in one credential batch (``Seguridad.md`` 3.3)."""
+
     CGM_CSV_MAX_BYTES: ClassVar[int] = 10 * 1024 * 1024
     """Body size of one CGM CSV import (10 MiB)."""
 
