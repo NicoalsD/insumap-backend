@@ -13,7 +13,7 @@ from typing import Annotated, Any, Final, Self, final
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from insumap.api.paths import API_V1_PREFIX
 from insumap.api.routers.common import (
@@ -52,6 +52,7 @@ from insumap.application.treatment.template_commands import (
     RetireProtocolTemplateCommand,
 )
 from insumap.domain.identity.permissions import PermissionCode
+from insumap.domain.monitoring.injection_sites import SITE_ORDER, SiteCode
 from insumap.domain.treatment.content import (
     InsulinKind,
     ItemSpec,
@@ -130,6 +131,24 @@ class ItemRequest(StrictRequest):
     instructions: str | None = Field(
         default=None, max_length=FieldLimits.INSTRUCTIONS_MAX_LENGTH
     )
+    injection_sites: list[SiteCode] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=len(SITE_ORDER),
+        description=(
+            "Sitios de inyección que el médico permite para esta insulina; nulo "
+            "permite todos. Una lista vacía no es válida."
+        ),
+    )
+
+    @field_validator("injection_sites")
+    @classmethod
+    def _unique_in_canonical_order(
+        cls, sites: list[SiteCode] | None
+    ) -> list[SiteCode] | None:
+        if sites is None:
+            return None
+        return [site for site in SITE_ORDER if site in sites]
 
     def to_spec(self) -> ItemSpec:
         return ItemSpec(
@@ -142,6 +161,9 @@ class ItemRequest(StrictRequest):
             if self.days_of_week is None
             else tuple(self.days_of_week),
             instructions=self.instructions,
+            injection_sites=None
+            if self.injection_sites is None
+            else tuple(self.injection_sites),
         )
 
 
@@ -262,6 +284,7 @@ class ItemResponse(BaseModel):
     time_of_day: time | None
     days_of_week: list[int] | None
     instructions: str | None
+    injection_sites: list[SiteCode] | None
 
     @classmethod
     def of(cls, item: ItemSpec) -> Self:
@@ -274,6 +297,9 @@ class ItemResponse(BaseModel):
             time_of_day=item.time_of_day,
             days_of_week=None if item.days_of_week is None else list(item.days_of_week),
             instructions=item.instructions,
+            injection_sites=None
+            if item.injection_sites is None
+            else list(item.injection_sites),
         )
 
 

@@ -22,6 +22,8 @@ from insumap.domain.clinical_notes.note import ClinicalNote
 from insumap.domain.dashboard.triage import TriageAssessment, TriageFlag
 from insumap.domain.metrics.glycemic_metrics import GlycemicMetrics
 from insumap.domain.monitoring.glucose import GlucoseReading
+from insumap.domain.monitoring.injection_sites import PregnancyStatus
+from insumap.domain.onboarding.vocabulary import Sex
 from insumap.domain.reminders.reminder import Reminder
 from insumap.domain.treatment.plan import TreatmentPlan
 from insumap.shared.field_limits import FieldLimits
@@ -231,6 +233,13 @@ class PatientOverviewResponse(BaseModel):
     data_source: str | None = Field(
         default=None, description="`SIMULATED` en la clínica demo; ausente si no."
     )
+    sex: Sex = Field(
+        description="Sexo administrativo: `FEMALE`, `MALE`, `OTHER` o `UNKNOWN`."
+    )
+    bmi: float | None = Field(description="IMC del paciente, o nulo si no se conoce.")
+    pregnancy_status: PregnancyStatus = Field(
+        description="`NONE`, `PREGNANT` o `UNKNOWN`."
+    )
 
     @classmethod
     def of(cls, overview: PatientOverview) -> Self:
@@ -262,6 +271,9 @@ class PatientOverviewResponse(BaseModel):
             reminders=[ReminderResponse.of(r) for r in overview.reminders],
             simulated=overview.simulated,
             data_source=SIMULATED_SOURCE if overview.simulated else None,
+            sex=overview.body.sex,
+            bmi=_number(overview.body.bmi),
+            pregnancy_status=overview.body.pregnancy_status,
         )
 
 

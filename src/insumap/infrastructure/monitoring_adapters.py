@@ -9,6 +9,10 @@ from insumap.application.common.unit_of_work import TransactionFactory
 from insumap.application.metrics.forecast import GlucoseForecastPort
 from insumap.application.metrics.ports import GlucoseSeriesPort, TargetProfilePort
 from insumap.application.monitoring.cgm import CgmReadingSource
+from insumap.application.monitoring.injection import (
+    InjectionHistoryPort,
+    PatientBodyProfilePort,
+)
 from insumap.application.monitoring.ports import (
     ActivePlanPort,
     ClinicalRecordPort,
@@ -39,6 +43,10 @@ from insumap.infrastructure.persistence.care_repositories import (
 from insumap.infrastructure.persistence.care_team_repository import (
     CareTeamRepository,
     PatientDirectoryRepository,
+)
+from insumap.infrastructure.persistence.injection_repositories import (
+    InjectionHistoryRepository,
+    PatientBodyProfileRepository,
 )
 from insumap.infrastructure.persistence.metrics_repositories import (
     GlucoseSeriesRepository,
@@ -76,6 +84,8 @@ class MonitoringAdapters:
     active_plans: ActivePlanPort
     cgm: CgmReadingSource
     exporters: dict[ExportFormat, TimelineExporterPort]
+    body_profiles: PatientBodyProfilePort
+    injection_history: InjectionHistoryPort
 
 
 def build_monitoring_adapters(
@@ -123,4 +133,6 @@ def build_monitoring_adapters(
             ExportFormat.CSV: CsvTimelineExporter(),
             ExportFormat.FHIR: FhirTimelineExporter(),
         },
+        body_profiles=PatientBodyProfileRepository(current),
+        injection_history=InjectionHistoryRepository(current),
     )

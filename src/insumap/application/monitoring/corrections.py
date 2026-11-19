@@ -28,6 +28,7 @@ from insumap.application.monitoring.ports import (
     GlucoseReadingPort,
     SymptomCatalogPort,
 )
+from insumap.application.monitoring.records import require_site_for
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.monitoring.glucose import GlucoseReading, GlucoseValue
 from insumap.domain.monitoring.record import ClinicalRecord, RecordType
@@ -185,6 +186,8 @@ class CorrectRecordUseCase:
                 product_name=data.product_name,
                 units=data.units,
                 note=data.note,
+                injection_site=data.injection_site,
+                injection_spot=data.injection_spot,
             )
         if isinstance(original, Meal) and isinstance(data, MealData):
             return original.corrected(
@@ -207,8 +210,13 @@ class CorrectRecordUseCase:
             entry = self._catalog.find_active(clinic_id, data.symptom_code)
             if entry is None:
                 raise _wrong_data()
+            require_site_for(entry, data)
             return original.corrected(
-                **common, symptom_at=data.occurred_at, symptom=entry, note=data.note
+                **common,
+                symptom_at=data.occurred_at,
+                symptom=entry,
+                note=data.note,
+                injection_site=data.injection_site,
             )
         raise _wrong_data()
 

@@ -194,3 +194,64 @@ def test_unknown_field_is_422(api: IdentityApi) -> None:
     response = api.client.post(BASE, headers=headers, json=body)
 
     assert response.status_code == 422, response.text
+
+
+def dose(site: str | None = None, spot: int | None = None) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "kind": "BASAL",
+        "product_name": "Glargina",
+        "units": 12.5,
+        "administered_at": (api_now() - timedelta(hours=1)).isoformat(),
+    }
+    if site is not None:
+        body["injection_site"] = site
+    if spot is not None:
+        body["injection_spot"] = spot
+    return body
+
+
+def api_now() -> Any:
+    return NOW
+
+
+def test_a_dose_records_and_returns_the_injection_site_and_spot(
+    api: IdentityApi,
+) -> None:
+    headers = patient(api)
+
+    created = api.client.post(
+        "/api/v1/insulin-doses", headers=headers, json=dose("THIGH_LEFT", 2)
+    )
+    listed = api.client.get("/api/v1/insulin-doses", headers=headers)
+
+    assert created.status_code == 201, created.text
+    assert created.json()["injection_site"] == "THIGH_LEFT"
+    assert created.json()["injection_spot"] == 2
+    assert listed.json()["items"][0]["injection_site"] == "THIGH_LEFT"
+    assert listed.json()["items"][0]["injection_spot"] == 2
+
+
+def test_a_dose_without_site_answers_null_site_and_spot(api: IdentityApi) -> None:
+    created = api.client.post(
+        "/api/v1/insulin-doses", headers=patient(api), json=dose()
+    )
+
+    assert created.status_code == 201, created.text
+    assert created.json()["injection_site"] is None
+    assert created.json()["injection_spot"] is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        dose(spot=2),
+        dose("THIGH_LEFT", 5),
+        dose("THIGH_LEFT", 0),
+        dose("CHEST_LEFT"),
+    ],
+)
+def test_a_bad_site_or_spot_is_422(api: IdentityApi, body: dict[str, Any]) -> None:
+    response = api.client.post("/api/v1/insulin-doses", headers=patient(api), json=body)
+
+    assert response.status_code == 422, response.text
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
