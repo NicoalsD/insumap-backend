@@ -24,6 +24,7 @@ from testcontainers.postgres import PostgresContainer
 from insumap.container import Container
 from insumap.main import create_app
 from tests.support.db_seed import DemoWorld, seed_demo_world
+from tests.support.notifications import InMemoryChannel
 from tests.support.settings import make_settings
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,7 +34,7 @@ POSTGRES_IMAGE = "postgres:18-alpine"
 APP_ROLE = "insumap_app"
 APP_ROLE_TEST_PASSWORD = "app-test-only"
 ORIGIN = "https://app.example.test"
-TRUNCATED_SCHEMAS = ("iam", "clinic")
+TRUNCATED_SCHEMAS = ("iam", "clinic", "audit")
 SEEDED_TABLES = ("iam.roles", "iam.permissions", "iam.role_permissions")
 
 
@@ -95,7 +96,7 @@ def demo_world(migrated_url: str) -> DemoWorld:
         ).fetchall()
         names = [row[0] for row in tables if row[0] not in SEEDED_TABLES]
         conn.execute("SET session_replication_role = replica")
-        conn.execute(f"TRUNCATE {', '.join(names)}")
+        conn.execute(f"TRUNCATE {', '.join(names)} CASCADE")
         conn.execute("SET session_replication_role = DEFAULT")
         return seed_demo_world(conn, settings)
 
@@ -110,10 +111,18 @@ def app_url(migrated_url: str) -> str:
 
 
 @pytest.fixture
-def api(app_url: str, demo_world: DemoWorld) -> Iterator[TestClient]:
+def mail() -> InMemoryChannel:
+    """The email channel of the app under test: it keeps what it was asked to send."""
+    return InMemoryChannel()
+
+
+@pytest.fixture
+def api(
+    app_url: str, demo_world: DemoWorld, mail: InMemoryChannel
+) -> Iterator[TestClient]:
     """The real app over PostgreSQL: real repositories, Argon2id, JWT and TOTP."""
     settings = make_settings(database_url=app_url, cors_origins=[ORIGIN])
-    app = create_app(Container(settings))
+    app = create_app(Container(settings, email_channel=mail))
     with TestClient(
         app, base_url="https://testserver", raise_server_exceptions=False
     ) as client:

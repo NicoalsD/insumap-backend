@@ -29,6 +29,10 @@ class SecurityEventType(StrEnum):
     ACTIVATION_FAILED = "ACTIVATION_FAILED"
     ACCOUNT_ACTIVATED = "ACCOUNT_ACTIVATED"
     SESSIONS_REVOKED = "SESSIONS_REVOKED"
+    PASSWORD_CHANGED = "PASSWORD_CHANGED"  # noqa: S105 - event name, not a secret
+    PASSWORD_RESET_REQUESTED = "PASSWORD_RESET_REQUESTED"  # noqa: S105 - event name
+    ACCOUNT_UNLOCKED = "ACCOUNT_UNLOCKED"
+    MFA_RESET = "MFA_RESET"
 
     @property
     def severity(self) -> SecuritySeverity:
@@ -46,6 +50,10 @@ _SEVERITY = {
     SecurityEventType.ACTIVATION_FAILED: SecuritySeverity.LOW,
     SecurityEventType.ACCOUNT_ACTIVATED: SecuritySeverity.LOW,
     SecurityEventType.SESSIONS_REVOKED: SecuritySeverity.LOW,
+    SecurityEventType.PASSWORD_CHANGED: SecuritySeverity.LOW,
+    SecurityEventType.PASSWORD_RESET_REQUESTED: SecuritySeverity.LOW,
+    SecurityEventType.ACCOUNT_UNLOCKED: SecuritySeverity.LOW,
+    SecurityEventType.MFA_RESET: SecuritySeverity.HIGH,
 }
 
 

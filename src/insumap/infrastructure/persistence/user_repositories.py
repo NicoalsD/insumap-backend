@@ -112,6 +112,7 @@ class UserRepository(UserRepositoryPort):
                 is_active=clinic.status == ACTIVE_CLINIC,
             ),
             patient_id=patient_id,
+            email_verified=user.email_verified_at is not None,
         )
 
     @override
@@ -150,6 +151,11 @@ class UserRepository(UserRepositoryPort):
                     else_=UserOrm.password_changed_at,
                 ),
                 token_version=account.token_version,
+                email_verified_at=(
+                    func.coalesce(UserOrm.email_verified_at, now)
+                    if account.email_verified
+                    else None
+                ),
                 email=func.coalesce(account.email, UserOrm.email),
                 email_normalized=func.coalesce(
                     account.email_normalized, UserOrm.email_normalized

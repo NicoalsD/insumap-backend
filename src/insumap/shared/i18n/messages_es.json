@@ -16,5 +16,13 @@
   "email.unavailable": "El correo ya pertenece a otra cuenta.",
   "consent.version_outdated": "La versión del aviso de privacidad ya no es la vigente.",
   "invalid.state_transition": "La transición de estado no está permitida.",
-  "invitation.invalid": "El código no es válido o venció. Pide uno nuevo a tu clínica."
+  "invitation.invalid": "El código no es válido o venció. Pide uno nuevo a tu clínica.",
+  "demo.mark": "Datos simulados.",
+  "notification.password_reset.subject": "Restablece tu contraseña de Insumap",
+  "notification.password_reset.external": "Recibimos una solicitud para restablecer tu contraseña. Abre este enlace en los próximos {lifetime} minutos: {link} Si no fuiste tú, ignora este mensaje.",
+  "notification.email_verification.subject": "Confirma tu correo en Insumap",
+  "notification.email_verification.external": "Confirma tu correo con este enlace en las próximas {lifetime} horas: {link} Si no creaste esta cuenta, ignora este mensaje.",
+  "notification.password_changed.subject": "Tu contraseña de Insumap cambió",
+  "notification.password_changed.external": "La contraseña de tu cuenta de Insumap se restableció. Si no fuiste tú, comunícate con tu clínica.",
+  "reason.required": "Indica un motivo de 10 a 500 caracteres."
 }

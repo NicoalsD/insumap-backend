@@ -81,6 +81,15 @@ class Settings(BaseSettings):
     rate_limit_activation_per_ip_per_hour: int = Field(default=50, ge=1)
     rate_limit_refresh_per_user_per_minute: int = Field(default=30, ge=1)
 
+    # Password reset, email verification and staff invitations (Seguridad.md 3.6).
+    password_reset_ttl_minutes: int = Field(default=30, ge=1)
+    email_verification_ttl_hours: int = Field(default=24, ge=1)
+    staff_invitation_days: int = Field(default=7, ge=1)
+    rate_limit_reset_request_per_ip_per_hour: int = Field(default=5, ge=1)
+    rate_limit_reset_request_per_account_per_hour: int = Field(default=3, ge=1)
+    rate_limit_reset_complete_per_ip_per_minute: int = Field(default=10, ge=1)
+    web_app_base_url: str = Field(default="http://localhost:5173", min_length=1)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def normalize_log_level(cls, value: object) -> object:

@@ -45,6 +45,7 @@ STATUS_BY_CODE: Final[Mapping[ErrorCode, HTTPStatus]] = {
     ErrorCode.CONSENT_VERSION_OUTDATED: HTTPStatus.CONFLICT,
     ErrorCode.INVALID_STATE_TRANSITION: HTTPStatus.CONFLICT,
     ErrorCode.INVITATION_INVALID: HTTPStatus.GONE,
+    ErrorCode.REASON_REQUIRED: HTTPStatus.UNPROCESSABLE_ENTITY,
 }
 """HTTP status of every error code."""
 
