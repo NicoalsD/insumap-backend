@@ -10,6 +10,7 @@ from uuid import UUID
 
 from insumap.application.access.ports import (
     AccessPurpose,
+    DataAccessAction,
     DataResource,
     PatientRecord,
     PatientRecordPort,
@@ -190,6 +191,7 @@ class FakePatientRecords(PatientRecordPort):
         patient_id: UUID,
         purpose: AccessPurpose,
         resource: DataResource,
+        action: DataAccessAction = DataAccessAction.READ,
     ) -> PatientRecord:
         del resource
         self.reads.append((actor.user_id, patient_id, purpose))

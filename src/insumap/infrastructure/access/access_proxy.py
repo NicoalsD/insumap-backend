@@ -8,6 +8,7 @@ from uuid import UUID
 from insumap.application.access.ports import (
     AccessPurpose,
     CareTeamAssignmentPort,
+    DataAccessAction,
     DataResource,
     PatientDirectoryPort,
     PatientRecord,
@@ -55,6 +56,7 @@ class PatientRecordAccessProxy(PatientRecordPort):
         patient_id: UUID,
         purpose: AccessPurpose,
         resource: DataResource,
+        action: DataAccessAction = DataAccessAction.READ,
     ) -> PatientRecord:
         patient = self._patients.find(patient_id)
         if patient is None:
@@ -70,4 +72,4 @@ class PatientRecordAccessProxy(PatientRecordPort):
             raise PermissionDeniedError
         if decision is AccessDecision.NOT_FOUND:
             raise ResourceNotFoundError
-        return self._subject.read_record(actor, patient_id, purpose, resource)
+        return self._subject.read_record(actor, patient_id, purpose, resource, action)

@@ -7,6 +7,7 @@ from uuid import UUID
 
 from insumap.application.access.ports import (
     AccessPurpose,
+    DataAccessAction,
     DataResource,
     PatientDirectoryPort,
     PatientRecord,
@@ -35,6 +36,7 @@ class PatientRecordRepository(PatientRecordPort):
         patient_id: UUID,
         purpose: AccessPurpose,
         resource: DataResource,
+        action: DataAccessAction = DataAccessAction.READ,
     ) -> PatientRecord:
         del actor, purpose, resource
         patient = self._patients.find(patient_id)

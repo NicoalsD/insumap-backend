@@ -54,6 +54,17 @@ class DataAccessOutcome(StrEnum):
     DENIED = "DENIED"
 
 
+class DataAccessAction(StrEnum):
+    """What was done with the data (``audit.data_access_log.action``).
+
+    A report or an export is an ``EXPORT`` even when it only reads.
+    """
+
+    READ = "READ"
+    EXPORT = "EXPORT"
+    DECRYPT = "DECRYPT"
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PatientRecord:
     """The handle of a patient record a caller was allowed to read.
@@ -80,6 +91,7 @@ class PatientRecordPort(ABC):
         patient_id: UUID,
         purpose: AccessPurpose,
         resource: DataResource,
+        action: DataAccessAction = DataAccessAction.READ,
     ) -> PatientRecord:
         """Return the record, or raise a ``NOT_FOUND`` or ``FORBIDDEN`` error."""
 
@@ -113,6 +125,7 @@ class DataAccessRecord:
     purpose: AccessPurpose
     outcome: DataAccessOutcome
     request_id: str | None
+    action: DataAccessAction = DataAccessAction.READ
 
 
 class DataAccessLogPort(ABC):
