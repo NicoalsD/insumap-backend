@@ -21,6 +21,16 @@ def test_every_error_code_has_an_http_status() -> None:
         (ErrorCode.RATE_LIMITED, HTTPStatus.TOO_MANY_REQUESTS),
         (ErrorCode.PAYLOAD_TOO_LARGE, HTTPStatus.REQUEST_ENTITY_TOO_LARGE),
         (ErrorCode.INTERNAL_ERROR, HTTPStatus.INTERNAL_SERVER_ERROR),
+        (ErrorCode.SESSION_REVOKED, HTTPStatus.UNAUTHORIZED),
+        (ErrorCode.INVALID_CREDENTIALS, HTTPStatus.UNAUTHORIZED),
+        (ErrorCode.ACCOUNT_NOT_ACTIVE, HTTPStatus.FORBIDDEN),
+        (ErrorCode.CLINIC_SUSPENDED, HTTPStatus.FORBIDDEN),
+        (ErrorCode.MFA_REQUIRED, HTTPStatus.FORBIDDEN),
+        (ErrorCode.CONSENT_REQUIRED, HTTPStatus.FORBIDDEN),
+        (ErrorCode.EMAIL_UNAVAILABLE, HTTPStatus.CONFLICT),
+        (ErrorCode.CONSENT_VERSION_OUTDATED, HTTPStatus.CONFLICT),
+        (ErrorCode.INVALID_STATE_TRANSITION, HTTPStatus.CONFLICT),
+        (ErrorCode.INVITATION_INVALID, HTTPStatus.GONE),
     ],
 )
 def test_status_for_each_code(code: ErrorCode, status: HTTPStatus) -> None:

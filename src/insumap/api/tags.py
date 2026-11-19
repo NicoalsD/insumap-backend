@@ -7,3 +7,5 @@ class ApiTag(StrEnum):
     """Name of each Swagger tag, as shown to the reader."""
 
     HEALTH = "Salud"
+    META = "Metadatos"
+    AUTH = "Autenticación"

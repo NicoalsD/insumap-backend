@@ -17,6 +17,8 @@ def test_codes_are_english_upper_snake_case_equal_to_their_names() -> None:
         (ErrorCode.PAYLOAD_TOO_LARGE, "payload.too_large"),
         (ErrorCode.CONFLICT, "conflict"),
         (ErrorCode.INTERNAL_ERROR, "internal.error"),
+        (ErrorCode.INVITATION_INVALID, "invitation.invalid"),
+        (ErrorCode.CONSENT_VERSION_OUTDATED, "consent.version_outdated"),
     ],
 )
 def test_default_message_key_follows_the_domain_convention(
@@ -32,6 +34,17 @@ def test_error_uses_the_default_message_key_of_its_code() -> None:
     assert error.message_key == "conflict"
     assert error.params == {}
     assert error.detail == {}
+    assert error.headers == {}
+
+
+def test_error_keeps_read_only_response_headers() -> None:
+    headers = {"Retry-After": "30"}
+    error = InsumapError(ErrorCode.RATE_LIMITED, headers=headers)
+    headers["Retry-After"] = "0"
+
+    assert error.headers == {"Retry-After": "30"}
+    with pytest.raises(TypeError):
+        error.headers["X-Leak"] = "x"  # type: ignore[index]
 
 
 def test_error_keeps_its_own_key_params_and_detail() -> None:

@@ -29,11 +29,48 @@ class FieldLimits:
     EMAIL_MAX_LENGTH: ClassVar[int] = 254
     """Maximum length of an email address (RFC 5321 path limit)."""
 
+    EMAIL_PATTERN: ClassVar[str] = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+    """Shape of an email typed by a person (use fullmatch); not a delivery check."""
+
     PASSWORD_MIN_LENGTH: ClassVar[int] = 12
     """Minimum length of a new password."""
 
     PASSWORD_MAX_LENGTH: ClassVar[int] = 128
     """Maximum length of any password input, checked before hashing."""
+
+    # Authentication.
+
+    AUTH_HEADER_MAX_BYTES: ClassVar[int] = 2048
+    """Largest ``Authorization`` header accepted; longer ones are never decoded."""
+
+    OPAQUE_TOKEN_MAX_LENGTH: ClassVar[int] = 64
+    """Maximum length of an opaque token input (challenge or activation token)."""
+
+    TOTP_CODE_LENGTH: ClassVar[int] = 6
+    """Digits of a TOTP code (RFC 6238)."""
+
+    MFA_CODE_INPUT_MAX_LENGTH: ClassVar[int] = 16
+    """Maximum length of an MFA code input: a TOTP or a formatted recovery code."""
+
+    RECOVERY_CODE_LENGTH: ClassVar[int] = 10
+    """Characters of a normalized MFA recovery code (Crockford base32, 50 bits)."""
+
+    RECOVERY_CODE_GROUP_SIZE: ClassVar[int] = 5
+    """Characters per dash separated group of a displayed recovery code."""
+
+    # Activation.
+
+    ACTIVATION_CODE_LENGTH: ClassVar[int] = 16
+    """Characters of a normalized activation code (Crockford base32, 80 bits)."""
+
+    ACTIVATION_CODE_GROUP_SIZE: ClassVar[int] = 4
+    """Characters per dash separated group of a displayed activation code."""
+
+    ACTIVATION_CODE_INPUT_MAX_LENGTH: ClassVar[int] = 32
+    """Maximum length of a raw activation code input, with dashes and spaces."""
+
+    BIRTH_DATE_MIN_YEAR: ClassVar[int] = 1900
+    """Earliest year accepted in a birth date input."""
 
     # Requests and pagination.
 

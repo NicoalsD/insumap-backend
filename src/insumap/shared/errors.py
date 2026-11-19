@@ -26,6 +26,16 @@ class ErrorCode(StrEnum):
     RATE_LIMITED = "RATE_LIMITED"
     PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
     INTERNAL_ERROR = "INTERNAL_ERROR"
+    SESSION_REVOKED = "SESSION_REVOKED"
+    INVALID_CREDENTIALS = "INVALID_CREDENTIALS"
+    ACCOUNT_NOT_ACTIVE = "ACCOUNT_NOT_ACTIVE"
+    CLINIC_SUSPENDED = "CLINIC_SUSPENDED"
+    MFA_REQUIRED = "MFA_REQUIRED"
+    CONSENT_REQUIRED = "CONSENT_REQUIRED"
+    EMAIL_UNAVAILABLE = "EMAIL_UNAVAILABLE"
+    CONSENT_VERSION_OUTDATED = "CONSENT_VERSION_OUTDATED"
+    INVALID_STATE_TRANSITION = "INVALID_STATE_TRANSITION"
+    INVITATION_INVALID = "INVITATION_INVALID"
 
     @property
     def default_message_key(self) -> str:
@@ -45,7 +55,9 @@ class InsumapError(Exception):
     ``message_key`` points to the Spanish text in ``messages_es.json`` (the code's
     default when omitted) and ``params`` fills its placeholders. ``detail`` is
     returned to the client as is, so it must never hold personal or health data.
-    The string form of the error is the message key, never the parameters.
+    ``headers`` are HTTP headers the api layer adds to the response (for
+    example ``Retry-After``). The string form of the error is the message key,
+    never the parameters.
     """
 
     def __init__(
@@ -55,9 +67,11 @@ class InsumapError(Exception):
         message_key: str | None = None,
         params: Mapping[str, object] | None = None,
         detail: Mapping[str, object] | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         self.code = code
         self.message_key = message_key or code.default_message_key
         self.params: Mapping[str, object] = MappingProxyType(dict(params or {}))
         self.detail: Mapping[str, object] = MappingProxyType(dict(detail or {}))
+        self.headers: Mapping[str, str] = MappingProxyType(dict(headers or {}))
         super().__init__(self.message_key)

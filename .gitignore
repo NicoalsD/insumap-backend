@@ -19,3 +19,6 @@ build/
 .vscode/
 .DS_Store
 *.log
+
+# Checkout de insumap-database que hace la CI para las pruebas de integración.
+.insumap-database/
