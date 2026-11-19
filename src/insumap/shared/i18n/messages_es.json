@@ -23,5 +23,6 @@
   "notification.email_verification.subject": "Confirma tu correo en Insumap",
   "notification.email_verification.external": "Confirma tu correo con este enlace en las próximas {lifetime} horas: {link} Si no creaste esta cuenta, ignora este mensaje.",
   "notification.password_changed.subject": "Tu contraseña de Insumap cambió",
-  "notification.password_changed.external": "La contraseña de tu cuenta de Insumap se restableció. Si no fuiste tú, comunícate con tu clínica."
+  "notification.password_changed.external": "La contraseña de tu cuenta de Insumap se restableció. Si no fuiste tú, comunícate con tu clínica.",
+  "reason.required": "Indica un motivo de 10 a 500 caracteres."
 }
