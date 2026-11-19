@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 
 from insumap.application.audit.ports import SecurityEventKind
-from insumap.application.security.events import SecuritySeverity
+from insumap.application.security.events import SecurityEventType, SecuritySeverity
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
 from tests.api.identity_support import IdentityApi
@@ -105,6 +105,8 @@ def test_a_broken_chain_reports_the_first_inconsistent_row(api: IdentityApi) -> 
         "is_valid": False,
         "first_inconsistent_row_id": str(BROKEN),
     }
+    recorded = [event.event_type for event in api.world.events.events]
+    assert SecurityEventType.AUDIT_CHAIN_BROKEN in recorded
 
 
 def test_clinic_admin_sees_only_its_own_security_events(api: IdentityApi) -> None:
