@@ -81,6 +81,23 @@ def test_activation_of_an_active_account_is_refused() -> None:
         )
 
 
+def test_deactivation_keeps_the_reason_and_closes_the_account() -> None:
+    reason = "Salida de la clínica del personal"
+
+    closed = patient().deactivated(reason=reason)
+
+    assert closed.status is AccountStatus.DEACTIVATED
+    assert closed.status_reason == reason
+    assert not closed.can_sign_in
+
+
+def test_a_deactivated_account_cannot_be_deactivated_again() -> None:
+    closed = patient().deactivated(reason="Salida de la clínica del personal")
+
+    with pytest.raises(InvalidStateTransitionError):
+        closed.deactivated(reason="Otra salida de la clínica")
+
+
 def test_challenge_is_usable_until_expired_exhausted_or_consumed() -> None:
     challenge = AuthChallenge(
         challenge_id=UUID(int=1),
