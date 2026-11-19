@@ -43,7 +43,11 @@ def test_declares_the_bearer_jwt_scheme(document: dict[str, Any]) -> None:
 
 
 def test_tags_are_in_spanish_with_descriptions(document: dict[str, Any]) -> None:
-    assert [tag["name"] for tag in document["tags"]] == ["Salud"]
+    assert [tag["name"] for tag in document["tags"]] == [
+        "Salud",
+        "Metadatos",
+        "Autenticación",
+    ]
     assert all(tag["description"] for tag in document["tags"])
 
 

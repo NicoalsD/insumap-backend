@@ -6,7 +6,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from insumap.api.correlation import REQUEST_ID_HEADER
-from insumap.api.middleware import BodySizeLimitMiddleware, RequestIdMiddleware
+from insumap.api.middleware import (
+    BodySizeLimitMiddleware,
+    NoStoreCacheMiddleware,
+    RequestIdMiddleware,
+)
 from insumap.api.openapi import InsumapApi
 from insumap.container import Container
 from insumap.shared.field_limits import FieldLimits
@@ -26,6 +30,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     # The last middleware added is the outermost. The request id wraps the size
     # limit, so a 413 carries X-Request-ID, and CORS wraps both, so browsers can
     # read every error.
+    app.add_middleware(NoStoreCacheMiddleware)
     app.add_middleware(
         BodySizeLimitMiddleware,
         responses=container.error_responses,
@@ -42,6 +47,7 @@ def create_app(container: Container | None = None) -> FastAPI:
             expose_headers=[REQUEST_ID_HEADER],
         )
     app.include_router(container.health_router.router)
+    app.include_router(container.meta_router.router)
     return app
 
 

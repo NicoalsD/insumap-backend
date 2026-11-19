@@ -6,6 +6,7 @@ from typing import final
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
 from insumap.api.routers.health import HealthRouter
+from insumap.api.routers.meta import MetaRouter
 from insumap.application.readiness import (
     AlwaysReadyProbe,
     CheckReadinessUseCase,
@@ -44,3 +45,4 @@ class Container:
         self.error_responses = ErrorResponseFactory(self.message_catalog)
         self.exception_handlers = ApiExceptionHandlers(self.error_responses)
         self.health_router = HealthRouter(self.check_readiness)
+        self.meta_router = MetaRouter()

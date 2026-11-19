@@ -1,4 +1,4 @@
-"""ASGI middleware of the API: correlation id and request body size limit."""
+"""ASGI middleware of the API: correlation id, body size limit and cache policy."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from insumap.api.correlation import REQUEST_ID_HEADER, REQUEST_ID_STATE_KEY
 from insumap.api.errors import ErrorResponseFactory
+from insumap.api.paths import API_V1_PREFIX
 from insumap.shared.errors import ErrorCode
 from insumap.shared.field_limits import FieldLimits
 from insumap.shared.request_context import bind_request_id, unbind_request_id
@@ -20,6 +21,8 @@ HTTP_SCOPE: Final = "http"
 HTTP_REQUEST_MESSAGE: Final = "http.request"
 HTTP_RESPONSE_START_MESSAGE: Final = "http.response.start"
 CONTENT_LENGTH_HEADER: Final = "content-length"
+CACHE_CONTROL_HEADER: Final = "cache-control"
+NO_STORE: Final = "no-store"
 EMPTY_BODY: Final = b""
 STATE_SCOPE_KEY: Final = "state"
 SAFE_REQUEST_ID: Final = re.compile(FieldLimits.REQUEST_ID_PATTERN)
@@ -141,3 +144,31 @@ class BodySizeLimitMiddleware:
             ErrorCode.PAYLOAD_TOO_LARGE, detail={"max_bytes": self._max_body_bytes}
         )
         await response(scope, receive, send)
+
+
+@final
+class NoStoreCacheMiddleware:
+    """Sends ``Cache-Control: no-store`` on every ``/api/v1`` response.
+
+    A route that sets its own ``Cache-Control`` (``GET /meta/field-limits``) keeps
+    it. Tokens, secrets and recovery codes therefore never land in a cache.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != HTTP_SCOPE or not str(scope.get("path", "")).startswith(
+            API_V1_PREFIX
+        ):
+            await self._app(scope, receive, send)
+            return
+
+        async def send_with_cache_policy(message: Message) -> None:
+            if message["type"] == HTTP_RESPONSE_START_MESSAGE:
+                headers = MutableHeaders(scope=message)
+                if CACHE_CONTROL_HEADER not in headers:
+                    headers[CACHE_CONTROL_HEADER] = NO_STORE
+            await send(message)
+
+        await self._app(scope, receive, send_with_cache_policy)

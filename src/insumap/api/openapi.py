@@ -28,6 +28,17 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
         "name": ApiTag.HEALTH,
         "description": "Estado de la API para monitores y orquestadores.",
     },
+    {
+        "name": ApiTag.META,
+        "description": "Metadatos públicos de la API, como los límites de los campos.",
+    },
+    {
+        "name": ApiTag.AUTH,
+        "description": (
+            "Inicio de sesión, segundo factor (TOTP), renovación y cierre de "
+            "sesión, y activación de cuentas con código de un solo uso."
+        ),
+    },
 ]
 
 
