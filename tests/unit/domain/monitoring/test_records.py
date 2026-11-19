@@ -1,5 +1,6 @@
 """Glucose values, append-only corrections and the lab unit conversion."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -123,12 +124,12 @@ def test_an_annulment_keeps_the_values_of_the_original() -> None:
     assert voided.value_mg_dl == Decimal(110)
 
 
-@pytest.mark.parametrize("lifecycle", [RecordLifecycle.CORRECTED, RecordLifecycle.VOIDED])
+@pytest.mark.parametrize(
+    "lifecycle", [RecordLifecycle.CORRECTED, RecordLifecycle.VOIDED]
+)
 def test_a_superseded_row_cannot_be_corrected_again(
     lifecycle: RecordLifecycle,
 ) -> None:
-    from dataclasses import replace
-
     old = replace(reading(), lifecycle=lifecycle)
 
     with pytest.raises(InvalidStateTransitionError):
