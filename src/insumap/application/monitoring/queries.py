@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import Final, final
 from uuid import UUID
 
+from insumap.application.access.ports import DataResource
 from insumap.application.common.actor import Actor
 from insumap.application.common.unit_of_work import (
     TransactionContext,
@@ -47,6 +48,21 @@ class ListableKind(StrEnum):
     ACTIVITIES = "activities"
     SYMPTOMS = "symptoms"
     LAB_RESULTS = "lab-results"
+
+    @property
+    def resource(self) -> DataResource:
+        """What the audit of the read records (``data_access_log.resource_type``)."""
+        return _RESOURCE_OF_KIND[self]
+
+
+_RESOURCE_OF_KIND: dict[ListableKind, DataResource] = {
+    ListableKind.READINGS: DataResource.GLUCOSE_READINGS,
+    ListableKind.INSULIN_DOSES: DataResource.INSULIN_DOSES,
+    ListableKind.MEALS: DataResource.MEALS,
+    ListableKind.ACTIVITIES: DataResource.PHYSICAL_ACTIVITIES,
+    ListableKind.SYMPTOMS: DataResource.SYMPTOMS,
+    ListableKind.LAB_RESULTS: DataResource.LAB_RESULTS,
+}
 
 
 @final
@@ -134,7 +150,10 @@ class ListRecordsUseCase:
                 patient_id = self._own_gate.enter(actor, permission).patient_id
             else:
                 patient_id = self._assigned_gate.enter(
-                    actor, PermissionCode.PATIENTS_READ_ASSIGNED, input.patient_id
+                    actor,
+                    PermissionCode.PATIENTS_READ_ASSIGNED,
+                    input.patient_id,
+                    input.kind.resource,
                 )
             rows: Sequence[ClinicalRecord]
             if input.kind is ListableKind.READINGS:
@@ -184,7 +203,10 @@ class GetTimelineUseCase:
                 ).patient_id
             else:
                 patient_id = self._assigned_gate.enter(
-                    actor, PermissionCode.PATIENTS_READ_ASSIGNED, input.patient_id
+                    actor,
+                    PermissionCode.PATIENTS_READ_ASSIGNED,
+                    input.patient_id,
+                    DataResource.PATIENT_TIMELINE,
                 )
             events = self._timeline.events(patient_id, query, input.event_types)
         page, next_cursor = paginate(events, input.request.limit, _event_key)
@@ -261,7 +283,10 @@ class ExportTimelineUseCase:
                 ).patient_id
             else:
                 patient_id = self._assigned_gate.enter(
-                    actor, PermissionCode.PATIENTS_READ_ASSIGNED, input.patient_id
+                    actor,
+                    PermissionCode.PATIENTS_READ_ASSIGNED,
+                    input.patient_id,
+                    DataResource.PATIENT_TIMELINE,
                 )
             events = self._timeline.effective_events(patient_id, query)
         if len(events) > FieldLimits.EXPORT_MAX_EVENTS:

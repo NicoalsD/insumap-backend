@@ -72,6 +72,37 @@ class FieldLimits:
     BIRTH_DATE_MIN_YEAR: ClassVar[int] = 1900
     """Earliest year accepted in a birth date input."""
 
+    # Decisions.
+
+    REASON_MIN_LENGTH: ClassVar[int] = 10
+    """Shortest reason that accompanies a suspension, withdrawal or correction."""
+
+    REASON_MAX_LENGTH: ClassVar[int] = 500
+    """Longest reason that accompanies a decision."""
+
+    # Clinics and staff (lengths of ``clinic.clinics`` and ``clinic.staff_profiles``).
+
+    CLINIC_NAME_MAX_LENGTH: ClassVar[int] = 120
+    """Maximum length of the name of a clinic."""
+
+    TAX_ID_MAX_LENGTH: ClassVar[int] = 32
+    """Maximum length of the tax identifier of a clinic."""
+
+    TIMEZONE_MAX_LENGTH: ClassVar[int] = 64
+    """Maximum length of an IANA time zone name."""
+
+    SITE_NAME_MAX_LENGTH: ClassVar[int] = 120
+    """Maximum length of the name of a site."""
+
+    STAFF_FULL_NAME_MAX_LENGTH: ClassVar[int] = 120
+    """Maximum length of the full name of a staff member."""
+
+    PROFESSIONAL_LICENSE_MAX_LENGTH: ClassVar[int] = 40
+    """Maximum length of a professional license number."""
+
+    SPECIALTY_MAX_LENGTH: ClassVar[int] = 80
+    """Maximum length of a medical specialty."""
+
     # Requests and pagination.
 
     MAX_REQUEST_BODY_BYTES: ClassVar[int] = 1024 * 1024
@@ -82,14 +113,6 @@ class FieldLimits:
 
     PAGE_SIZE_MAX: ClassVar[int] = 100
     """Largest page size a client may ask for."""
-
-    # Reasons (corrections, annulments).
-
-    REASON_MIN_LENGTH: ClassVar[int] = 10
-    """Minimum length of a reason (RF-70)."""
-
-    REASON_MAX_LENGTH: ClassVar[int] = 500
-    """Maximum length of a reason (RF-70)."""
 
     # Patient records (monitoring schema).
 
@@ -149,4 +172,5 @@ class FieldLimits:
     """Most days an AGP request may superimpose."""
 
     CURSOR_MAX_LENGTH: ClassVar[int] = 512
-    """Maximum length of the opaque pagination cursor."""
+    """Longest pagination cursor accepted (the records cursor carries a time and
+    an id); a longer one is invalid."""

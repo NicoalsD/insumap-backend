@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import cast, final
 from uuid import UUID
 
+from insumap.application.access.ports import DataResource
 from insumap.application.common.actor import Actor
 from insumap.application.common.ids import IdGenerator
 from insumap.application.common.unit_of_work import (
@@ -337,7 +338,10 @@ class RecordPatientLabResultUseCase:
         actor = input.actor
         with self._uow.begin(TransactionContext.for_actor(actor)) as uow:
             patient_id = self._gate.enter(
-                actor, PermissionCode.LABS_WRITE_ASSIGNED, input.patient_id
+                actor,
+                PermissionCode.LABS_WRITE_ASSIGNED,
+                input.patient_id,
+                DataResource.LAB_RESULTS,
             )
             if actor.clinic_id is None:
                 raise InsumapError(ErrorCode.FORBIDDEN)

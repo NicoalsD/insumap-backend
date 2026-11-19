@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from typing import final
 from uuid import UUID
 
-from insumap.application.access.ports import AccessPurpose, PatientRecordPort
+from insumap.application.access.ports import (
+    AccessPurpose,
+    DataResource,
+    PatientRecordPort,
+)
 from insumap.application.common.actor import Actor
 from insumap.application.identity.ports import ConsentRepositoryPort
 from insumap.application.security.rate_limit import RateLimitCheck
@@ -60,7 +64,13 @@ class AssignedPatientGate:
     def __init__(self, patients: PatientRecordPort) -> None:
         self._patients = patients
 
-    def enter(self, actor: Actor, permission: PermissionCode, patient_id: UUID) -> UUID:
+    def enter(
+        self,
+        actor: Actor,
+        permission: PermissionCode,
+        patient_id: UUID,
+        resource: DataResource,
+    ) -> UUID:
         actor.require(permission)
-        self._patients.read_record(actor, patient_id, AccessPurpose.CARE)
+        self._patients.read_record(actor, patient_id, AccessPurpose.CARE, resource)
         return patient_id

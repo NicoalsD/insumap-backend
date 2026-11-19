@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from insumap.api.openapi import InsumapApi
 from insumap.api.security import bearer_auth
+from insumap.api.tags import ApiTag
 from insumap.container import Container
 from insumap.main import create_app
 from tests.support.settings import make_settings
@@ -43,13 +44,7 @@ def test_declares_the_bearer_jwt_scheme(document: dict[str, Any]) -> None:
 
 
 def test_tags_are_in_spanish_with_descriptions(document: dict[str, Any]) -> None:
-    assert [tag["name"] for tag in document["tags"]] == [
-        "Salud",
-        "Metadatos",
-        "Autenticación",
-        "Registros del paciente",
-        "Métricas glucémicas",
-    ]
+    assert [tag["name"] for tag in document["tags"]] == [tag.value for tag in ApiTag]
     assert all(tag["description"] for tag in document["tags"])
 
 

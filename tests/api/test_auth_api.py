@@ -548,7 +548,7 @@ def test_every_auth_route_declares_its_access_and_is_documented_in_spanish() -> 
         if path.startswith("/api/v1/auth")
         for method, operation in item.items()
     ]
-    assert len(operations) == 10
+    assert len(operations) == 15
     for path, method, operation in operations:
         assert operation["x-access"], (path, method)
         assert operation["operationId"]
@@ -560,6 +560,9 @@ def test_every_auth_route_declares_its_access_and_is_documented_in_spanish() -> 
         "/api/v1/auth/mfa/verify",
         "/api/v1/auth/activation/verify",
         "/api/v1/auth/activation/complete",
+        "/api/v1/auth/password-reset/request",
+        "/api/v1/auth/password-reset/complete",
+        "/api/v1/auth/email-verification/confirm",
     }
     for path, _, operation in operations:
         if path not in public:

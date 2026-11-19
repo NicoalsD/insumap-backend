@@ -10,6 +10,7 @@ from typing import final
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from insumap.application.access.ports import DataResource
 from insumap.application.common.actor import Actor
 from insumap.application.common.unit_of_work import (
     TransactionContext,
@@ -171,7 +172,9 @@ class _PatientScope:
     def patient_id(self, actor: Actor, patient_id: UUID | None) -> UUID:
         if patient_id is None:
             return self._own_gate.enter(actor, self._own).patient_id
-        return self._assigned_gate.enter(actor, self._assigned, patient_id)
+        return self._assigned_gate.enter(
+            actor, self._assigned, patient_id, DataResource.GLYCEMIC_METRICS
+        )
 
 
 def _targets(ports: TargetProfilePort, patient_id: UUID) -> PatientTargets:

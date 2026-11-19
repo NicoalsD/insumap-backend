@@ -11,12 +11,18 @@ from insumap.api.routers.auth_schemas import (
     TOKEN_TYPE,
     AccessTokenResponse,
     AuthenticationResponse,
+    ChangePasswordRequest,
     CompleteActivationRequest,
+    CompletePasswordResetRequest,
+    ConfirmEmailVerificationRequest,
     ConfirmMfaEnrollmentRequest,
     CurrentUserResponse,
     LoginRequest,
     MfaEnrollmentResponse,
     RecoveryCodesAuthenticationResponse,
+    RecoveryCodesResponse,
+    RegenerateMfaRecoveryCodesRequest,
+    RequestPasswordResetRequest,
     VerifyActivationCodeRequest,
     VerifyActivationCodeResponse,
     VerifyMfaChallengeRequest,
@@ -27,6 +33,7 @@ from insumap.api.security import (
     client_ip,
 )
 from insumap.api.tags import ApiTag
+from insumap.application.commands.base import CommandBus
 from insumap.application.common.actor import Actor
 from insumap.application.identity.activation import (
     CompleteActivationInput,
@@ -35,9 +42,14 @@ from insumap.application.identity.activation import (
     VerifyActivationCodeInput,
     VerifyActivationCodeUseCase,
 )
+from insumap.application.identity.change_password import ChangePasswordCommand
 from insumap.application.identity.current_user import (
     GetCurrentUserInput,
     GetCurrentUserUseCase,
+)
+from insumap.application.identity.email_verification import (
+    ConfirmEmailVerificationInput,
+    ConfirmEmailVerificationUseCase,
 )
 from insumap.application.identity.login import LoginInput, LoginUseCase
 from insumap.application.identity.mfa import (
@@ -47,6 +59,15 @@ from insumap.application.identity.mfa import (
     StartMfaEnrollmentUseCase,
     VerifyMfaChallengeInput,
     VerifyMfaChallengeUseCase,
+)
+from insumap.application.identity.password_reset import (
+    CompletePasswordResetInput,
+    CompletePasswordResetUseCase,
+    RequestPasswordResetInput,
+    RequestPasswordResetUseCase,
+)
+from insumap.application.identity.recovery_codes import (
+    RegenerateMfaRecoveryCodesCommand,
 )
 from insumap.application.identity.session import AuthenticationResult, SessionTokens
 from insumap.application.identity.sessions import (
@@ -76,11 +97,15 @@ ERROR_DESCRIPTIONS: Final[dict[int, str]] = {
         "`FORBIDDEN`, `ACCOUNT_NOT_ACTIVE`, `CLINIC_SUSPENDED`, `MFA_REQUIRED` o "
         "`CONSENT_REQUIRED`."
     ),
+    HTTPStatus.NOT_FOUND: (
+        "`NOT_FOUND`: el recurso no existe, es de otra clínica o no está asignado."
+    ),
     HTTPStatus.CONFLICT: (
-        "`EMAIL_UNAVAILABLE`, `CONSENT_VERSION_OUTDATED` o `INVALID_STATE_TRANSITION`."
+        "`CONFLICT`, `EMAIL_UNAVAILABLE`, `CONSENT_VERSION_OUTDATED` o "
+        "`INVALID_STATE_TRANSITION`."
     ),
     HTTPStatus.GONE: "`INVITATION_INVALID`: el código o el token no es válido.",
-    HTTPStatus.UNPROCESSABLE_ENTITY: "`VALIDATION_ERROR`.",
+    HTTPStatus.UNPROCESSABLE_ENTITY: "`VALIDATION_ERROR` o `REASON_REQUIRED`.",
     HTTPStatus.TOO_MANY_REQUESTS: "`RATE_LIMITED`, con el encabezado `Retry-After`.",
 }
 
@@ -104,6 +129,7 @@ class AuthRouter:
     def __init__(  # noqa: PLR0913 - one use case per endpoint
         self,
         *,
+        commands: CommandBus,
         clock: Clock,
         cookie: RefreshCookie,
         login: LoginUseCase,
@@ -116,11 +142,15 @@ class AuthRouter:
         logout_all: LogoutAllUseCase,
         verify_activation: VerifyActivationCodeUseCase,
         complete_activation: CompleteActivationUseCase,
+        request_reset: RequestPasswordResetUseCase,
+        complete_reset: CompletePasswordResetUseCase,
+        confirm_email: ConfirmEmailVerificationUseCase,
         session_actor: Any,
         enrollment_actor: Any,
         any_actor: Any,
         csrf_guard: Any,
     ) -> None:
+        self._commands = commands
         self._clock = clock
         self._cookie = cookie
         self._login = login
@@ -133,6 +163,9 @@ class AuthRouter:
         self._logout_all = logout_all
         self._verify_activation = verify_activation
         self._complete_activation = complete_activation
+        self._request_reset = request_reset
+        self._complete_reset = complete_reset
+        self._confirm_email = confirm_email
         self._session_actor = session_actor
         self._enrollment_actor = enrollment_actor
         self._any_actor = any_actor
@@ -170,6 +203,19 @@ class AuthRouter:
         ) -> RecoveryCodesAuthenticationResponse:
             return self._confirm_enrollment_endpoint(body, request, response, actor)
 
+        def regenerate_mfa_recovery_codes(
+            body: RegenerateMfaRecoveryCodesRequest,
+            actor: Annotated[Actor, session_actor],
+        ) -> RecoveryCodesResponse:
+            return self._regenerate_recovery_codes_endpoint(body, actor)
+
+        def change_password(
+            body: ChangePasswordRequest,
+            response: Response,
+            actor: Annotated[Actor, session_actor],
+        ) -> AuthenticationResponse:
+            return self._change_password_endpoint(body, response, actor)
+
         def get_current_user(actor: Annotated[Actor, any_actor]) -> CurrentUserResponse:
             return self._current_user_endpoint(actor)
 
@@ -194,6 +240,21 @@ class AuthRouter:
             actor: Annotated[Actor, session_actor],
         ) -> None:
             self._logout_all_endpoint(response, actor)
+
+        def request_password_reset(
+            body: RequestPasswordResetRequest, request: Request
+        ) -> Response:
+            return self._request_reset_endpoint(body, request)
+
+        def complete_password_reset(
+            body: CompletePasswordResetRequest, request: Request
+        ) -> None:
+            self._complete_reset_endpoint(body, request)
+
+        def confirm_email_verification(
+            body: ConfirmEmailVerificationRequest, request: Request
+        ) -> None:
+            self._confirm_email_endpoint(body, request)
 
         def verify_activation_code(
             body: VerifyActivationCodeRequest, request: Request
@@ -284,6 +345,46 @@ class AuthRouter:
             openapi_extra={ACCESS_EXTENSION: ENROLLMENT_SELF},
         )
         add(
+            "/mfa/recovery-codes",
+            regenerate_mfa_recovery_codes,
+            methods=["POST"],
+            response_model=RecoveryCodesResponse,
+            operation_id="regenerate_mfa_recovery_codes",
+            summary="Regenerar los códigos de respaldo del segundo factor",
+            description=(
+                "Exige una sesión completa del personal y un TOTP vigente. Revoca los "
+                "códigos anteriores y devuelve los nuevos una sola vez. Queda "
+                "auditado en `audit.audit_log` (P09)."
+            ),
+            responses=error_responses(
+                HTTPStatus.UNAUTHORIZED,
+                HTTPStatus.FORBIDDEN,
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+            ),
+            openapi_extra={ACCESS_EXTENSION: SESSION_SELF},
+        )
+        add(
+            "/password/change",
+            change_password,
+            methods=["POST"],
+            response_model=AuthenticationResponse,
+            operation_id="change_password",
+            summary="Cambiar la contraseña de la cuenta",
+            description=(
+                "Verifica la contraseña actual y aplica la política de contraseñas "
+                "(longitud, contraseñas comunes, datos personales e historial). "
+                "Sube la versión del token y revoca todas las sesiones; este "
+                "dispositivo recibe una sesión nueva con su cookie de refresh. Queda "
+                "auditado en `audit.audit_log` (P09)."
+            ),
+            responses=error_responses(
+                HTTPStatus.UNAUTHORIZED,
+                HTTPStatus.FORBIDDEN,
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+            ),
+            openapi_extra={ACCESS_EXTENSION: SESSION_SELF},
+        )
+        add(
             "/current-user",
             get_current_user,
             methods=["GET"],
@@ -348,6 +449,54 @@ class AuthRouter:
             ),
             responses=error_responses(HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN),
             openapi_extra={ACCESS_EXTENSION: SESSION_SELF},
+        )
+        add(
+            "/password-reset/request",
+            request_password_reset,
+            methods=["POST"],
+            status_code=HTTPStatus.ACCEPTED,
+            response_class=Response,
+            operation_id="request_password_reset",
+            summary="Pedir el enlace para restablecer la contraseña",
+            description=(
+                "Responde siempre `202` sin datos, exista o no el correo. Si la cuenta "
+                "existe, está activa y su correo está verificado, se envía un enlace "
+                "de un solo uso (30 minutos) con el token en el fragmento `#token=`. "
+                "El exceso de tasa por IP o por correo se ignora y también responde "
+                "`202`."
+            ),
+            responses=error_responses(HTTPStatus.UNPROCESSABLE_ENTITY),
+            openapi_extra={ACCESS_EXTENSION: PUBLIC},
+        )
+        add(
+            "/password-reset/complete",
+            complete_password_reset,
+            methods=["POST"],
+            status_code=HTTPStatus.NO_CONTENT,
+            operation_id="complete_password_reset",
+            summary="Fijar la contraseña nueva con el enlace recibido",
+            description=(
+                "Consume el token de un solo uso y aplica la política de "
+                "contraseñas. Sube la versión del token y revoca todas las sesiones; "
+                "la persona inicia sesión de nuevo. Un enlace usado, vencido o "
+                "inexistente responde `410 INVITATION_INVALID`."
+            ),
+            responses=error_responses(HTTPStatus.GONE, HTTPStatus.UNPROCESSABLE_ENTITY),
+            openapi_extra={ACCESS_EXTENSION: PUBLIC},
+        )
+        add(
+            "/email-verification/confirm",
+            confirm_email_verification,
+            methods=["POST"],
+            status_code=HTTPStatus.NO_CONTENT,
+            operation_id="confirm_email_verification",
+            summary="Confirmar el correo con el enlace recibido",
+            description=(
+                "Consume el token de un solo uso (24 horas) y deja el correo "
+                "verificado. Cualquier fallo responde `410 INVITATION_INVALID`."
+            ),
+            responses=error_responses(HTTPStatus.GONE, HTTPStatus.UNPROCESSABLE_ENTITY),
+            openapi_extra={ACCESS_EXTENSION: PUBLIC},
         )
         add(
             "/activation/verify",
@@ -437,6 +586,26 @@ class AuthRouter:
             **base.model_dump(), recovery_codes=list(result.recovery_codes)
         )
 
+    def _regenerate_recovery_codes_endpoint(
+        self, body: RegenerateMfaRecoveryCodesRequest, actor: Actor
+    ) -> RecoveryCodesResponse:
+        result = self._commands.dispatch(
+            RegenerateMfaRecoveryCodesCommand(actor=actor, code=body.code)
+        )
+        return RecoveryCodesResponse(recovery_codes=list(result.recovery_codes))
+
+    def _change_password_endpoint(
+        self, body: ChangePasswordRequest, response: Response, actor: Actor
+    ) -> AuthenticationResponse:
+        result = self._commands.dispatch(
+            ChangePasswordCommand(
+                actor=actor,
+                current_password=body.current_password,
+                new_password=body.new_password,
+            )
+        )
+        return self._authentication(result.authentication, response)
+
     def _current_user_endpoint(self, actor: Actor) -> CurrentUserResponse:
         return CurrentUserResponse.from_result(
             self._current_user.execute(GetCurrentUserInput(actor=actor))
@@ -464,6 +633,34 @@ class AuthRouter:
     def _logout_all_endpoint(self, response: Response, actor: Actor) -> None:
         self._logout_all.execute(LogoutAllInput(actor=actor))
         self._cookie.clear(response)
+
+    def _request_reset_endpoint(
+        self, body: RequestPasswordResetRequest, request: Request
+    ) -> Response:
+        self._request_reset.execute(
+            RequestPasswordResetInput(email=body.email, client_ip=client_ip(request))
+        )
+        return Response(status_code=HTTPStatus.ACCEPTED)
+
+    def _complete_reset_endpoint(
+        self, body: CompletePasswordResetRequest, request: Request
+    ) -> None:
+        self._complete_reset.execute(
+            CompletePasswordResetInput(
+                token=body.token,
+                new_password=body.new_password,
+                client_ip=client_ip(request),
+            )
+        )
+
+    def _confirm_email_endpoint(
+        self, body: ConfirmEmailVerificationRequest, request: Request
+    ) -> None:
+        self._confirm_email.execute(
+            ConfirmEmailVerificationInput(
+                token=body.token, client_ip=client_ip(request)
+            )
+        )
 
     def _verify_activation_endpoint(
         self, body: VerifyActivationCodeRequest, request: Request

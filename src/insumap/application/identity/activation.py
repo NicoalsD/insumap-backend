@@ -16,6 +16,7 @@ from uuid import UUID
 from insumap.application.common.ids import IdGenerator
 from insumap.application.common.unit_of_work import TransactionContext, UnitOfWorkPort
 from insumap.application.identity.challenges import ChallengePolicy, ChallengeService
+from insumap.application.identity.email_verification import EmailVerificationIssuer
 from insumap.application.identity.passwords import NewPasswordService
 from insumap.application.identity.ports import (
     ActivationRepositoryPort,
@@ -224,7 +225,9 @@ class CompleteActivationUseCase:
         rate_limit: RateLimitCheck,
         ids: IdGenerator,
         clock: Clock,
+        email_verification: EmailVerificationIssuer | None = None,
     ) -> None:
+        self._email_verification = email_verification
         self._uow = uow
         self._challenges = challenges
         self._activations = activations
@@ -322,8 +325,15 @@ class CompleteActivationUseCase:
                     )
                 ]
             )
+            verification = (
+                None
+                if self._email_verification is None
+                else self._email_verification.issue(activated, email.original)
+            )
             result = self._sessions.open_full_session(activated)
             uow.commit()
+        if verification is not None:
+            verification.send()
         return result
 
 

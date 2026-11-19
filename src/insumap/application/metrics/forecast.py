@@ -23,6 +23,7 @@ from typing import final
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from insumap.application.access.ports import DataResource
 from insumap.application.common.actor import Actor
 from insumap.application.common.unit_of_work import (
     TransactionContext,
@@ -167,6 +168,7 @@ class GetForecastUseCase:
                     actor,
                     PermissionCode.AI_FORECASTS_READ_ASSIGNED,
                     input.patient_id,
+                    DataResource.AI_OUTPUTS,
                 )
             found = self._targets.for_patient(patient_id)
             if found is None:

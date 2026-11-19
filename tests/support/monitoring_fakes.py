@@ -10,6 +10,7 @@ from uuid import UUID
 
 from insumap.application.access.ports import (
     AccessPurpose,
+    DataResource,
     PatientRecord,
     PatientRecordPort,
 )
@@ -174,12 +175,17 @@ class FakePatientRecords(PatientRecordPort):
         self.reads: list[tuple[UUID, UUID, AccessPurpose]] = []
 
     def read_record(
-        self, actor: Actor, patient_id: UUID, purpose: AccessPurpose
+        self,
+        actor: Actor,
+        patient_id: UUID,
+        purpose: AccessPurpose,
+        resource: DataResource,
     ) -> PatientRecord:
+        del resource
         self.reads.append((actor.user_id, patient_id, purpose))
         if (actor.user_id, patient_id) not in self.assigned:
             raise InsumapError(ErrorCode.NOT_FOUND)
-        return PatientRecord(patient_id=patient_id, glucose_mg_dl=())
+        return PatientRecord(patient_id=patient_id, clinic_id=CLINIC_ID)
 
 
 def _lifecycle_of(

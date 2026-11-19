@@ -40,19 +40,92 @@ OPENAPI_TAGS: Final[list[dict[str, Any]]] = [
         ),
     },
     {
+        "name": ApiTag.PUBLIC,
+        "description": (
+            "Contenido público, como la versión vigente del aviso de privacidad."
+        ),
+    },
+    {
+        "name": ApiTag.CLINICS,
+        "description": (
+            "Clínicas y sedes: alta, estado, administradores y datos propios."
+        ),
+    },
+    {
+        "name": ApiTag.USERS,
+        "description": "Personal de la clínica: alta, roles, sedes, bloqueo y MFA.",
+    },
+    {
+        "name": ApiTag.PATIENTS,
+        "description": (
+            "Pacientes: vista administrativa, estado de la cuenta y expediente."
+        ),
+    },
+    {
+        "name": ApiTag.IMPORTS,
+        "description": (
+            "Importación de pacientes (FHIR R4 o CSV) y credenciales de un solo uso."
+        ),
+    },
+    {
+        "name": ApiTag.CARE_TEAM,
+        "description": (
+            "Médicos asignados a cada paciente: asignar, principal, "
+            "reasignar y retirar."
+        ),
+    },
+    {
         "name": ApiTag.RECORDS,
         "description": (
-            "Glucosa, insulina, comidas, actividad, síntomas y laboratorio del "
-            "paciente, con correcciones que no borran, línea de tiempo y "
-            "exportación. El médico lee los de sus pacientes asignados."
+            "Glucosa, insulina, comidas, actividad, síntomas, laboratorios "
+            "y línea de tiempo."
+        ),
+    },
+    {
+        "name": ApiTag.TREATMENT,
+        "description": (
+            "Plantillas de protocolo, planes de tratamiento, metas y recordatorios."
         ),
     },
     {
         "name": ApiTag.METRICS,
         "description": (
-            "TIR, TBR, TAR, GMI, CV y AGP con las metas del perfil asignado, y "
-            "pronóstico de glucosa con respaldo cuando la IA no responde."
+            "Métricas glucémicas (TIR, TBR, TAR, CV, GMI, AGP) y pronóstico."
         ),
+    },
+    {
+        "name": ApiTag.ALERTS,
+        "description": "Reglas de alerta y alertas del paciente con su ciclo de vida.",
+    },
+    {
+        "name": ApiTag.NOTIFICATIONS,
+        "description": "Notificaciones in-app, Web Push y preferencias.",
+    },
+    {
+        "name": ApiTag.AI,
+        "description": (
+            "Sugerencias de IA que el médico aprueba, modifica o rechaza con motivo."
+        ),
+    },
+    {
+        "name": ApiTag.DASHBOARD,
+        "description": "Triage del médico, notas clínicas y KPIs de la clínica.",
+    },
+    {
+        "name": ApiTag.REPORTS,
+        "description": "Reportes del paciente y de la clínica en PDF o HTML.",
+    },
+    {
+        "name": ApiTag.MESSAGING,
+        "description": "Mensajes entre el paciente y su equipo, y seguimientos.",
+    },
+    {
+        "name": ApiTag.AUDIT,
+        "description": "Auditoría de acciones y accesos, y eventos de seguridad.",
+    },
+    {
+        "name": ApiTag.CONSENT,
+        "description": "Consentimiento versionado y solicitudes de privacidad.",
     },
 ]
 

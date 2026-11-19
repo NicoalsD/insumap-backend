@@ -77,6 +77,46 @@ class ConfirmMfaEnrollmentRequest(StrictRequest):
     )
 
 
+class RegenerateMfaRecoveryCodesRequest(StrictRequest):
+    """TOTP vigente que prueba que quien pide los códigos es el titular."""
+
+    code: str = Field(
+        pattern=rf"^\d{{{FieldLimits.TOTP_CODE_LENGTH}}}$",
+        description="TOTP vigente de 6 dígitos.",
+        examples=["123456"],
+    )
+
+
+class ChangePasswordRequest(StrictRequest):
+    """Contraseña actual y contraseña nueva de la cuenta de la sesión."""
+
+    current_password: PasswordInput
+    new_password: PasswordInput
+
+
+class RequestPasswordResetRequest(StrictRequest):
+    """Correo de la cuenta que olvidó su contraseña."""
+
+    email: EmailInput
+
+
+class CompletePasswordResetRequest(StrictRequest):
+    """Token del enlace recibido por correo y contraseña nueva."""
+
+    token: OpaqueTokenInput = Field(
+        description="Token de un solo uso del fragmento `#token=` del enlace."
+    )
+    new_password: PasswordInput
+
+
+class ConfirmEmailVerificationRequest(StrictRequest):
+    """Token del enlace de verificación de correo."""
+
+    token: OpaqueTokenInput = Field(
+        description="Token de un solo uso del fragmento `#token=` del enlace."
+    )
+
+
 class VerifyActivationCodeRequest(StrictRequest):
     """Código de activación y fecha de nacimiento del paciente."""
 
@@ -164,6 +204,17 @@ class RecoveryCodesAuthenticationResponse(AuthenticationResponse):
 
     recovery_codes: list[str] = Field(
         description="10 códigos `XXXXX-XXXXX` de un solo uso. No se vuelven a mostrar."
+    )
+
+
+class RecoveryCodesResponse(BaseModel):
+    """Códigos de respaldo nuevos, mostrados una sola vez."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    recovery_codes: list[str] = Field(
+        description="Códigos `XXXXX-XXXXX` de un solo uso. Los anteriores quedan "
+        "invalidados y estos no se vuelven a mostrar."
     )
 
 
