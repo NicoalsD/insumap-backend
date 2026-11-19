@@ -140,7 +140,17 @@ def test_forecast_without_the_model_is_a_fallback_not_an_error(
     body = response.json()
     assert body["is_fallback"] is True
     assert body["points"] == []
-    assert body["fallback_reason"] is not None
+    assert body["fallback_reason"] == "AI_ERROR"
+
+
+def test_forecast_without_data_says_insufficient_data(api: IdentityApi) -> None:
+    api.records.series.points_by_patient.clear()
+
+    response = api.client.get(OWN_FORECAST, headers=patient(api))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["is_fallback"] is True
+    assert response.json()["fallback_reason"] == "INSUFFICIENT_DATA"
 
 
 def test_doctor_reads_the_forecast_of_an_assigned_patient(api: IdentityApi) -> None:
