@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     rate_limit_reset_request_per_account_per_hour: int = Field(default=3, ge=1)
     rate_limit_reset_complete_per_ip_per_minute: int = Field(default=10, ge=1)
     web_app_base_url: str = Field(default="http://localhost:5173", min_length=1)
+    # Patient credentials (docs/Seguridad.md 3.2 and 3.3; docs/API.md section 5).
+    activation_code_ttl_hours: int = Field(default=168, ge=1)
+    rate_limit_credential_issue_per_clinic_per_hour: int = Field(default=300, ge=1)
+    rate_limit_credential_batch_per_clinic_per_hour: int = Field(default=10, ge=1)
 
     # Web Push endpoints the browser may register (Seguridad.md 13.4). Hosts
     # only, no scheme; ``*.`` matches any subdomain. Not a secret.

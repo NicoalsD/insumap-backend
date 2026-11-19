@@ -10,9 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
+from typing import Final
 from uuid import UUID
 
-from insumap.domain.identity.errors import InvitationInvalidError
+from insumap.domain.identity.errors import (
+    InvalidStateTransitionError,
+    InvitationInvalidError,
+)
 
 
 class InvitationStatus(StrEnum):
@@ -34,6 +38,30 @@ class InvitationPurpose(StrEnum):
     PASSWORD_RESET = "PASSWORD_RESET"  # noqa: S105 - enum value, not a secret
 
 
+class InvitationChannel(StrEnum):
+    """How the code reaches the holder: printed by the clinic or sent by email."""
+
+    PRINT = "PRINT"
+    EMAIL = "EMAIL"
+
+
+class DeliveryStatus(StrEnum):
+    """Result of the email delivery (``iam.credential_invitations.delivery_status``)."""
+
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    PENDING = "PENDING"
+    SENT = "SENT"
+    FAILED = "FAILED"
+
+
+INVITATION_MACHINE: Final = "credential_invitation"
+
+OPEN_STATUSES: frozenset[InvitationStatus] = frozenset(
+    {InvitationStatus.PENDING, InvitationStatus.VERIFIED}
+)
+"""Statuses that still count as one open invitation per account and purpose."""
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CredentialInvitation:
     """An invitation found by the keyed hash of its code."""
@@ -48,6 +76,7 @@ class CredentialInvitation:
     failed_attempts: int
     verified_at: datetime | None = None
     used_at: datetime | None = None
+    revoked_at: datetime | None = None
 
     def verify_birth_date(
         self, *, matches: bool, now: datetime, max_attempts: int
@@ -77,6 +106,23 @@ class CredentialInvitation:
         """Step 2 of the activation: a verified invitation is consumed."""
         self._ensure(InvitationStatus.VERIFIED, now)
         return replace(self, status=InvitationStatus.USED, used_at=now)
+
+    def revoke(self, *, now: datetime) -> CredentialInvitation:
+        """Withdraw an open invitation (``-> REVOKED``), also when it was replaced.
+
+        Only ``PENDING`` and ``VERIFIED`` invitations can be revoked; any other
+        status is refused with ``INVALID_STATE_TRANSITION``.
+        """
+        if self.status not in OPEN_STATUSES:
+            raise InvalidStateTransitionError(
+                INVITATION_MACHINE, self.status.value, "revoke"
+            )
+        return replace(self, status=InvitationStatus.REVOKED, revoked_at=now)
+
+    @property
+    def is_open(self) -> bool:
+        """``True`` while the code can still be used or revoked."""
+        return self.status in OPEN_STATUSES
 
     @property
     def is_locked(self) -> bool:
