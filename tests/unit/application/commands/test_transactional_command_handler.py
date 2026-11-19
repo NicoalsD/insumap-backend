@@ -92,3 +92,56 @@ def test_events_are_published_only_after_the_commit() -> None:
 def test_collecting_outside_a_command_is_a_programming_error() -> None:
     with pytest.raises(RuntimeError, match="no command is running"):
         CurrentUnitOfWork().collect([])
+
+
+class AnnouncingHandler(CommandHandler[RenameThingCommand, UUID]):
+    def __init__(self, current: CurrentUnitOfWork, sent: list[str]) -> None:
+        self._current = current
+        self._sent = sent
+
+    @override
+    def handle(self, command: RenameThingCommand) -> UUID:
+        self._current.after_commit(lambda: self._sent.append("after"))
+        self._current.after_commit(lambda: 1 / 0)
+        self._current.after_commit(lambda: self._sent.append("still runs"))
+        return ENTITY_ID
+
+
+def test_after_commit_actions_run_after_the_commit_and_a_failure_does_not_stop_them(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    uow, current = FakeUnitOfWorkPort(), CurrentUnitOfWork()
+    sent: list[str] = []
+
+    with caplog.at_level("ERROR"):
+        result = TransactionalCommandHandler(
+            AnnouncingHandler(current, sent), uow, current
+        ).handle(command())
+
+    assert result == ENTITY_ID
+    assert sent == ["after", "still runs"]
+    assert uow.commits == 1
+    assert "ZeroDivisionError" in str(caplog.records[0].__dict__)
+
+
+def test_after_commit_actions_never_run_when_the_command_fails() -> None:
+    uow, current = FakeUnitOfWorkPort(), CurrentUnitOfWork()
+    sent: list[str] = []
+
+    class Failing(AnnouncingHandler):
+        @override
+        def handle(self, command: RenameThingCommand) -> UUID:
+            super().handle(command)
+            raise RuntimeError("late failure")
+
+    with pytest.raises(RuntimeError):
+        TransactionalCommandHandler(Failing(current, sent), uow, current).handle(
+            command()
+        )
+
+    assert sent == []
+
+
+def test_registering_an_after_commit_action_outside_a_command_is_an_error() -> None:
+    with pytest.raises(RuntimeError, match="no command is running"):
+        CurrentUnitOfWork().after_commit(lambda: None)
