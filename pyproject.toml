@@ -41,7 +41,7 @@ select = ["E", "W", "F", "I", "B", "UP", "N", "PL", "S", "SIM", "RUF"]
 
 [tool.ruff.lint.pylint]
 # Use cases and adapters receive each port explicitly through the constructor.
-max-args = 10
+max-args = 12
 
 [tool.ruff.lint.per-file-ignores]
 # Asserts and magic numbers are idiomatic in tests; PLR2004 stays active in src/.
