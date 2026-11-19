@@ -340,6 +340,39 @@ class FieldLimits:
     AI_HASH_LENGTH: ClassVar[int] = 64
     """SHA-256 in hexadecimal (``ai.*.input_hash`` is ``char(64)``)."""
 
+    AI_WINDOW_DAYS_MIN: ClassVar[int] = 7
+    """Shortest window of a risk or summary, in days (Contrato-IA 8.2)."""
+
+    AI_WINDOW_DAYS_MAX: ClassVar[int] = 90
+    """Longest window of a risk or summary, in days (Contrato-IA 8.2)."""
+
+    AI_WINDOW_DAYS_DEFAULT: ClassVar[int] = 14
+    """Default window of the risk and of the clinical summary (API.md 8.10)."""
+
+    AI_ASSISTANT_MESSAGE_MAX_LENGTH: ClassVar[int] = 1000
+    """Longest patient message and reply (``ai.assistant_messages.content``)."""
+
+    AI_ASSISTANT_HISTORY_TURNS_MAX: ClassVar[int] = 10
+    """Turns of the conversation sent with a new message (Contrato-IA 8.6)."""
+
+    AI_CONTEXT_DOCS_MAX: ClassVar[int] = 8
+    """Approved fragments sent as context to the assistant (Contrato-IA 3.3)."""
+
+    AI_CONTEXT_DOC_CHARS_MAX: ClassVar[int] = 4000
+    """Longest text of one context fragment (Contrato-IA 3.3)."""
+
+    AI_KNOWLEDGE_TITLE_MAX_LENGTH: ClassVar[int] = 160
+    """Title of an approved document (``ai.knowledge_documents.title``)."""
+
+    AI_SUMMARY_TEXT_MAX_LENGTH: ClassVar[int] = 4000
+    """Longest clinical summary text the backend accepts from the service."""
+
+    AI_EVALUATION_USE_CASE_LENGTH: ClassVar[int] = 3
+    """Length of an ``IA1`` to ``IA7`` use case code (``ai.ai_evaluations``)."""
+
+    AI_MODEL_VERSION_MAX_LENGTH: ClassVar[int] = 80
+    """Longest model version (``ai.*.model_version`` is ``varchar(80)``)."""
+
     # Recommendations (ai.recommendations.suggestion, a doctor's modified proposal).
 
     INSULIN_UNITS_MAX: ClassVar[int] = 500
