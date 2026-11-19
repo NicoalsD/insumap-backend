@@ -286,3 +286,55 @@ def test_doctor_cannot_schedule_for_an_unassigned_patient(
 
     assert listed.status_code == 200, listed.text
     assert listed.json()["items"] == []
+
+
+def _foreign_profile(migrated_url: str) -> UUID:
+    """A profile of another clinic, inserted as superuser (RLS does not apply)."""
+    with psycopg.connect(migrated_url) as conn:
+        clinic = conn.execute(
+            "INSERT INTO clinic.clinics (name, tax_id, timezone, is_demo)"
+            " VALUES ('Clínica ajena', '900000001-1', 'America/Bogota', false)"
+            " RETURNING id"
+        ).fetchone()
+        assert clinic is not None
+        row = conn.execute(
+            "INSERT INTO care.target_profiles (clinic_id, code, label, population,"
+            " version, status, is_default, range_low_mg_dl, range_high_mg_dl,"
+            " very_low_mg_dl, very_high_mg_dl, tir_min_pct, tbr_l1_max_pct,"
+            " tbr_l2_max_pct, tar_l1_max_pct, tar_l2_max_pct, cv_max_pct,"
+            " min_data_sufficiency_pct, min_days, max_gap_minutes,"
+            " hypo_episode_min_minutes, min_readings_for_cv,"
+            " min_readings_for_cv_smbg, night_start, night_end, source_reference)"
+            " VALUES (%s, 'FOREIGN_TARGETS', 'Metas ajenas', 'ADULT', 1, 'ACTIVE',"
+            " false, 70, 180, 54, 250, 70, 4, 1, 25, 5, 36, 70, 14, 15, 15, 100, 3,"
+            " '00:00', '06:00', 'Fuente ajena')"
+            " RETURNING id",
+            (clinic[0],),
+        ).fetchone()
+    assert row is not None
+    value = row[0]
+    assert isinstance(value, UUID)
+    return value
+
+
+def test_another_clinics_profile_is_invisible_to_this_clinic(
+    api: TestClient,
+    staff: dict[str, dict[str, str]],
+    assigned: UUID,
+    migrated_url: str,
+) -> None:
+    foreign = _foreign_profile(migrated_url)
+
+    detail = api.get(f"{PROFILES}/{foreign}", headers=staff["admin"])
+    listed = api.get(PROFILES, headers=staff["admin"])
+    assigned_response = api.put(
+        f"/api/v1/patients/{assigned}/target-profile",
+        headers=staff["doctor"],
+        json={"target_profile_id": str(foreign)},
+    )
+
+    assert detail.status_code == 404
+    assert detail.json()["error"]["code"] == "NOT_FOUND"
+    assert str(foreign) not in [i["id"] for i in listed.json()["items"]]
+    assert assigned_response.status_code == 404
+    assert assigned_response.json()["error"]["code"] == "NOT_FOUND"

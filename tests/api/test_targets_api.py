@@ -8,6 +8,7 @@ import pytest
 from insumap.domain.identity.consent import ConsentAction, ConsentRecord, ConsentScope
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
+from insumap.shared.field_limits import FieldLimits
 from tests.api.identity_support import IdentityApi
 from tests.support.identity_world import (
     CLINIC,
@@ -244,6 +245,9 @@ def test_doctor_assigns_a_profile_to_his_patient_and_it_is_audited(
     assert response.status_code == 200, response.text
     assert response.json()["target_profile_id"] == profile["id"]
     assert response.json()["patient_id"] == str(PATIENT_ID)
+    assert response.json()["code"] == "CLINIC_TARGETS"
+    assert response.json()["version"] == 1
+    assert response.json()["label"] == "Metas de la clínica"
     assert "TARGET_PROFILE_ASSIGNED" in [e.action for e in api.audit_log.entries]
 
 
@@ -294,3 +298,17 @@ def test_admin_cannot_assign_a_profile_to_a_patient(api: IdentityApi) -> None:
     )
 
     assert response.status_code == 403
+
+
+def test_a_min_days_above_the_smallint_column_is_a_validation_error(
+    api: IdentityApi,
+) -> None:
+    response = api.client.post(
+        BASE,
+        headers=admin(api),
+        json=profile_body(min_days=FieldLimits.SMALLINT_MAX + 1),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert api.catalog.profiles == {}

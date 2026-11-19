@@ -214,8 +214,8 @@ def test_assign_opens_the_assignment_and_ends_the_previous_one(world: World) -> 
         )
     )
 
-    assert first.target_profile_id == PROFILE
-    assert second.target_profile_id == UUID(int=600)
+    assert first.assignment.target_profile_id == PROFILE
+    assert second.assignment.target_profile_id == UUID(int=600)
     assert [r.ended_at is None for r in world.assignments.rows] == [False, True]
     assert world.patients.reads[-1][2].value == "CARE"
 
@@ -295,6 +295,6 @@ def test_assign_is_audited_with_the_assignment_id(world: World) -> None:
 
     [entry] = world.audit.entries
     assert entry.action == "TARGET_PROFILE_ASSIGNED"
-    assert entry.entity_id == assignment.id
+    assert entry.entity_id == assignment.assignment.id
     assert entry.changed_fields == ("target_profile_id",)
-    assert assignment.patient_id == PATIENT_ID
+    assert assignment.assignment.patient_id == PATIENT_ID
