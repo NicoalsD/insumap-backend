@@ -11,12 +11,15 @@ from insumap.api.routers.auth_schemas import (
     TOKEN_TYPE,
     AccessTokenResponse,
     AuthenticationResponse,
+    ChangePasswordRequest,
     CompleteActivationRequest,
     ConfirmMfaEnrollmentRequest,
     CurrentUserResponse,
     LoginRequest,
     MfaEnrollmentResponse,
     RecoveryCodesAuthenticationResponse,
+    RecoveryCodesResponse,
+    RegenerateMfaRecoveryCodesRequest,
     VerifyActivationCodeRequest,
     VerifyActivationCodeResponse,
     VerifyMfaChallengeRequest,
@@ -27,6 +30,7 @@ from insumap.api.security import (
     client_ip,
 )
 from insumap.api.tags import ApiTag
+from insumap.application.commands.base import CommandBus
 from insumap.application.common.actor import Actor
 from insumap.application.identity.activation import (
     CompleteActivationInput,
@@ -35,6 +39,7 @@ from insumap.application.identity.activation import (
     VerifyActivationCodeInput,
     VerifyActivationCodeUseCase,
 )
+from insumap.application.identity.change_password import ChangePasswordCommand
 from insumap.application.identity.current_user import (
     GetCurrentUserInput,
     GetCurrentUserUseCase,
@@ -47,6 +52,9 @@ from insumap.application.identity.mfa import (
     StartMfaEnrollmentUseCase,
     VerifyMfaChallengeInput,
     VerifyMfaChallengeUseCase,
+)
+from insumap.application.identity.recovery_codes import (
+    RegenerateMfaRecoveryCodesCommand,
 )
 from insumap.application.identity.session import AuthenticationResult, SessionTokens
 from insumap.application.identity.sessions import (
@@ -104,6 +112,7 @@ class AuthRouter:
     def __init__(  # noqa: PLR0913 - one use case per endpoint
         self,
         *,
+        commands: CommandBus,
         clock: Clock,
         cookie: RefreshCookie,
         login: LoginUseCase,
@@ -121,6 +130,7 @@ class AuthRouter:
         any_actor: Any,
         csrf_guard: Any,
     ) -> None:
+        self._commands = commands
         self._clock = clock
         self._cookie = cookie
         self._login = login
@@ -169,6 +179,19 @@ class AuthRouter:
             actor: Annotated[Actor, enrollment_actor],
         ) -> RecoveryCodesAuthenticationResponse:
             return self._confirm_enrollment_endpoint(body, request, response, actor)
+
+        def regenerate_mfa_recovery_codes(
+            body: RegenerateMfaRecoveryCodesRequest,
+            actor: Annotated[Actor, session_actor],
+        ) -> RecoveryCodesResponse:
+            return self._regenerate_recovery_codes_endpoint(body, actor)
+
+        def change_password(
+            body: ChangePasswordRequest,
+            response: Response,
+            actor: Annotated[Actor, session_actor],
+        ) -> AuthenticationResponse:
+            return self._change_password_endpoint(body, response, actor)
 
         def get_current_user(actor: Annotated[Actor, any_actor]) -> CurrentUserResponse:
             return self._current_user_endpoint(actor)
@@ -282,6 +305,46 @@ class AuthRouter:
                 HTTPStatus.UNPROCESSABLE_ENTITY,
             ),
             openapi_extra={ACCESS_EXTENSION: ENROLLMENT_SELF},
+        )
+        add(
+            "/mfa/recovery-codes",
+            regenerate_mfa_recovery_codes,
+            methods=["POST"],
+            response_model=RecoveryCodesResponse,
+            operation_id="regenerate_mfa_recovery_codes",
+            summary="Regenerar los códigos de respaldo del segundo factor",
+            description=(
+                "Exige una sesión completa del personal y un TOTP vigente. Revoca los "
+                "códigos anteriores y devuelve los nuevos una sola vez. Queda "
+                "auditado en `audit.audit_log` (P09)."
+            ),
+            responses=error_responses(
+                HTTPStatus.UNAUTHORIZED,
+                HTTPStatus.FORBIDDEN,
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+            ),
+            openapi_extra={ACCESS_EXTENSION: SESSION_SELF},
+        )
+        add(
+            "/password/change",
+            change_password,
+            methods=["POST"],
+            response_model=AuthenticationResponse,
+            operation_id="change_password",
+            summary="Cambiar la contraseña de la cuenta",
+            description=(
+                "Verifica la contraseña actual y aplica la política de contraseñas "
+                "(longitud, contraseñas comunes, datos personales e historial). "
+                "Sube la versión del token y revoca todas las sesiones; este "
+                "dispositivo recibe una sesión nueva con su cookie de refresh. Queda "
+                "auditado en `audit.audit_log` (P09)."
+            ),
+            responses=error_responses(
+                HTTPStatus.UNAUTHORIZED,
+                HTTPStatus.FORBIDDEN,
+                HTTPStatus.UNPROCESSABLE_ENTITY,
+            ),
+            openapi_extra={ACCESS_EXTENSION: SESSION_SELF},
         )
         add(
             "/current-user",
@@ -436,6 +499,26 @@ class AuthRouter:
         return RecoveryCodesAuthenticationResponse(
             **base.model_dump(), recovery_codes=list(result.recovery_codes)
         )
+
+    def _regenerate_recovery_codes_endpoint(
+        self, body: RegenerateMfaRecoveryCodesRequest, actor: Actor
+    ) -> RecoveryCodesResponse:
+        result = self._commands.dispatch(
+            RegenerateMfaRecoveryCodesCommand(actor=actor, code=body.code)
+        )
+        return RecoveryCodesResponse(recovery_codes=list(result.recovery_codes))
+
+    def _change_password_endpoint(
+        self, body: ChangePasswordRequest, response: Response, actor: Actor
+    ) -> AuthenticationResponse:
+        result = self._commands.dispatch(
+            ChangePasswordCommand(
+                actor=actor,
+                current_password=body.current_password,
+                new_password=body.new_password,
+            )
+        )
+        return self._authentication(result.authentication, response)
 
     def _current_user_endpoint(self, actor: Actor) -> CurrentUserResponse:
         return CurrentUserResponse.from_result(

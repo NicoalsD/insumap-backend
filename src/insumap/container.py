@@ -3,14 +3,32 @@
 from __future__ import annotations
 
 import secrets
+from dataclasses import dataclass
 from datetime import timedelta
-from typing import final
+from typing import Final, Never, final
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
 from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.meta import MetaRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
+from insumap.application.commands.auditing import (
+    AuditingCommandHandler,
+    AuditLogPort,
+)
+from insumap.application.commands.base import (
+    Command,
+    CommandBus,
+    CommandHandler,
+    InMemoryCommandBus,
+    Registration,
+    bind,
+)
+from insumap.application.commands.transactional import (
+    CurrentUnitOfWork,
+    TransactionalCommandHandler,
+)
+from insumap.application.common.unit_of_work import UnitOfWorkPort
 from insumap.application.events.publisher import (
     DomainEventPublisher,
     InProcessDomainEventPublisher,
@@ -25,6 +43,10 @@ from insumap.application.identity.authenticate import (
     SessionScope,
 )
 from insumap.application.identity.challenges import ChallengePolicy, ChallengeService
+from insumap.application.identity.change_password import (
+    ChangePasswordCommand,
+    ChangePasswordCommandHandler,
+)
 from insumap.application.identity.csrf import RefreshRequestGuard
 from insumap.application.identity.current_user import GetCurrentUserUseCase
 from insumap.application.identity.login import LoginUseCase
@@ -34,6 +56,10 @@ from insumap.application.identity.mfa import (
     VerifyMfaChallengeUseCase,
 )
 from insumap.application.identity.passwords import NewPasswordService, PasswordRules
+from insumap.application.identity.recovery_codes import (
+    RegenerateMfaRecoveryCodesCommand,
+    RegenerateMfaRecoveryCodesCommandHandler,
+)
 from insumap.application.identity.second_factor import SecondFactorVerifier
 from insumap.application.identity.session import SessionIssuer, SessionLifetimes
 from insumap.application.identity.sessions import (
@@ -56,10 +82,67 @@ from insumap.infrastructure.identity_adapters import (
     load_common_passwords,
 )
 from insumap.infrastructure.logging import JsonLoggingConfigurator
+from insumap.infrastructure.persistence.transactions import CurrentSession
+from insumap.infrastructure.platform_adapters import (
+    PlatformAdapters,
+    build_platform_adapters,
+)
 from insumap.shared.config import Settings, get_settings
 from insumap.shared.field_limits import FieldLimits
 from insumap.shared.i18n import MessageCatalog
 from insumap.shared.time import Clock, SystemClock
+
+ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
+    RegenerateMfaRecoveryCodesCommand,
+    ChangePasswordCommand,
+)
+"""Every command of the API: a missing handler fails when the container is built."""
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class IdentityServices:
+    """Objects shared by the identity use cases and the identity commands."""
+
+    login_limit: RateLimitCheck
+    mfa_limit: RateLimitCheck
+    activation_limit: RateLimitCheck
+    refresh_limit: RateLimitCheck
+    sessions: SessionIssuer
+    challenges: ChallengeService
+    verifier: SecondFactorVerifier
+    passwords: NewPasswordService
+
+
+@final
+class CommandGuard:
+    """Puts a command handler inside its transaction and its audit (P13 and P09).
+
+    The order is fixed: the transaction wraps the audit decorator, which wraps
+    the handler, so the audit row and the action commit or roll back together.
+    """
+
+    def __init__(
+        self,
+        *,
+        uow: UnitOfWorkPort,
+        audit_log: AuditLogPort,
+        current: CurrentUnitOfWork,
+        clock: Clock,
+    ) -> None:
+        self._uow = uow
+        self._audit_log = audit_log
+        self._current = current
+        self._clock = clock
+
+    def wrap[C: Command[Never], R](
+        self, handler: CommandHandler[C, R]
+    ) -> CommandHandler[C, R]:
+        """Return ``handler`` decorated with the audit and the transaction."""
+        return TransactionalCommandHandler(
+            AuditingCommandHandler(handler, self._audit_log, self._clock),
+            self._uow,
+            self._current,
+        )
 
 
 @final
@@ -79,6 +162,7 @@ class Container:
         readiness_probe: ReadinessProbe | None = None,
         identity_adapters: IdentityAdapters | None = None,
         event_publisher: DomainEventPublisher | None = None,
+        platform_adapters: PlatformAdapters | None = None,
     ) -> None:
         self.settings: Settings = settings or get_settings()
         self.clock: Clock = clock or SystemClock.instance()
@@ -96,16 +180,32 @@ class Container:
         self.event_publisher: DomainEventPublisher = (
             event_publisher or InProcessDomainEventPublisher()
         )
+        current = CurrentSession()
         adapters = identity_adapters or build_identity_adapters(
             self.settings,
             clock=self.clock,
             publisher=self.event_publisher,
             engine=build_engine(self.settings),
+            current=current,
         )
-        self.auth_router = self._build_auth_router(adapters)
+        platform = platform_adapters or build_platform_adapters(current=current)
+        services = self._build_identity_services(adapters)
+        self._command_guard = CommandGuard(
+            uow=adapters.unit_of_work,
+            audit_log=platform.audit_log,
+            current=CurrentUnitOfWork(),
+            clock=self.clock,
+        )
+        registrations = [
+            *self._identity_commands(adapters, services),
+        ]
+        self.command_bus: CommandBus = InMemoryCommandBus(
+            registrations, required=ALL_COMMAND_TYPES
+        )
+        self.auth_router = self._build_auth_router(adapters, services)
 
-    def _build_auth_router(self, adapters: IdentityAdapters) -> AuthRouter:
-        """Wire the identity use cases over ``adapters`` and mount their router."""
+    def _build_identity_services(self, adapters: IdentityAdapters) -> IdentityServices:
+        """The services several identity use cases and commands share."""
         settings, clock = self.settings, self.clock
         minute, hour = timedelta(minutes=1), timedelta(hours=1)
         login_limit = RateLimitCheck(
@@ -188,6 +288,66 @@ class Container:
             history=adapters.password_history,
             clock=clock,
         )
+        return IdentityServices(
+            login_limit=login_limit,
+            mfa_limit=mfa_limit,
+            activation_limit=activation_limit,
+            refresh_limit=refresh_limit,
+            sessions=sessions,
+            challenges=challenges,
+            verifier=verifier,
+            passwords=passwords,
+        )
+
+    def _identity_commands(
+        self, adapters: IdentityAdapters, services: IdentityServices
+    ) -> list[Registration]:
+        """The commands of the identity module, each behind transaction and audit."""
+        settings, clock = self.settings, self.clock
+        guard = self._command_guard
+        return [
+            bind(
+                RegenerateMfaRecoveryCodesCommand,
+                guard.wrap(
+                    RegenerateMfaRecoveryCodesCommandHandler(
+                        factors=adapters.mfa_factors,
+                        verifier=services.verifier,
+                        generator=adapters.recovery_codes,
+                        code_count=settings.mfa_recovery_code_count,
+                        code_hasher=adapters.code_hasher,
+                        rate_limit=services.mfa_limit,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                ChangePasswordCommand,
+                guard.wrap(
+                    ChangePasswordCommandHandler(
+                        users=adapters.users,
+                        hasher=adapters.password_hasher,
+                        passwords=services.passwords,
+                        refresh_tokens=adapters.refresh_tokens,
+                        sessions=services.sessions,
+                        consents=adapters.consents,
+                        events=adapters.security_events,
+                        rate_limit=services.login_limit,
+                        clock=clock,
+                    )
+                ),
+            ),
+        ]
+
+    def _build_auth_router(
+        self, adapters: IdentityAdapters, services: IdentityServices
+    ) -> AuthRouter:
+        """Wire the identity use cases over ``adapters`` and mount their router."""
+        settings, clock = self.settings, self.clock
+        login_limit, mfa_limit = services.login_limit, services.mfa_limit
+        activation_limit = services.activation_limit
+        refresh_limit = services.refresh_limit
+        sessions, challenges = services.sessions, services.challenges
+        verifier, passwords = services.verifier, services.passwords
         authenticate = AuthenticateActorUseCase(
             uow=adapters.unit_of_work,
             tokens=adapters.tokens,
@@ -209,6 +369,7 @@ class Container:
             rate_limit=login_limit,
         )
         return AuthRouter(
+            commands=self.command_bus,
             clock=clock,
             cookie=RefreshCookie(),
             login=login,
