@@ -299,9 +299,6 @@ class ImportRowOrm(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=NOW
     )
-    mrn: Mapped[str] = mapped_column(String(40))
-    document_last4: Mapped[str] = mapped_column(String(4))
-    import_batch_id: Mapped[UUID | None] = mapped_column(Uuid)
 
 
 class PrivacyNoticeVersionOrm(Base):
