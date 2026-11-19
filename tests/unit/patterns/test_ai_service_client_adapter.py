@@ -117,6 +117,9 @@ def adapter(handler: Handler, *, token: str = TOKEN) -> AiServiceClientAdapter:
         request_ids=SequentialIds(),
         connect_seconds=2.0,
         forecast_seconds=3.0,
+        risk_seconds=3.0,
+        summary_seconds=30.0,
+        assistant_seconds=20.0,
     )
 
 

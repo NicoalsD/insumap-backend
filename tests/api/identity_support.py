@@ -10,10 +10,6 @@ from insumap.application.identity.second_factor import totp_secret_binding
 from insumap.container import Container
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
-from insumap.infrastructure.ai.unconfigured_forecast import (
-    UnconfiguredGlucoseForecastAdapter,
-)
-from insumap.infrastructure.ai_adapters import AiAdapters
 from insumap.infrastructure.clinic_admin_adapters import ClinicAdminAdapters
 from insumap.infrastructure.credentials_adapters import CredentialsAdapters
 from insumap.infrastructure.patient_adapters import PatientAdapters
@@ -22,6 +18,7 @@ from insumap.infrastructure.targets_adapters import TargetsAdapters
 from insumap.infrastructure.treatment_adapters import TreatmentAdapters
 from insumap.main import create_app
 from tests.support.access_fakes import FakeDirectory, InMemoryDataAccessLog
+from tests.support.ai_assessment_fakes import AiWorld
 from tests.support.alerts_fakes import AlertsWorld
 from tests.support.audit_fakes import AuditFakes
 from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
@@ -56,7 +53,7 @@ from tests.support.notifications import InMemoryChannel
 from tests.support.onboarding_fakes import OnboardingWorld
 from tests.support.patient_fakes import FakePatientRoster, FakePendingInvitations
 from tests.support.recommendation_fakes import FakeDrafts, InMemoryRecommendations
-from tests.support.settings import make_settings
+from tests.support.settings import TEST_APP_HMAC_KEY, make_settings
 from tests.support.sites_fakes import FakeSites
 from tests.support.targets_fakes import (
     FakeReminders,
@@ -133,6 +130,9 @@ class IdentityApi:
             patient_ids=[PATIENT_ID],
         )
         self.audit = AuditFakes()
+        self.ai = AiWorld(
+            clock=self.world.clock, ids=self.world.ids, app_hmac_key=TEST_APP_HMAC_KEY
+        )
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -156,10 +156,8 @@ class IdentityApi:
             messaging_adapters=self.messaging.adapters(),
             onboarding_adapters=self.onboarding.adapters(),
             alert_adapters=self.alerts.adapters(),
-            ai_adapters=AiAdapters(
-                forecasts=UnconfiguredGlucoseForecastAdapter(),
-                recommendations=self.recommendations,
-                drafts=FakeDrafts(),
+            ai_adapters=self.ai.adapters(
+                recommendations=self.recommendations, drafts=FakeDrafts()
             ),
             treatment_adapters=TreatmentAdapters(
                 templates=self.templates,
