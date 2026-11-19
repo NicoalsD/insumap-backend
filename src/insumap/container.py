@@ -12,6 +12,7 @@ from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.care_team import CareTeamRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.meta import MetaRouter
+from insumap.api.routers.sites import SiteRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
 from insumap.application.care_team.commands import (
     AssignDoctorCommand,
@@ -97,6 +98,15 @@ from insumap.application.readiness import (
     ReadinessProbe,
 )
 from insumap.application.security.rate_limit import RateLimitCheck, RateLimitRule
+from insumap.application.sites.commands import (
+    CreateSiteCommand,
+    CreateSiteCommandHandler,
+    SetUserSitesCommand,
+    SetUserSitesCommandHandler,
+    UpdateSiteCommand,
+    UpdateSiteCommandHandler,
+)
+from insumap.application.sites.list_sites import ListSitesUseCase
 from insumap.domain.identity.password_policy import PasswordPolicy
 from insumap.domain.identity.refresh_token import RefreshTokenLifetime
 from insumap.infrastructure.identity_adapters import (
@@ -127,6 +137,9 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     SetPrimaryDoctorCommand,
     ReassignDoctorCommand,
     EndAssignmentCommand,
+    CreateSiteCommand,
+    UpdateSiteCommand,
+    SetUserSitesCommand,
 )
 """Every command of the API: a missing handler fails when the container is built."""
 
@@ -236,6 +249,7 @@ class Container:
         registrations = [
             *self._identity_commands(adapters, services),
             *self._care_team_commands(adapters, platform),
+            *self._site_commands(adapters, platform),
         ]
         self.command_bus: CommandBus = InMemoryCommandBus(
             registrations, required=ALL_COMMAND_TYPES
@@ -245,6 +259,13 @@ class Container:
             commands=self.command_bus,
             list_assignments=ListCareTeamAssignmentsUseCase(
                 uow=adapters.unit_of_work, teams=platform.care_teams
+            ),
+            staff_actor=self.full_session_actor,
+        )
+        self.site_router = SiteRouter(
+            commands=self.command_bus,
+            list_sites=ListSitesUseCase(
+                uow=adapters.unit_of_work, sites=platform.sites
             ),
             staff_actor=self.full_session_actor,
         )
@@ -399,6 +420,33 @@ class Container:
             bind(
                 EndAssignmentCommand,
                 guard.wrap(EndAssignmentCommandHandler(teams=teams, clock=clock)),
+            ),
+        ]
+
+    def _site_commands(
+        self, adapters: IdentityAdapters, platform: PlatformAdapters
+    ) -> list[Registration]:
+        """The site decisions (P13), each behind transaction and audit (P09)."""
+        guard, clock = self._command_guard, self.clock
+        sites, staff_sites = platform.sites, platform.staff_sites
+        return [
+            bind(
+                CreateSiteCommand,
+                guard.wrap(
+                    CreateSiteCommandHandler(sites=sites, ids=adapters.ids, clock=clock)
+                ),
+            ),
+            bind(
+                UpdateSiteCommand,
+                guard.wrap(UpdateSiteCommandHandler(sites=sites, clock=clock)),
+            ),
+            bind(
+                SetUserSitesCommand,
+                guard.wrap(
+                    SetUserSitesCommandHandler(
+                        sites=sites, staff_sites=staff_sites, clock=clock
+                    )
+                ),
             ),
         ]
 
