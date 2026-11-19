@@ -11,6 +11,7 @@ from insumap.container import Container
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
 from insumap.infrastructure.platform_adapters import PlatformAdapters
+from insumap.infrastructure.treatment_adapters import TreatmentAdapters
 from insumap.main import create_app
 from tests.support.access_fakes import FakeDirectory
 from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
@@ -28,6 +29,12 @@ from tests.support.monitoring_fakes import RecordsWorld, records_adapters
 from tests.support.notifications import InMemoryChannel
 from tests.support.settings import make_settings
 from tests.support.sites_fakes import FakeSites
+from tests.support.treatment_fakes import (
+    FakePlans,
+    FakeSnapshots,
+    FakeTargets,
+    FakeTemplates,
+)
 from tests.support.users_fakes import (
     FakeActivationCodes,
     FakeLoginLockouts,
@@ -38,6 +45,7 @@ from tests.support.users_fakes import (
 ORIGIN = "https://app.example.test"
 CSRF_HEADERS = {"X-Requested-With": "insumap-web"}
 FACTOR_ID_OFFSET: Final = 1000
+TREATMENT_TARGET: Final = UUID(int=4040)
 
 
 class IdentityApi:
@@ -58,6 +66,10 @@ class IdentityApi:
         self.staff_directory = FakeStaffDirectory(self.world.users, self.world.factors)
         self.staff_invitations = FakeStaffInvitations()
         self.login_lockouts = FakeLoginLockouts()
+        self.templates = FakeTemplates()
+        self.plans = FakePlans()
+        self.snapshots = FakeSnapshots()
+        self.targets = FakeTargets(TREATMENT_TARGET)
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -78,6 +90,12 @@ class IdentityApi:
                 activation_codes=FakeActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
+            treatment_adapters=TreatmentAdapters(
+                templates=self.templates,
+                plans=self.plans,
+                snapshots=self.snapshots,
+                targets=self.targets,
+            ),
         )
         self.app = create_app(container)
         self.client = TestClient(
