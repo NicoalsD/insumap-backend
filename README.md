@@ -6,7 +6,7 @@ Aquí vive también la **documentación canónica** del proyecto, en `docs/`.
 
 ## Estado
 
-En construcción (Fase 0: documentación y planeación).
+En construcción. Hecho: fundaciones transversales, `GET /api/v1/meta/field-limits` e identidad y sesión (`/api/v1/auth/*`: login, MFA TOTP, `/me`, refresh rotativo, logout y activación del paciente) sobre el esquema `db-v0.1.0`.
 
 ## Repositorios de Insumap
 
@@ -52,6 +52,23 @@ Verificación completa (la misma que corre el CI):
 ```bash
 uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run lint-imports && uv run pytest
 ```
+
+### Pruebas de integración
+
+Corren la API real (repositorios, Argon2id, JWT y TOTP) contra PostgreSQL 18 con las migraciones de `insumap-database` en la etiqueta de `db-schema.lock`, conectada como `insumap_app` y sujeta a la RLS.
+
+```bash
+# Con una base desechable propia (superusuario); si no se define, usan Testcontainers
+export INSUMAP_TEST_DATABASE_URL=postgresql://insumap:<clave>@localhost:5432/insumap_test
+export INSUMAP_DATABASE_REPO_PATH=../insumap-database     # en la etiqueta de db-schema.lock
+uv run pytest -m integration
+```
+
+Sin `INSUMAP_TEST_DATABASE_URL` ni Docker, se saltan con el motivo.
+
+### Datos de demostración (solo local)
+
+Con la base migrada y las variables de la API definidas, `DATABASE_URL_MIGRATOR=<url de superusuario> uv run python -m tests.support.db_seed` crea la clínica demo, tres cuentas ficticias (`example.test`) y una invitación de activación, e imprime las credenciales. Nunca se apunta a una base compartida.
 
 ## Documentación
 
