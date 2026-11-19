@@ -85,7 +85,7 @@ class AiServicePort(ABC):
 @final
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ForecastRecord:
-    """One row of ``ai.glucose_forecasts`` (append only), ready to store."""
+    """One output of IA1 (or of its fallback), ready for ``ai.glucose_forecasts``."""
 
     clinic_id: UUID
     patient_id: UUID
@@ -94,26 +94,11 @@ class ForecastRecord:
     output: RemoteForecast
 
 
-@final
-@dataclass(frozen=True, slots=True, kw_only=True)
-class AiProcessingRecord:
-    """One row of ``audit.data_access_log`` for a patient's data sent to the AI."""
-
-    clinic_id: UUID
-    patient_id: UUID
-    occurred_at: datetime
-    request_id: str | None
-
-
 class AiOutputStorePort(ABC):
-    """Stores an AI output and its audit row in one system transaction."""
+    """Stores an AI output and the audit row of the data sent for it, atomically."""
 
     @abstractmethod
-    def store(
-        self,
-        *,
-        clinic_id: UUID,
-        forecast: ForecastRecord,
-        processing: AiProcessingRecord | None,
+    def store_forecast(
+        self, record: ForecastRecord, *, request_id: str | None, occurred_at: datetime
     ) -> None:
-        """Write the output, and the audit row when data was sent to the service."""
+        """Write the output and its ``AI_PROCESSING`` audit row in one transaction."""

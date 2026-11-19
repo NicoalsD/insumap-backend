@@ -308,6 +308,10 @@ from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistr
 from insumap.domain.monitoring.events import GlucoseReadingRecorded
 from insumap.domain.monitoring.validation import build_validation_chain
 from insumap.domain.onboarding.vocabulary import SourceFormat
+from insumap.infrastructure.ai_adapters import (
+    AiAdapters,
+    build_ai_adapters,
+)
 from insumap.infrastructure.alerts_adapters import (
     AlertsAdapters,
     build_alerts_adapters,
@@ -497,6 +501,7 @@ class Container:
         notification_adapters: NotificationAdapters | None = None,
         clinic_admin_adapters: ClinicAdminAdapters | None = None,
         patient_adapters: PatientAdapters | None = None,
+        ai_adapters: AiAdapters | None = None,
     ) -> None:
         self.settings: Settings = settings or get_settings()
         self.clock: Clock = clock or SystemClock.instance()
@@ -528,10 +533,19 @@ class Container:
             app_hmac_key=decode_key(self.settings.app_hmac_key.get_secret_value()),
         )
         targets = targets_adapters or build_targets_adapters(current=current)
+        ai = ai_adapters or build_ai_adapters(
+            settings=self.settings,
+            clock=self.clock,
+            current=current,
+            transactions=SqlTransactionFactory(engine, current),
+            ids=adapters.ids,
+            app_hmac_key=decode_key(self.settings.app_hmac_key.get_secret_value()),
+        )
         monitoring = monitoring_adapters or build_monitoring_adapters(
             current=current,
             clock=self.clock,
             transactions=SqlTransactionFactory(engine, current),
+            forecasts=ai.forecasts,
         )
         patient_ports = patient_adapters or build_patient_adapters(
             current=current, transactions=SqlTransactionFactory(engine, current)

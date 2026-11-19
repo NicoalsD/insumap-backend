@@ -451,3 +451,32 @@ class AlertStatusHistoryOrm(Base):
     actor_type: Mapped[str] = mapped_column(String(6))
     note: Mapped[str | None] = mapped_column(String(500))
     occurred_at: Mapped[datetime] = _timestamp()
+
+
+AI = {"schema": "ai"}
+
+
+class GlucoseForecastOrm(Base):
+    """``ai.glucose_forecasts``: append only (IA1 output)."""
+
+    __tablename__ = "glucose_forecasts"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    mode: Mapped[str] = mapped_column(String(10))
+    based_on_reading_id: Mapped[UUID | None] = mapped_column(Uuid)
+    points: Mapped[list[Any]] = mapped_column(JSONB)
+    hypo_probability: Mapped[list[Any]] = mapped_column(JSONB)
+    hyper_probability: Mapped[list[Any]] = mapped_column(JSONB)
+    target_profile_id: Mapped[UUID] = mapped_column(Uuid)
+    model_name: Mapped[str] = mapped_column(String(80))
+    model_version: Mapped[str] = mapped_column(String(80))
+    input_hash: Mapped[str] = mapped_column(CHAR(64))
+    explanation: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    is_fallback: Mapped[bool] = mapped_column(Boolean)
+    fallback_reason: Mapped[str | None] = mapped_column(String(17))
+    is_shadow: Mapped[bool] = mapped_column(Boolean)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
