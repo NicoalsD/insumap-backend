@@ -68,7 +68,7 @@ Sin `INSUMAP_TEST_DATABASE_URL` ni Docker, se saltan con el motivo.
 
 ### Datos de demostración (solo local)
 
-Con la base migrada y las variables de la API definidas, `DATABASE_URL_MIGRATOR=<url de superusuario> uv run python -m tests.support.db_seed` crea la clínica demo, tres cuentas ficticias (`example.test`) y una invitación de activación, e imprime las credenciales. Nunca se apunta a una base compartida.
+Con la base migrada y las variables de la API definidas, `DATABASE_URL_MIGRATOR=<url de superusuario> uv run python -m tests.support.db_seed` crea la clínica demo, tres cuentas ficticias (`example.test`) y una invitación de activación. La contraseña y el código de activación son las constantes `DEMO_PASSWORD` y `ACTIVATION_CODE` del módulo; el script no los imprime. Nunca se apunta a una base compartida.
 
 ## Documentación
 

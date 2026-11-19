@@ -6,7 +6,8 @@ use the reserved ``example.test`` domain and documents are deliberately invalid.
 
 Run ``uv run python -m tests.support.db_seed`` with ``DATABASE_URL_MIGRATOR``
 (superuser) and the API secrets in the environment to seed a migrated local
-database; it prints the demo credentials. Never point it at a shared database.
+database; it lists the demo accounts (never the secrets). Never point it at a
+shared database.
 """
 
 import hashlib
@@ -203,16 +204,21 @@ def seed_demo_world(conn: psycopg.Connection, settings: Settings) -> DemoWorld:
 
 
 def main() -> None:
-    """Seed the database of ``DATABASE_URL_MIGRATOR`` and print the credentials."""
+    """Seed the database of ``DATABASE_URL_MIGRATOR`` and list the demo accounts.
+
+    Secrets (the password and the activation code) are never printed: they are
+    the ``DEMO_PASSWORD`` and ``ACTIVATION_CODE`` constants of this module.
+    """
     url = os.environ["DATABASE_URL_MIGRATOR"]
     with psycopg.connect(url) as conn:
         seed_demo_world(conn, Settings())
     print(
-        f"Clínica demo sembrada. Contraseña de las tres cuentas: {DEMO_PASSWORD}\n"
+        "Clínica demo sembrada. La contraseña y el código de activación son las"
+        " constantes DEMO_PASSWORD y ACTIVATION_CODE de tests/support/db_seed.py.\n"
         f"  PATIENT       {PATIENT_EMAIL}\n"
         f"  DOCTOR        {DOCTOR_EMAIL} (pide enrolar MFA)\n"
         f"  CLINIC_ADMIN  {ADMIN_EMAIL} (pide enrolar MFA)\n"
-        f"  Activación: código {ACTIVATION_CODE}, nacimiento {INVITED_BIRTH_DATE}"
+        "  Activación del paciente invitado: ACTIVATION_CODE e INVITED_BIRTH_DATE"
     )
 
 
