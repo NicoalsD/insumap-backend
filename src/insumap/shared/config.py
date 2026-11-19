@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     mfa_encryption_key_previous: SecretStr | None = None
     code_hmac_key: SecretStr
     code_hmac_key_previous: SecretStr | None = None
+    app_hmac_key: SecretStr
+    """Root of the keyed counters: lockouts and rate limits (``APP_HMAC_KEY``)."""
 
     # Access tokens and refresh sessions (docs/Seguridad.md, section 2).
     jwt_issuer: str = Field(default="insumap-api", min_length=1)
@@ -112,6 +114,7 @@ class Settings(BaseSettings):
         "mfa_encryption_key_previous",
         "code_hmac_key",
         "code_hmac_key_previous",
+        "app_hmac_key",
     )
     @classmethod
     def require_a_32_byte_key(cls, value: SecretStr | None) -> SecretStr | None:
