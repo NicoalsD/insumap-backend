@@ -250,9 +250,9 @@ class AiAssessmentRouter:
             summary="Consultar el riesgo de deterioro de un paciente asignado",
             description=(
                 "Sugerencia de la IA (o de las reglas tipo TIDE si la IA no responde) "
-                "sobre el riesgo de deterioro glucémico. El médico decide; la"
-                "respuesta "
-                "trae `is_fallback` y `fallback_reason` cuando calculan las reglas."
+                "sobre el riesgo de deterioro glucémico. El médico decide; la "
+                "respuesta trae `is_fallback` y `fallback_reason` cuando calculan las "
+                "reglas."
             ),
             responses=READ_ERRORS,
             openapi_extra={ACCESS_EXTENSION: access(read)},
@@ -278,10 +278,9 @@ class AiAssessmentRouter:
             status_code=HTTPStatus.CREATED,
             summary="Generar el resumen previo a la consulta",
             description=(
-                "Resumen de IA5 con sus cifras. Generado con IA como apoyo; verifica"
-                "con "
-                "los datos. Sin el LLM o sin datos simulados permitidos, responde la "
-                "plantilla fija."
+                "Resumen de IA5 con sus cifras. Generado con IA como apoyo; verifica "
+                "con los datos. Sin el LLM o sin datos simulados permitidos, responde "
+                "la plantilla fija."
             ),
             responses=SUMMARY_ERRORS,
             openapi_extra={ACCESS_EXTENSION: access(summaries)},
@@ -303,11 +302,9 @@ class AiAssessmentRouter:
             operation_id="list_dropout_risks",
             summary="Listar el riesgo de abandono de mis pacientes asignados",
             description=(
-                "Riesgo de abandono (IA7) del último cálculo por paciente asignado,"
-                "sin "
-                "valores clínicos. La lista de la clínica para el administrador"
-                "todavía "
-                "no está disponible."
+                "Riesgo de abandono (IA7) del último cálculo por paciente asignado, "
+                "sin valores clínicos. La lista de la clínica para el administrador "
+                "todavía no está disponible."
             ),
             responses=ROLE_ERRORS,
             openapi_extra={
