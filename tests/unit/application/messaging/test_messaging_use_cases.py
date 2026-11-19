@@ -1,5 +1,6 @@
 """Messages and their reads (RF-84, RF-85, P11, P07, P17) over in-memory doubles."""
 
+from datetime import timedelta
 from uuid import UUID
 
 import pytest
@@ -21,10 +22,16 @@ from insumap.application.messaging.send_message import (
     SendMessageUseCase,
 )
 from insumap.application.monitoring.gate import AssignedPatientGate, OwnPatientGate
+from insumap.application.security.rate_limit import (
+    RateLimitCheck,
+    RateLimitedError,
+    RateLimitRule,
+)
 from insumap.domain.common.errors import ResourceNotFoundError
 from insumap.domain.identity.errors import PermissionDeniedError
 from insumap.domain.messaging.events import MessageSent
 from insumap.domain.messaging.message import SenderRole
+from insumap.infrastructure.security.rate_limiter import InMemoryRateLimiter
 from insumap.shared.errors import ErrorCode, InsumapError
 from insumap.shared.i18n import MessageCatalog
 from tests.support.care_team_fakes import FakeCareTeams
@@ -85,6 +92,14 @@ class World:
             clock=self.clock,
             in_app=self.channel,
             catalog=self.catalog,
+            rate_limit=RateLimitCheck(
+                InMemoryRateLimiter(self.clock),
+                RateLimitRule(
+                    family="messages_user_minute",
+                    limit=MESSAGES_PER_MINUTE,
+                    window=timedelta(minutes=1),
+                ),
+            ),
         )
 
     def reader(self) -> ListMessagesUseCase:
@@ -102,6 +117,9 @@ class World:
 @pytest.fixture
 def world() -> World:
     return World()
+
+
+MESSAGES_PER_MINUTE = 30
 
 
 def _first_page() -> PageRequest:
@@ -318,3 +336,37 @@ def test_cursor_round_trip_matches_the_encoder() -> None:
     key = UUID(int=42)
 
     assert _decode(encode_cursor(key)) == key
+
+
+def test_messages_are_limited_per_user_per_minute_with_retry_after(
+    world: World,
+) -> None:
+    sender = world.sender()
+    for _ in range(MESSAGES_PER_MINUTE):
+        sender.execute(
+            SendMessageInput(actor=patient_actor(), patient_id=None, body="Hola")
+        )
+
+    with pytest.raises(RateLimitedError) as error:
+        sender.execute(
+            SendMessageInput(actor=patient_actor(), patient_id=None, body="Hola")
+        )
+
+    assert error.value.code is ErrorCode.RATE_LIMITED
+    assert int(error.value.headers["Retry-After"]) >= 1
+    assert len(world.messages.rows) == MESSAGES_PER_MINUTE
+
+
+def test_the_limit_is_per_user_not_per_thread(world: World) -> None:
+    sender = world.sender()
+    for _ in range(MESSAGES_PER_MINUTE):
+        sender.execute(
+            SendMessageInput(actor=patient_actor(), patient_id=None, body="Hola")
+        )
+
+    # The doctor of the same thread has a bucket of their own.
+    message = sender.execute(
+        SendMessageInput(actor=doctor_actor(), patient_id=PATIENT, body="Hola")
+    )
+
+    assert message.sender_role is SenderRole.DOCTOR

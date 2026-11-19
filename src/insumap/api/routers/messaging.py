@@ -58,6 +58,13 @@ MESSAGE_ERRORS: Final = error_responses(
     HTTPStatus.NOT_FOUND,
     HTTPStatus.UNPROCESSABLE_ENTITY,
 )
+SEND_MESSAGE_ERRORS: Final = error_responses(
+    HTTPStatus.UNAUTHORIZED,
+    HTTPStatus.FORBIDDEN,
+    HTTPStatus.NOT_FOUND,
+    HTTPStatus.UNPROCESSABLE_ENTITY,
+    HTTPStatus.TOO_MANY_REQUESTS,
+)
 FOLLOW_UP_WRITE_ERRORS: Final = error_responses(
     HTTPStatus.UNAUTHORIZED,
     HTTPStatus.FORBIDDEN,
@@ -209,9 +216,11 @@ class MessagingRouter:
             description=(
                 "Agrega un mensaje de texto plano al hilo. El remitente es la sesión "
                 "y su rol; el paciente no envía `patient_id`. Avisa al otro lado "
-                "dentro de la app, sin el texto. No es un canal de emergencias."
+                "dentro de la app, sin el texto. No es un canal de emergencias. "
+                "Hay un límite de envíos por minuto y usuario; el exceso responde "
+                "`429` con `Retry-After`."
             ),
-            responses=MESSAGE_ERRORS,
+            responses=SEND_MESSAGE_ERRORS,
             openapi_extra=own,
         )
         add(

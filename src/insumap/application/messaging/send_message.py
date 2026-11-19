@@ -31,6 +31,7 @@ from insumap.application.notifications.notification import (
     PendingNotification,
     Recipient,
 )
+from insumap.application.security.rate_limit import RateLimitCheck
 from insumap.domain.identity.errors import PermissionDeniedError
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
@@ -70,6 +71,7 @@ class SendMessageUseCase:
         clock: Clock,
         in_app: NotificationChannel,
         catalog: MessageCatalog,
+        rate_limit: RateLimitCheck,
     ) -> None:
         self._uow = uow
         self._scope = scope
@@ -82,12 +84,15 @@ class SendMessageUseCase:
         self._clock = clock
         self._in_app = in_app
         self._catalog = catalog
+        self._rate_limit = rate_limit
 
     def execute(self, input: SendMessageInput) -> ThreadMessage:
         """Store the message, then notify the other side once it is committed."""
         actor = input.actor
         if actor.clinic_id is None:
             raise PermissionDeniedError
+        # Counted per user before any write: the answer is a 429 with Retry-After.
+        self._rate_limit.ensure(str(actor.user_id))
         # Validated before any write: a rejected text leaves no thread behind.
         body = MessageBody.parse(input.body)
         with self._uow.begin(TransactionContext.for_actor(actor)) as unit:

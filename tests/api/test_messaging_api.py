@@ -255,3 +255,20 @@ def test_follow_up_close_rejects_a_missing_result_note(api: IdentityApi) -> None
     )
 
     assert response.status_code == 422
+
+
+def test_a_message_over_the_limit_is_refused_with_retry_after(
+    api: IdentityApi,
+) -> None:
+    _assign_doctor(api)
+    headers = patient(api)
+    api.world.limiter.blocked = True
+
+    response = api.client.post(
+        "/api/v1/messages", headers=headers, json={"body": "Hola"}
+    )
+
+    assert response.status_code == 429
+    assert response.json()["error"]["code"] == "RATE_LIMITED"
+    assert response.headers["Retry-After"]
+    assert api.in_app.delivered == []

@@ -2705,6 +2705,14 @@ class Container:
                 clock=self.clock,
                 in_app=notifications.in_app,
                 catalog=self.message_catalog,
+                rate_limit=RateLimitCheck(
+                    adapters.rate_limiter,
+                    RateLimitRule(
+                        family="messages_user_minute",
+                        limit=self.settings.rate_limit_messages_per_user_per_minute,
+                        window=timedelta(minutes=1),
+                    ),
+                ),
             ),
             list_follow_ups=ListFollowUpsUseCase(
                 uow=uow, scope=scope, follow_ups=messaging.follow_ups
