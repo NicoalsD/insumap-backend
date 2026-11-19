@@ -97,11 +97,15 @@ ERROR_DESCRIPTIONS: Final[dict[int, str]] = {
         "`FORBIDDEN`, `ACCOUNT_NOT_ACTIVE`, `CLINIC_SUSPENDED`, `MFA_REQUIRED` o "
         "`CONSENT_REQUIRED`."
     ),
+    HTTPStatus.NOT_FOUND: (
+        "`NOT_FOUND`: el recurso no existe, es de otra clínica o no está asignado."
+    ),
     HTTPStatus.CONFLICT: (
-        "`EMAIL_UNAVAILABLE`, `CONSENT_VERSION_OUTDATED` o `INVALID_STATE_TRANSITION`."
+        "`CONFLICT`, `EMAIL_UNAVAILABLE`, `CONSENT_VERSION_OUTDATED` o "
+        "`INVALID_STATE_TRANSITION`."
     ),
     HTTPStatus.GONE: "`INVITATION_INVALID`: el código o el token no es válido.",
-    HTTPStatus.UNPROCESSABLE_ENTITY: "`VALIDATION_ERROR`.",
+    HTTPStatus.UNPROCESSABLE_ENTITY: "`VALIDATION_ERROR` o `REASON_REQUIRED`.",
     HTTPStatus.TOO_MANY_REQUESTS: "`RATE_LIMITED`, con el encabezado `Retry-After`.",
 }
 
