@@ -324,3 +324,8 @@ class FieldLimits:
 
     AUDIT_ACTION_PATTERN: ClassVar[str] = r"^[A-Z][A-Z0-9_]*$"
     """Action names are UPPER_SNAKE_CASE (``ck_audit_log_action``; use fullmatch)."""
+
+    # Messaging (M11).
+
+    MESSAGE_BODY_MAX_LENGTH: ClassVar[int] = 1000
+    """Longest message of a thread (``messaging.messages.body``)."""

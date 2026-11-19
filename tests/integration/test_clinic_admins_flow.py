@@ -13,7 +13,11 @@ from insumap.infrastructure.security.password_hasher import (
     Argon2PasswordHasher,
     PasswordHashingConfig,
 )
-from tests.integration.test_clinics_flow import _audit_actions, _bearer, _staff_token
+from tests.integration.test_clinics_flow import (
+    _audit_actions,
+    _bearer,
+    _staff_token,
+)
 from tests.support.db_seed import ADMIN_EMAIL, DEMO_PASSWORD, DemoWorld
 from tests.support.notifications import InMemoryChannel
 from tests.support.settings import make_settings
@@ -24,6 +28,12 @@ BASE = "/api/v1/clinics"
 PLATFORM_EMAIL = "plataforma.admins@example.test"
 EMAIL = "admin.norte@example.test"
 ACTION = "CLINIC_ADMIN_CREATED"
+RESET_ACTION = "CLINIC_ADMIN_ACCESS_RESET"
+CURRENT_USER = "/api/v1/auth/current-user"
+REFRESH_PATH = "/api/v1/auth"
+REFRESH_COOKIE = "__Secure-insumap_rt"
+CSRF = {"X-Requested-With": "insumap-web"}
+RESET_REASON = "Revisión de contrato con la clínica"
 REASON = "Revisión de contrato con la clínica"
 FORMATTED_CODE = re.compile(r"\b[A-Z0-9]{4}(?:-[A-Z0-9]{4}){3}\b")
 
@@ -186,3 +196,139 @@ def test_a_clinic_admin_cannot_create_another_admin(
     assert response.status_code == 403, response.text
     assert response.json()["error"]["code"] == "FORBIDDEN"
     assert _accounts(migrated_url, EMAIL) == []
+
+
+def _one(url: str, sql: str, params: tuple[object, ...]) -> tuple[Any, ...]:
+    """A superuser read: it bypasses row level security, to check what was written."""
+    with psycopg.connect(url) as conn:
+        row = conn.execute(sql, params).fetchone()
+    assert row is not None
+    return tuple(row)
+
+
+def _reset(
+    api: TestClient, headers: dict[str, str], user_id: UUID, clinic_id: UUID
+) -> Any:
+    return api.post(
+        f"{BASE}/{clinic_id}/admins/{user_id}/reset-access",
+        headers=headers,
+        json={"reason": RESET_REASON},
+    )
+
+
+def test_the_reset_ends_the_old_sessions_and_issues_a_new_invitation(
+    api: TestClient,
+    platform: dict[str, str],
+    demo_world: DemoWorld,
+    migrated_url: str,
+    mail: InMemoryChannel,
+) -> None:
+    admin_token = _staff_token(api, ADMIN_EMAIL)
+    admin_refresh = api.cookies.get(REFRESH_COOKIE, path=REFRESH_PATH)
+    assert admin_refresh
+    assert api.get(CURRENT_USER, headers=_bearer(admin_token)).status_code == 200
+    admin = str(demo_world.admin_user_id)
+    version_before = _one(
+        migrated_url, "SELECT token_version FROM iam.users WHERE id = %s", (admin,)
+    )
+
+    response = _reset(api, platform, demo_world.admin_user_id, demo_world.clinic_id)
+
+    assert response.status_code == 204, response.text
+    assert response.content == b""
+    version_after = _one(
+        migrated_url, "SELECT token_version FROM iam.users WHERE id = %s", (admin,)
+    )
+    assert version_after[0] == version_before[0] + 1
+    stale = api.get(CURRENT_USER, headers=_bearer(admin_token))
+    assert stale.status_code == 401, stale.text
+    assert stale.json()["error"]["code"] == "SESSION_REVOKED"
+    api.cookies.clear()
+    api.cookies.set(REFRESH_COOKIE, admin_refresh, path=REFRESH_PATH)
+    old_refresh = api.post("/api/v1/auth/refresh", headers=CSRF)
+    assert old_refresh.status_code == 401, old_refresh.text
+    api.cookies.clear()
+    assert (
+        _one(
+            migrated_url,
+            "SELECT status, token_version FROM iam.users WHERE id = %s",
+            (admin,),
+        )[0]
+        == "INVITED"
+    )
+    assert _one(
+        migrated_url,
+        "SELECT count(*) FROM iam.mfa_factors WHERE user_id = %s"
+        " AND revoked_at IS NULL",
+        (admin,),
+    ) == (0,)
+    assert _one(
+        migrated_url,
+        "SELECT count(*) FROM iam.refresh_tokens WHERE user_id = %s"
+        " AND revoked_at IS NULL",
+        (admin,),
+    ) == (0,)
+    pending = _one(
+        migrated_url,
+        "SELECT count(*) FROM iam.credential_invitations WHERE user_id = %s"
+        " AND status = 'PENDING' AND purpose = 'STAFF_ACTIVATION'",
+        (admin,),
+    )
+    assert pending == (1,)
+    with psycopg.connect(migrated_url) as conn:
+        invitation = conn.execute(
+            "SELECT channel, code_hash FROM iam.credential_invitations"
+            " WHERE user_id = %s AND status = 'PENDING'",
+            (UUID(admin),),
+        ).fetchone()
+    assert invitation is not None
+    channel, code_hash = invitation
+    assert channel == "EMAIL"
+    assert re.fullmatch(r"[0-9a-f]{64}", code_hash)
+    activation = [d for d in mail.delivered if FORMATTED_CODE.search(d.body)]
+    assert len(activation) == 1
+    assert activation[0].recipient.address == ADMIN_EMAIL
+    assert code_hash not in activation[0].body
+    assert RESET_ACTION in _audit_actions(migrated_url, str(demo_world.clinic_id))
+
+
+def test_a_missing_admin_is_404_and_writes_nothing(
+    api: TestClient,
+    platform: dict[str, str],
+    demo_world: DemoWorld,
+    migrated_url: str,
+    mail: InMemoryChannel,
+) -> None:
+    response = _reset(api, platform, uuid4(), demo_world.clinic_id)
+
+    assert response.status_code == 404, response.text
+    assert response.json()["error"]["code"] == "NOT_FOUND"
+    assert _one(
+        migrated_url,
+        "SELECT count(*) FROM iam.credential_invitations"
+        " WHERE purpose = 'STAFF_ACTIVATION'",
+        (),
+    ) == (0,)
+    assert mail.delivered == []
+
+
+def test_a_suspended_admin_is_409_and_keeps_its_invitations(
+    api: TestClient,
+    platform: dict[str, str],
+    demo_world: DemoWorld,
+    migrated_url: str,
+    mail: InMemoryChannel,
+) -> None:
+    with psycopg.connect(migrated_url, autocommit=True) as conn:
+        conn.execute(
+            "UPDATE iam.users SET status = 'SUSPENDED', status_changed_at = now(),"
+            " status_reason = 'Revisión de prueba'"
+            " WHERE id = %s",
+            (demo_world.admin_user_id,),
+        )
+
+    response = _reset(api, platform, demo_world.admin_user_id, demo_world.clinic_id)
+
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "INVALID_STATE_TRANSITION"
+    assert mail.delivered == []
