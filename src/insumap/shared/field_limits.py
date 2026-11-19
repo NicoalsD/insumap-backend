@@ -317,6 +317,9 @@ class FieldLimits:
     PUSH_KEY_PATTERN: ClassVar[str] = r"^[A-Za-z0-9_-]+$"
     """Subscription keys are base64url without padding (use fullmatch)."""
 
+    # clinic.privacy_requests.description (varchar(500))
+    PRIVACY_REQUEST_DESCRIPTION_MAX_LENGTH: ClassVar[int] = 500
+
     # Audit (audit.audit_log and audit.data_access_log, API.md 8.13).
 
     AUDIT_ACTION_MAX_LENGTH: ClassVar[int] = 60

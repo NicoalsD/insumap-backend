@@ -13,6 +13,7 @@ from insumap.api.routers.audit import AuditRouter
 from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.care_team import CareTeamRouter
 from insumap.api.routers.clinics import ClinicRouter
+from insumap.api.routers.consents import ConsentRouter
 from insumap.api.routers.credentials import CredentialRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.imports import ImportRouter
@@ -104,6 +105,26 @@ from insumap.application.commands.transactional import (
 )
 from insumap.application.common.patient_scope import PatientScope
 from insumap.application.common.unit_of_work import UnitOfWorkPort
+from insumap.application.consents.commands import (
+    AcceptConsentCommand,
+    AcceptConsentCommandHandler,
+    WithdrawConsentCommand,
+    WithdrawConsentCommandHandler,
+)
+from insumap.application.consents.gate import OwnConsentGate
+from insumap.application.consents.privacy_requests import (
+    CreatePrivacyRequestCommand,
+    CreatePrivacyRequestCommandHandler,
+    ExportPrivacyRequestUseCase,
+    ListPrivacyRequestsUseCase,
+    ResolvePrivacyRequestCommand,
+    ResolvePrivacyRequestCommandHandler,
+)
+from insumap.application.consents.queries import (
+    GetOwnConsentUseCase,
+    GetPrivacyNoticeUseCase,
+    ListConsentStatusesUseCase,
+)
 from insumap.application.credentials.commands import (
     IssueCredentialsCommand,
     IssueCredentialsCommandHandler,
@@ -340,6 +361,10 @@ from insumap.infrastructure.clinic_admin_adapters import (
     ClinicAdminAdapters,
     build_clinic_admin_adapters,
 )
+from insumap.infrastructure.consents_adapters import (
+    ConsentsAdapters,
+    build_consents_adapters,
+)
 from insumap.infrastructure.credentials_adapters import (
     CredentialsAdapters,
     build_credentials_adapters,
@@ -401,6 +426,10 @@ VERIFY_EMAIL_PATH: Final = "verify-email"
 """Routes of the web app the emailed links point at (``<base>/<path>#token=...``)."""
 
 ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
+    AcceptConsentCommand,
+    WithdrawConsentCommand,
+    CreatePrivacyRequestCommand,
+    ResolvePrivacyRequestCommand,
     RegenerateMfaRecoveryCodesCommand,
     ChangePasswordCommand,
     AssignDoctorCommand,
@@ -528,6 +557,7 @@ class Container:
         notification_adapters: NotificationAdapters | None = None,
         clinic_admin_adapters: ClinicAdminAdapters | None = None,
         patient_adapters: PatientAdapters | None = None,
+        consents_adapters: ConsentsAdapters | None = None,
         audit_adapters: AuditAdapters | None = None,
         messaging_adapters: MessagingAdapters | None = None,
     ) -> None:
@@ -571,6 +601,9 @@ class Container:
         )
         clinic_admins = clinic_admin_adapters or build_clinic_admin_adapters(
             current=current
+        )
+        consents = consents_adapters or build_consents_adapters(
+            current=current, transactions=SqlTransactionFactory(engine, current)
         )
         if email_channel is not None:
             platform = replace(platform, email_channel=email_channel)
@@ -622,6 +655,7 @@ class Container:
             ),
             *self._patient_commands(adapters, platform, patient_ports),
             *self._credential_commands(adapters, platform, unit_of_work, credentials),
+            *self._consent_commands(adapters, consents, unit_of_work),
         ]
         self.command_bus: CommandBus = InMemoryCommandBus(
             registrations, required=ALL_COMMAND_TYPES
@@ -634,6 +668,7 @@ class Container:
             ),
             staff_actor=self.full_session_actor,
         )
+        self.consent_router = self._build_consent_router(adapters, consents, monitoring)
         self.clinic_router = ClinicRouter(
             commands=self.command_bus,
             list_clinics=ListClinicsUseCase(
@@ -1278,6 +1313,99 @@ class Container:
                 ),
             ),
         ]
+
+    def _consent_commands(
+        self,
+        adapters: IdentityAdapters,
+        ports: ConsentsAdapters,
+        events: CurrentUnitOfWork,
+    ) -> list[Registration]:
+        """The consent and privacy decisions (P13), behind transaction and audit."""
+        guard, clock = self._command_guard, self.clock
+        own_consent = OwnConsentGate()
+        return [
+            bind(
+                AcceptConsentCommand,
+                guard.wrap(
+                    AcceptConsentCommandHandler(
+                        gate=own_consent,
+                        consents=adapters.consents,
+                        history=ports.history,
+                        ids=adapters.ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                WithdrawConsentCommand,
+                guard.wrap(
+                    WithdrawConsentCommandHandler(
+                        gate=own_consent,
+                        consents=adapters.consents,
+                        history=ports.history,
+                        ids=adapters.ids,
+                        clock=clock,
+                        events=events,
+                    )
+                ),
+            ),
+            bind(
+                CreatePrivacyRequestCommand,
+                guard.wrap(
+                    CreatePrivacyRequestCommandHandler(
+                        gate=OwnPatientGate(adapters.consents),
+                        requests=ports.requests,
+                        ids=adapters.ids,
+                        clock=clock,
+                        due_days=self.settings.privacy_request_due_days,
+                    )
+                ),
+            ),
+            bind(
+                ResolvePrivacyRequestCommand,
+                guard.wrap(
+                    ResolvePrivacyRequestCommandHandler(
+                        requests=ports.requests, clock=clock
+                    )
+                ),
+            ),
+        ]
+
+    def _build_consent_router(
+        self,
+        adapters: IdentityAdapters,
+        ports: ConsentsAdapters,
+        monitoring: MonitoringAdapters,
+    ) -> ConsentRouter:
+        """Wire the consent and privacy routes (API.md 8.13) over ``ports``."""
+        uow, clock = adapters.unit_of_work, self.clock
+        return ConsentRouter(
+            commands=self.command_bus,
+            notice=GetPrivacyNoticeUseCase(uow=uow, notices=ports.notices),
+            own_consent=GetOwnConsentUseCase(
+                uow=uow,
+                gate=OwnConsentGate(),
+                consents=adapters.consents,
+                history=ports.history,
+            ),
+            list_statuses=ListConsentStatusesUseCase(
+                uow=uow,
+                history=ports.history,
+                access_log=ports.access_log,
+                clock=clock,
+            ),
+            list_requests=ListPrivacyRequestsUseCase(uow=uow, requests=ports.requests),
+            export_request=ExportPrivacyRequestUseCase(
+                uow=uow,
+                gate=OwnPatientGate(adapters.consents),
+                requests=ports.requests,
+                history=ports.history,
+                timeline=monitoring.timeline,
+                access_log=ports.access_log,
+                clock=clock,
+            ),
+            session_actor=self.full_session_actor,
+        )
 
     def _credential_issue_limit(self, adapters: IdentityAdapters) -> RateLimitCheck:
         """300 code issues per clinic and hour (API.md section 5)."""
