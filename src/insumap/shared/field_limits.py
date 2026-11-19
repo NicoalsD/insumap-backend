@@ -177,3 +177,29 @@ class FieldLimits:
     CURSOR_MAX_LENGTH: ClassVar[int] = 512
     """Longest pagination cursor accepted (the records cursor carries a time and
     an id); a longer one is invalid."""
+
+    # Alerts (alerts.alert_rules and alerts.alerts).
+
+    ALERT_NAME_MAX_LENGTH: ClassVar[int] = 120
+    """Maximum length of the name of an alert rule (``alerts.alert_rules.name``)."""
+
+    ALERT_LEVEL_MIN: ClassVar[int] = 1
+    """Lowest hypoglycemia level (``alerts.alert_rules.level``, CHECK 1 to 3)."""
+
+    ALERT_LEVEL_MAX: ClassVar[int] = 3
+    """Highest hypoglycemia level, and the last step of an escalation chain."""
+
+    ALERT_MINUTES_MIN: ClassVar[int] = 1
+    """Shortest duration or wait of a rule, in minutes."""
+
+    ALERT_MINUTES_MAX: ClassVar[int] = 10080
+    """Longest duration or wait of a rule, in minutes (one week)."""
+
+    ALERT_RATE_INPUT_MAX: ClassVar[int] = 100
+    """Largest rate of change accepted in a rule, in mg/dL per minute."""
+
+    ALERT_CONDITION_MAX_DEPTH: ClassVar[int] = 4
+    """Deepest nesting of a rule condition tree (an input limit, not a clinical one)."""
+
+    ALERT_CONDITION_MAX_NODES: ClassVar[int] = 16
+    """Most nodes, leaves and groups together, in one rule condition tree."""

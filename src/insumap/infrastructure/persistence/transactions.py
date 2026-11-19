@@ -26,6 +26,16 @@ the end of the transaction and never leaks to the next one on the connection."""
 NOT_SET = ""
 
 
+SYSTEM_ROLE = "SYSTEM"
+
+
+def _role_value(context: TransactionContext) -> str:
+    """The ``app.role`` of the transaction: ``SYSTEM``, a role or nothing."""
+    if context.system:
+        return SYSTEM_ROLE
+    return NOT_SET if context.role is None else context.role.value
+
+
 @final
 class CurrentSession:
     """The session of the transaction that is open in this thread of control.
@@ -73,7 +83,7 @@ class SqlTransaction(Transaction):
                 if context.clinic_id is None
                 else str(context.clinic_id),
                 "user_id": NOT_SET if context.user_id is None else str(context.user_id),
-                "role": NOT_SET if context.role is None else context.role.value,
+                "role": _role_value(context),
             },
         )
 
