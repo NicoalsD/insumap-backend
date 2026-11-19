@@ -1,6 +1,6 @@
 # Historias de usuario
 
-Este documento define 56 historias de usuario (HU-01 a HU-56), agrupadas por módulo (M1 a M13). Cada historia tiene actor, enunciado, prioridad, fase del plan, requisitos relacionados y criterios de aceptación en formato Dado/Cuando/Entonces. Los requisitos están en [Requerimientos.md](Requerimientos.md) y los permisos en [Actores-y-permisos.md](Actores-y-permisos.md).
+Este documento define 57 historias de usuario (HU-01 a HU-57), agrupadas por módulo (M1 a M13). Cada historia tiene actor, enunciado, prioridad, fase del plan, requisitos relacionados y criterios de aceptación en formato Dado/Cuando/Entonces. Los requisitos están en [Requerimientos.md](Requerimientos.md) y los permisos en [Actores-y-permisos.md](Actores-y-permisos.md).
 
 > **Aviso:** Insumap es un proyecto académico, no es un dispositivo médico y la IA solo apoya al médico. Los pacientes son simulados.
 
@@ -37,7 +37,7 @@ Este documento define 56 historias de usuario (HU-01 a HU-56), agrupadas por mó
 | M2 Clínicas y usuarios | HU-04 a HU-05 | 2 |
 | M3 Onboarding y credenciales | HU-06 a HU-11 | 6 |
 | M4 Equipo de atención | HU-12 a HU-14 | 3 |
-| M5 Registros del paciente | HU-15 a HU-23 | 9 |
+| M5 Registros del paciente | HU-15 a HU-23 y HU-57 | 10 |
 | M6 Plan de tratamiento | HU-24 a HU-28 | 5 |
 | M7 Métricas glucémicas | HU-29 a HU-30 | 2 |
 | M8 Alertas y notificaciones | HU-31 a HU-36 | 6 |
@@ -46,7 +46,7 @@ Este documento define 56 historias de usuario (HU-01 a HU-56), agrupadas por mó
 | M11 Mensajería y seguimiento | HU-49 a HU-50 | 2 |
 | M12 Auditoría y cumplimiento | HU-51 a HU-53 | 3 |
 | M13 Datos simulados | HU-54 a HU-56 | 3 |
-| **Total** | | **56** |
+| **Total** | | **57** |
 
 ---
 
@@ -509,6 +509,11 @@ Escenario: sin sugerencia de dosis
   Dado un paciente registrando una dosis
   Cuando abre la pantalla
   Entonces la app no calcula ni sugiere ninguna dosis; solo registra lo que él indica
+
+Escenario: registrar el sitio de inyección
+  Dado un paciente que registra una dosis
+  Cuando elige el sitio y el punto sobre el cuerpo 3D
+  Entonces la dosis se guarda con `injection_site` e `injection_spot` y la siguiente sugerencia rota
 ```
 
 ### HU-18: Registrar comidas y actividad
@@ -648,6 +653,48 @@ Escenario: lecturas repetidas
   Dado un archivo con lecturas ya cargadas
   Cuando lo carga
   Entonces las repetidas se marcan DUPLICATE y no se duplican
+```
+
+### HU-57: Ver dónde inyectarme
+
+- **Actor:** `PATIENT` (el `DOCTOR` asignado ve el historial de sitios).
+- **Historia:** Como paciente, quiero que la app me diga en qué sitio inyectarme y me lo muestre en el cuerpo, para rotar los sitios y evitar la lipohipertrofia.
+- **Prioridad:** MVP. **Fase:** 5. **RF:** RF-101.
+
+```gherkin
+Escenario: bolo de una paciente
+  Dado una paciente (FEMALE) con un plan que permite todos los sitios
+  Cuando abre "Dónde inyectarme" para un bolo
+  Entonces el cuerpo 3D marca un punto del abdomen como sugerido y explica el motivo
+
+Escenario: insulina basal
+  Dado una basal sin restricciones del plan
+  Cuando consulta el sitio
+  Entonces se sugiere un muslo o un glúteo, con un punto distinto al último usado
+
+Escenario: embarazo
+  Dado una paciente con `pregnancy_status` PREGNANT
+  Cuando consulta el sitio para un bolo
+  Entonces el centro del abdomen aparece como "evitar" y se sugiere un lado del abdomen o el muslo
+
+Escenario: paciente delgado
+  Dado un paciente MALE con IMC menor de 22
+  Cuando consulta el sitio para un bolo
+  Entonces el brazo y el muslo aparecen como "evitar" y se sugiere el abdomen con la nota de pellizco
+
+Escenario: el plan restringe los sitios
+  Dado un plan cuyo ítem solo permite abdomen y muslo
+  Cuando consulta el sitio
+  Entonces el brazo y el glúteo no son opciones y el motivo es "indicado por tu plan"
+
+Escenario: lipohipertrofia reportada
+  Dado un síntoma de lipohipertrofia registrado en el muslo derecho hace 20 días
+  Cuando consulta el sitio
+  Entonces el muslo derecho queda como "evitar" y el médico ve el aviso
+
+Escenario: la app no decide dosis
+  Dado cualquier consulta de sitio
+  Entonces la respuesta no contiene unidades de insulina
 ```
 
 ## M6: Plan de tratamiento
@@ -1519,7 +1566,7 @@ Escenario: solo en la clínica demo
 | HU-14 | RF-14, RF-30 |
 | HU-15 | RF-31, RF-33 |
 | HU-16 | RF-32, RF-33 |
-| HU-17 | RF-34 |
+| HU-17 | RF-34, RF-101 |
 | HU-18 | RF-35, RF-36 |
 | HU-19 | RF-37 |
 | HU-20 | RF-38 |
@@ -1559,6 +1606,7 @@ Escenario: solo en la clínica demo
 | HU-54 | RF-97, RF-99, RF-100 |
 | HU-55 | RF-96 |
 | HU-56 | RF-98, RF-99 |
+| HU-57 | RF-101 |
 
 ## Documentos relacionados
 

@@ -28,6 +28,7 @@ Términos clínicos y técnicos usados en la documentación de Insumap, en orden
 | Hipoglucemia nivel 3 | `HYPO_L3` | Evento severo con alteración mental o física que requiere ayuda de otra persona; se registra como evento, sin un umbral de glucosa. |
 | ICR (relación insulina-carbohidratos) | `insulin_to_carb_ratio` | Gramos de carbohidratos que cubre una unidad de insulina de acción rápida. Es un parámetro del plan que define el médico; la IA nunca lo comunica al paciente como consejo. |
 | ISF (factor de sensibilidad a la insulina) | `insulin_sensitivity_factor` | Cuántos mg/dL baja la glucosa una unidad de insulina de acción rápida. Parámetro del plan definido por el médico. |
+| Sitio de inyección | `injection_site` | Una de ocho zonas del cuerpo (abdomen, muslo, brazo y glúteo, derecha e izquierda del paciente) con cuatro puntos cada una. La app sugiere el siguiente con una regla determinista y lo muestra en el cuerpo 3D (RF-101); nunca sugiere la dosis. |
 | Lipohipertrofia | `lipohypertrophy` | Engrosamiento del tejido graso por inyectar insulina repetidamente en el mismo sitio; altera la absorción y puede explicar una glucosa variable. Es un síntoma que se puede registrar. |
 | Rango objetivo | `target_range` | Intervalo de glucosa deseado (por ejemplo, 70 a 180 mg/dL), definido por el perfil de metas. |
 | SMBG (automonitoreo de glucosa capilar) | `SMBG` | Medición con glucómetro y gota de sangre. Fuente de lectura `SMBG`. |
