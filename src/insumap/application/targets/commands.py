@@ -84,7 +84,15 @@ class CreateTargetProfileVersionCommand(Command[TargetProfileVersion]):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class AssignTargetProfileCommand(Command[PatientTargetAssignment]):
+class AssignedTargetProfile:
+    """The assignment that now holds, with the profile version it points to."""
+
+    assignment: PatientTargetAssignment
+    profile: TargetProfileVersion
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AssignTargetProfileCommand(Command[AssignedTargetProfile]):
     """The doctor assigns a profile to a patient he cares for."""
 
     audit_action: ClassVar[str] = "TARGET_PROFILE_ASSIGNED"
@@ -94,10 +102,10 @@ class AssignTargetProfileCommand(Command[PatientTargetAssignment]):
     target_profile_id: UUID
 
     @override
-    def audit_subject(self, result: PatientTargetAssignment) -> AuditSubject:
+    def audit_subject(self, result: AssignedTargetProfile) -> AuditSubject:
         return AuditSubject(
             clinic_id=self.actor.clinic_id,
-            entity_id=result.id,
+            entity_id=result.assignment.id,
             changed_fields=("target_profile_id",),
         )
 
@@ -188,7 +196,7 @@ class CreateTargetProfileVersionCommandHandler(
 
 @final
 class AssignTargetProfileCommandHandler(
-    CommandHandler[AssignTargetProfileCommand, PatientTargetAssignment]
+    CommandHandler[AssignTargetProfileCommand, AssignedTargetProfile]
 ):
     """Ends the open assignment and opens one for the profile (other clinic: 404)."""
 
@@ -208,7 +216,7 @@ class AssignTargetProfileCommandHandler(
         self._clock = clock
 
     @override
-    def handle(self, command: AssignTargetProfileCommand) -> PatientTargetAssignment:
+    def handle(self, command: AssignTargetProfileCommand) -> AssignedTargetProfile:
         actor = command.actor
         patient_id = self._gate.enter(
             actor,
@@ -227,7 +235,7 @@ class AssignTargetProfileCommandHandler(
         if open_assignment is not None and (
             open_assignment.target_profile_id == profile.id
         ):
-            return open_assignment
+            return AssignedTargetProfile(assignment=open_assignment, profile=profile)
         at = self._clock.now()
         if open_assignment is not None:
             self._assignments.end(open_assignment.ended(at))
@@ -240,4 +248,4 @@ class AssignTargetProfileCommandHandler(
             assigned_at=at,
         )
         self._assignments.insert(assignment)
-        return assignment
+        return AssignedTargetProfile(assignment=assignment, profile=profile)

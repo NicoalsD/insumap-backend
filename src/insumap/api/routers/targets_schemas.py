@@ -17,8 +17,8 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from insumap.api.routers.common import StrictRequest
+from insumap.application.targets.commands import AssignedTargetProfile
 from insumap.domain.metrics.target_profile_version import (
-    PatientTargetAssignment,
     TargetProfileValues,
     TargetProfileVersion,
 )
@@ -82,9 +82,9 @@ def _percent(description: str) -> Any:
     )
 
 
-def _count(description: str) -> Any:
-    """A count of days, minutes or readings (positive, within ``integer``)."""
-    return Field(gt=0, le=FieldLimits.INTEGER_MAX, description=description)
+def _count(description: str, *, ceiling: int = FieldLimits.INTEGER_MAX) -> Any:
+    """A positive count, within the ``integer`` or ``smallint`` column it maps to."""
+    return Field(gt=0, le=ceiling, description=description)
 
 
 class TargetProfileValuesRequest(StrictRequest):
@@ -113,10 +113,16 @@ class TargetProfileValuesRequest(StrictRequest):
     min_data_sufficiency_pct: Decimal = _percent(
         "Suficiencia mínima de datos para reportar métricas."
     )
-    min_days: int = _count("Días del periodo de referencia.")
-    max_gap_minutes: int = _count("Minutos máximos que una lectura representa.")
+    min_days: int = _count(
+        "Días del periodo de referencia.", ceiling=FieldLimits.SMALLINT_MAX
+    )
+    max_gap_minutes: int = _count(
+        "Minutos máximos que una lectura representa.",
+        ceiling=FieldLimits.SMALLINT_MAX,
+    )
     hypo_episode_min_minutes: int = _count(
-        "Minutos consecutivos bajo el umbral para contar un episodio."
+        "Minutos consecutivos bajo el umbral para contar un episodio.",
+        ceiling=FieldLimits.SMALLINT_MAX,
     )
     min_readings_for_cv: int = _count("Lecturas mínimas para el CV con CGM.")
     min_readings_for_cv_smbg: int = _count(
@@ -444,19 +450,26 @@ class TargetProfileDetailResponse(TargetProfileResponse):
 
 
 class PatientTargetAssignmentResponse(BaseModel):
-    """The profile assigned to a patient. ``target_profile_id`` is the version row."""
+    """The profile assigned to a patient, with the version it points to."""
 
     id: UUID
     patient_id: UUID
     target_profile_id: UUID
+    code: str
+    version: int
+    label: str
     assigned_at: datetime
 
     @classmethod
-    def of(cls, assignment: PatientTargetAssignment) -> Self:
+    def of(cls, result: AssignedTargetProfile) -> Self:
+        assignment, profile = result.assignment, result.profile
         return cls(
             id=assignment.id,
             patient_id=assignment.patient_id,
             target_profile_id=assignment.target_profile_id,
+            code=profile.code,
+            version=profile.version,
+            label=profile.values.label,
             assigned_at=assignment.assigned_at,
         )
 
