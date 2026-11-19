@@ -16,7 +16,7 @@ La arquitectura separa cuatro piezas de producto (la PWA, la API, el scheduler y
 
 | Actor o sistema externo | Qué hace con Insumap | Canal |
 |---|---|---|
-| Paciente (`PATIENT`) | Activa su cuenta con el código de un solo uso, registra glucosa, insulina, comidas, actividad y síntomas, ve sus gráficas y su plan activo, recibe recordatorios y alertas, escribe a su médico y usa el asistente educativo. | PWA mobile first |
+| Paciente (`PATIENT`) | Activa su cuenta con el código de un solo uso, registra glucosa, insulina, comidas, actividad y síntomas, ve sus gráficas y su plan activo, recibe recordatorios y alertas, escribe a su médico y usa el asistente educativo. | PWA escritorio primero, instalable y usable desde 360 px |
 | Médico (`DOCTOR`) | Ve el triage de sus pacientes asignados y el detalle de cada uno (AGP, TIR, línea de tiempo), gestiona el plan de tratamiento, decide las recomendaciones de la IA, atiende alertas, notas y mensajes. | Dashboard web |
 | Admin de clínica (`CLINIC_ADMIN`) | Importa pacientes, emite y reenvía credenciales, gestiona médicos, usuarios y equipos de atención, configura metas, reglas de alerta y plantillas de protocolo, ve la auditoría y los KPIs. **No ve datos clínicos detallados.** | Consola web |
 | Admin de plataforma (`PLATFORM_ADMIN`) | Crea y gestiona clínicas (tenants). No ve datos de pacientes. | Consola web |
