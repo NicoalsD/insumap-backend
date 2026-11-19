@@ -66,7 +66,9 @@ CLINIC_ADMIN_PERMISSIONS = frozenset(
 )
 
 
-def doctor(user: UUID = DOCTOR, permissions=DOCTOR_PERMISSIONS) -> Actor:
+def doctor(
+    user: UUID = DOCTOR, permissions: frozenset[PermissionCode] = DOCTOR_PERMISSIONS
+) -> Actor:
     return Actor(
         user_id=user,
         clinic_id=CLINIC,
@@ -77,7 +79,9 @@ def doctor(user: UUID = DOCTOR, permissions=DOCTOR_PERMISSIONS) -> Actor:
     )
 
 
-def admin(permissions=CLINIC_ADMIN_PERMISSIONS) -> Actor:
+def admin(
+    permissions: frozenset[PermissionCode] = CLINIC_ADMIN_PERMISSIONS,
+) -> Actor:
     return Actor(
         user_id=UUID(int=3),
         clinic_id=CLINIC,

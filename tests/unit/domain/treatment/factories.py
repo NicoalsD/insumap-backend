@@ -29,7 +29,11 @@ def uid(n: int) -> UUID:
 
 
 def insulin(
-    name: str = "Basal", *, at: str | None = "08:00", units: str = "10", days=None
+    name: str = "Basal",
+    *,
+    at: str | None = "08:00",
+    units: str = "10",
+    days: tuple[int, ...] | None = None,
 ) -> ItemSpec:
     return ItemSpec(
         item_type=ItemType.INSULIN,

@@ -8,7 +8,7 @@ import pytest
 
 from insumap.domain.identity.errors import InvalidStateTransitionError
 from insumap.domain.treatment.content import ItemType
-from insumap.domain.treatment.plan import PlanStatus
+from insumap.domain.treatment.plan import PlanStatus, TreatmentPlan
 from insumap.domain.treatment.template import (
     ProtocolTemplate,
     TemplateStatus,
@@ -44,7 +44,9 @@ def template(status: TemplateStatus = TemplateStatus.ACTIVE) -> ProtocolTemplate
     )
 
 
-def clone(source: ProtocolTemplate, *, item_ids=None):
+def clone(
+    source: ProtocolTemplate, *, item_ids: tuple[UUID, ...] | None = None
+) -> TreatmentPlan:
     ids = item_ids or (uid(1), uid(2))
     return source.clone_for_patient(
         plan_id=UUID(int=500),

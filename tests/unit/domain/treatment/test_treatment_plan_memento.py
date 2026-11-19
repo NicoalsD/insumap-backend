@@ -1,6 +1,7 @@
 """P16 Memento: TreatmentPlan.create_memento() and from_memento()."""
 
 import json
+from datetime import time
 from decimal import Decimal
 
 from insumap.domain.treatment.content import TitrationRules
@@ -48,7 +49,7 @@ def test_the_memento_keeps_the_decimal_and_the_time_exactly() -> None:
     restored = TreatmentPlan.from_memento(plan.create_memento(taken_at=AT))
 
     assert restored.items[0].dose_units == Decimal("0.25")
-    assert restored.items[0].time_of_day.isoformat() == "06:45:00"
+    assert restored.items[0].time_of_day == time(6, 45)
 
 
 def test_a_memento_without_titration_rules_or_items_round_trips() -> None:

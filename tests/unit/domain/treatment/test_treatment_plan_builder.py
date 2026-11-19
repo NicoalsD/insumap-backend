@@ -30,7 +30,9 @@ from tests.unit.domain.treatment.factories import (
 LIMITS = ProtocolLimits(max_dose_units=Decimal("20"), min_gap_minutes=60)
 
 
-def violations_of(plan: TreatmentPlan, limits: ProtocolLimits | None = None):
+def violations_of(
+    plan: TreatmentPlan, limits: ProtocolLimits | None = None
+) -> tuple[PlanViolation, ...]:
     with pytest.raises(TreatmentPlanInvariantError) as raised:
         TreatmentPlanBuilder(plan, limits=limits).build()
     assert raised.value.code is ErrorCode.VALIDATION_ERROR
@@ -153,9 +155,11 @@ def test_incoherent_titration_rules_are_refused_all_at_once() -> None:
 def test_every_violation_is_reported_together() -> None:
     found = violations_of(
         draft(
-            insulin("A", units="0", at="08:00"),
-            insulin("B", units="5", at="08:00"),
-            ItemSpec(item_type=ItemType.INSULIN, name="C", dose_units=Decimal("1")),
+            *plan_items(
+                insulin("A", units="0", at="08:00"),
+                insulin("B", units="5", at="08:00"),
+                ItemSpec(item_type=ItemType.INSULIN, name="C", dose_units=Decimal("1")),
+            ),
         ),
         LIMITS,
     )

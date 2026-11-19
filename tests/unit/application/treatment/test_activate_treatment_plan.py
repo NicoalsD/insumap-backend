@@ -5,6 +5,7 @@ from uuid import UUID
 
 import pytest
 
+from insumap.application.common.actor import Actor
 from insumap.application.treatment.plan_commands import ActivateTreatmentPlanCommand
 from insumap.domain.common.errors import ResourceNotFoundError
 from insumap.domain.identity.errors import (
@@ -12,7 +13,8 @@ from insumap.domain.identity.errors import (
     PermissionDeniedError,
 )
 from insumap.domain.treatment.builder import TreatmentPlanInvariantError
-from insumap.domain.treatment.plan import PlanStatus
+from insumap.domain.treatment.content import ItemSpec
+from insumap.domain.treatment.plan import PlanStatus, TreatmentPlan
 from insumap.shared.errors import ErrorCode
 from tests.support.treatment_fakes import active
 from tests.unit.application.treatment.helpers import (
@@ -35,17 +37,19 @@ from tests.unit.domain.treatment.factories import (
 OLD_PLAN = UUID(int=11)
 
 
-def a_draft(plan_id: UUID = PLAN, *, version: int = 2, items=None):
+def a_draft(
+    plan_id: UUID = PLAN, *, version: int = 2, items: tuple[ItemSpec, ...] | None = None
+) -> TreatmentPlan:
     specs = (insulin(), measure()) if items is None else items
     base = draft(*plan_items(*specs))
     return replace(base, plan_id=plan_id, version=version)
 
 
-def an_active(plan_id: UUID = OLD_PLAN):
+def an_active(plan_id: UUID = OLD_PLAN) -> TreatmentPlan:
     return active(replace(a_draft(plan_id, version=1), status=PlanStatus.ACTIVE))
 
 
-def activate(world: World, plan_id: UUID, actor=None):
+def activate(world: World, plan_id: UUID, actor: Actor | None = None) -> TreatmentPlan:
     return world.activate.handle(
         ActivateTreatmentPlanCommand(actor=actor or doctor(), plan_id=plan_id)
     )

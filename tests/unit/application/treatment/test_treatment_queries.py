@@ -15,7 +15,7 @@ from insumap.application.treatment.queries import (
 )
 from insumap.domain.common.errors import ResourceNotFoundError
 from insumap.domain.identity.errors import ConsentRequiredError
-from insumap.domain.treatment.plan import PlanStatus
+from insumap.domain.treatment.plan import PlanStatus, TreatmentPlan
 from tests.support.treatment_fakes import active
 from tests.unit.application.treatment.helpers import (
     World,
@@ -38,7 +38,7 @@ DRAFT_PLAN = UUID(int=31)
 ACTIVE_PLAN = UUID(int=32)
 
 
-def plan(plan_id: UUID, *, is_active: bool):
+def plan(plan_id: UUID, *, is_active: bool) -> TreatmentPlan:
     base = replace(draft(*plan_items(insulin(), measure())), plan_id=plan_id)
     return active(base) if is_active else base
 

@@ -15,7 +15,7 @@ from insumap.application.treatment.plan_commands import (
 )
 from insumap.domain.common.errors import ResourceNotFoundError
 from insumap.domain.identity.errors import InvalidStateTransitionError
-from insumap.domain.treatment.plan import PlanStatus
+from insumap.domain.treatment.plan import PlanStatus, TreatmentPlan
 from insumap.domain.treatment.template import TemplateStatus
 from insumap.shared.errors import ErrorCode, InsumapError
 from tests.support.treatment_fakes import active
@@ -40,13 +40,13 @@ OTHER_TARGET = UUID(int=44)
 NEW = PlanContentInput(items=(insulin("Nueva", units="4"),), notes="Ajuste")
 
 
-def a_draft(plan_id: UUID = PLAN, version: int = 1):
+def a_draft(plan_id: UUID = PLAN, version: int = 1) -> TreatmentPlan:
     return replace(
         draft(*plan_items(insulin(), measure())), plan_id=plan_id, version=version
     )
 
 
-def an_active(plan_id: UUID = PLAN, version: int = 1):
+def an_active(plan_id: UUID = PLAN, version: int = 1) -> TreatmentPlan:
     return active(a_draft(plan_id, version))
 
 
