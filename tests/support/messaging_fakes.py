@@ -12,6 +12,7 @@ from uuid import UUID
 
 from insumap.application.access.ports import (
     AccessPurpose,
+    DataAccessAction,
     DataResource,
     PatientDirectoryPort,
     PatientRecord,
@@ -193,8 +194,9 @@ class FakeAssignedRecords(PatientRecordPort):
         patient_id: UUID,
         purpose: AccessPurpose,
         resource: DataResource,
+        action: DataAccessAction = DataAccessAction.READ,
     ) -> PatientRecord:
-        del purpose
+        del purpose, action
         self.reads.append((actor.user_id, patient_id, resource))
         if (actor.user_id, patient_id) not in self.assigned:
             raise ResourceNotFoundError

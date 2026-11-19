@@ -457,6 +457,56 @@ class AlertStatusHistoryOrm(Base):
     occurred_at: Mapped[datetime] = _timestamp()
 
 
+CARE_SCHEMA = {"schema": "care"}
+
+
+class ClinicalNoteOrm(Base):
+    """``care.clinical_notes``: append only; ``body`` is the text of the note."""
+
+    __tablename__ = "clinical_notes"
+    __table_args__ = CARE_SCHEMA
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    author_user_id: Mapped[UUID] = mapped_column(Uuid)
+    body: Mapped[str] = mapped_column(String(2000))
+    supersedes_id: Mapped[UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = _timestamp()
+
+
+class TriageReviewOrm(Base):
+    """``care.triage_reviews``: append only; the latest row of a doctor wins."""
+
+    __tablename__ = "triage_reviews"
+    __table_args__ = CARE_SCHEMA
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    reviewed_by: Mapped[UUID] = mapped_column(Uuid)
+    risk_assessment_id: Mapped[UUID | None] = mapped_column(Uuid)
+    window_days: Mapped[int] = mapped_column(SmallInteger)
+    reviewed_at: Mapped[datetime] = _timestamp()
+
+
+class ClinicSettingsOrm(Base):
+    """``clinic.clinic_settings``: the global row has a null ``clinic_id``."""
+
+    __tablename__ = "clinic_settings"
+    __table_args__ = CLINIC
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID | None] = mapped_column(Uuid)
+    recommendation_expiry_hours: Mapped[int] = mapped_column(Integer)
+    forecast_refresh_minutes: Mapped[int] = mapped_column(Integer)
+    dropout_inactivity_days: Mapped[int] = mapped_column(Integer)
+    kpi_min_cell_size: Mapped[int] = mapped_column(Integer)
+    updated_by: Mapped[UUID | None] = mapped_column(Uuid)
+    updated_at: Mapped[datetime] = _timestamp()
+    lock_version: Mapped[int] = mapped_column(Integer)
+
+
 AI = {"schema": "ai"}
 
 

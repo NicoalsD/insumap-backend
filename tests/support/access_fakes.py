@@ -10,6 +10,7 @@ from uuid import UUID
 from insumap.application.access.ports import (
     AccessPurpose,
     CareTeamAssignmentPort,
+    DataAccessAction,
     DataAccessLogPort,
     DataAccessRecord,
     DataResource,
@@ -94,6 +95,7 @@ class RecordingSubject(PatientRecordPort):
         patient_id: UUID,
         purpose: AccessPurpose,
         resource: DataResource,
+        action: DataAccessAction = DataAccessAction.READ,
     ) -> PatientRecord:
         self.calls += 1
         return PatientRecord(patient_id=patient_id, clinic_id=CLINIC)

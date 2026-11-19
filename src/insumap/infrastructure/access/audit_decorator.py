@@ -7,6 +7,7 @@ from uuid import UUID
 
 from insumap.application.access.ports import (
     AccessPurpose,
+    DataAccessAction,
     DataAccessLogPort,
     DataAccessOutcome,
     DataAccessRecord,
@@ -50,19 +51,34 @@ class PhiAccessAuditDecorator(PatientRecordPort):
         patient_id: UUID,
         purpose: AccessPurpose,
         resource: DataResource,
+        action: DataAccessAction = DataAccessAction.READ,
     ) -> PatientRecord:
         try:
-            record = self._inner.read_record(actor, patient_id, purpose, resource)
+            record = self._inner.read_record(
+                actor, patient_id, purpose, resource, action
+            )
         except InsumapError as error:
             if error.code in DENIAL_CODES:
                 self._log.record_denied(
                     self._entry(
-                        actor, patient_id, purpose, resource, DataAccessOutcome.DENIED
+                        actor,
+                        patient_id,
+                        purpose,
+                        resource,
+                        DataAccessOutcome.DENIED,
+                        action,
                     )
                 )
             raise
         self._log.record_granted(
-            self._entry(actor, patient_id, purpose, resource, DataAccessOutcome.GRANTED)
+            self._entry(
+                actor,
+                patient_id,
+                purpose,
+                resource,
+                DataAccessOutcome.GRANTED,
+                action,
+            )
         )
         return record
 
@@ -73,6 +89,7 @@ class PhiAccessAuditDecorator(PatientRecordPort):
         purpose: AccessPurpose,
         resource: DataResource,
         outcome: DataAccessOutcome,
+        action: DataAccessAction,
     ) -> DataAccessRecord:
         return DataAccessRecord(
             occurred_at=self._clock.now(),
@@ -84,4 +101,5 @@ class PhiAccessAuditDecorator(PatientRecordPort):
             purpose=purpose,
             outcome=outcome,
             request_id=current_request_id(),
+            action=action,
         )

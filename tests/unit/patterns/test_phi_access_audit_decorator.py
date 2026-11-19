@@ -6,6 +6,7 @@ import pytest
 
 from insumap.application.access.ports import (
     AccessPurpose,
+    DataAccessAction,
     DataAccessOutcome,
     DataResource,
     PatientRecord,
@@ -43,6 +44,7 @@ class BrokenSubject(PatientRecordPort):
         patient_id: UUID,
         purpose: AccessPurpose,
         resource: DataResource,
+        action: DataAccessAction = DataAccessAction.READ,
     ) -> PatientRecord:
         raise InsumapError(ErrorCode.INTERNAL_ERROR)
 
@@ -131,3 +133,27 @@ def test_an_error_that_is_not_a_denial_leaves_no_denied_row() -> None:
 
     assert error.value.code is ErrorCode.INTERNAL_ERROR
     assert log.denied == [] and log.granted == []
+
+
+def test_an_export_is_recorded_with_the_export_action() -> None:
+    log = InMemoryDataAccessLog()
+    chain(log).read_record(
+        actor(DOCTOR, Role.DOCTOR),
+        PATIENT,
+        AccessPurpose.CARE,
+        DataResource.REPORT,
+        DataAccessAction.EXPORT,
+    )
+
+    [row] = log.granted
+    assert row.action is DataAccessAction.EXPORT
+    assert row.resource is DataResource.REPORT
+
+
+def test_a_plain_read_defaults_to_the_read_action() -> None:
+    log = InMemoryDataAccessLog()
+    chain(log).read_record(
+        actor(DOCTOR, Role.DOCTOR), PATIENT, AccessPurpose.CARE, RESOURCE
+    )
+
+    assert [row.action for row in log.granted] == [DataAccessAction.READ]

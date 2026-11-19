@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import final, override
 
 from sqlalchemy import text
@@ -41,6 +42,14 @@ class SqlDataAccessLog(DataAccessLogPort):
     @override
     def record_granted(self, record: DataAccessRecord) -> None:
         self._current.get().execute(INSERT_ROW, self._params(record))
+
+    @override
+    def record_granted_many(self, records: Sequence[DataAccessRecord]) -> None:
+        """One batch of INSERTs in the list transaction (triage audit, P09)."""
+        if records:
+            self._current.get().execute(
+                INSERT_ROW, [self._params(record) for record in records]
+            )
 
     @override
     def record_denied(self, record: DataAccessRecord) -> None:

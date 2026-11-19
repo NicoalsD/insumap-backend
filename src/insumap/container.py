@@ -14,19 +14,24 @@ from insumap.api.routers.assistant import AssistantRouter
 from insumap.api.routers.audit import AuditRouter
 from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.care_team import CareTeamRouter
+from insumap.api.routers.clinic_kpis import ClinicKpiRouter
+from insumap.api.routers.clinical_notes import ClinicalNotesRouter
 from insumap.api.routers.clinics import ClinicRouter
 from insumap.api.routers.consents import ConsentRouter
 from insumap.api.routers.credentials import CredentialRouter
+from insumap.api.routers.dashboard import DashboardRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.imports import ImportRouter
 from insumap.api.routers.messaging import MessagingRouter
 from insumap.api.routers.meta import MetaRouter
 from insumap.api.routers.metrics import MetricsRouter
 from insumap.api.routers.notifications import NotificationRouter
+from insumap.api.routers.overview import PatientOverviewRouter
 from insumap.api.routers.patients import PatientRouter
 from insumap.api.routers.recommendations import RecommendationRouter
 from insumap.api.routers.records import RecordsRouter
 from insumap.api.routers.reminders import ReminderRouter
+from insumap.api.routers.reports import ReportRouter
 from insumap.api.routers.sites import SiteRouter
 from insumap.api.routers.targets import TargetProfileRouter
 from insumap.api.routers.treatment import TreatmentRouter
@@ -98,6 +103,7 @@ from insumap.application.clinic_admins.commands import (
     ResetClinicAdminAccessCommand,
     ResetClinicAdminAccessCommandHandler,
 )
+from insumap.application.clinic_kpis.queries import GetClinicKpisUseCase
 from insumap.application.clinics.commands import (
     CreateClinicCommand,
     CreateClinicCommandHandler,
@@ -162,6 +168,16 @@ from insumap.application.credentials.issuance import (
     IssueCredentialsBatchUseCase,
     IssueCredentialUseCase,
 )
+from insumap.application.dashboard.clinical_notes_queries import (
+    ListClinicalNotesUseCase,
+)
+from insumap.application.dashboard.commands import (
+    CreateClinicalNoteCommand,
+    CreateClinicalNoteCommandHandler,
+    MarkPatientReviewedCommand,
+    MarkPatientReviewedCommandHandler,
+)
+from insumap.application.dashboard.triage_facade import DoctorDashboardFacade
 from insumap.application.events.publisher import (
     DomainEventPublisher,
     InProcessDomainEventPublisher,
@@ -276,6 +292,7 @@ from insumap.application.onboarding.queries import (
     ListImportBatchesUseCase,
     ListImportRowsUseCase,
 )
+from insumap.application.overview.patient_overview_facade import PatientOverviewFacade
 from insumap.application.patients.commands import (
     DeactivatePatientCommand,
     DeactivatePatientCommandHandler,
@@ -304,6 +321,12 @@ from insumap.application.reminders.commands import (
 from insumap.application.reminders.queries import (
     ListOwnRemindersUseCase,
     ListPatientRemindersUseCase,
+)
+from insumap.application.reports.generate import (
+    GenerateClinicReportUseCase,
+    GenerateOwnReportUseCase,
+    GeneratePatientReportUseCase,
+    PatientReadSources,
 )
 from insumap.application.security.rate_limit import RateLimitCheck, RateLimitRule
 from insumap.application.sites.commands import (
@@ -400,6 +423,10 @@ from insumap.infrastructure.credentials_adapters import (
     CredentialsAdapters,
     build_credentials_adapters,
 )
+from insumap.infrastructure.dashboard_adapters import (
+    DashboardAdapters,
+    build_dashboard_adapters,
+)
 from insumap.infrastructure.identity_adapters import (
     IdentityAdapters,
     build_engine,
@@ -437,6 +464,7 @@ from insumap.infrastructure.platform_adapters import (
     PlatformAdapters,
     build_platform_adapters,
 )
+from insumap.infrastructure.reports.adapter import ReportRenderingAdapter
 from insumap.infrastructure.security.keys import KeyRing
 from insumap.infrastructure.targets_adapters import (
     TargetsAdapters,
@@ -509,6 +537,8 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     DeactivatePatientCommand,
     IssueCredentialsCommand,
     RevokeCredentialInvitationCommand,
+    MarkPatientReviewedCommand,
+    CreateClinicalNoteCommand,
     CreateFollowUpCommand,
     CloseFollowUpCommand,
 )
@@ -591,6 +621,7 @@ class Container:
         notification_adapters: NotificationAdapters | None = None,
         clinic_admin_adapters: ClinicAdminAdapters | None = None,
         patient_adapters: PatientAdapters | None = None,
+        dashboard_adapters: DashboardAdapters | None = None,
         ai_adapters: AiAdapters | None = None,
         consents_adapters: ConsentsAdapters | None = None,
         audit_adapters: AuditAdapters | None = None,
@@ -676,6 +707,9 @@ class Container:
         )
         messaging = messaging_adapters or build_messaging_adapters(current=current)
         audit = audit_adapters or build_audit_adapters(current=current)
+        dashboard = dashboard_adapters or build_dashboard_adapters(
+            current=current, transactions=SqlTransactionFactory(engine, current)
+        )
         services = self._build_identity_services(adapters, platform)
         unit_of_work = CurrentUnitOfWork()
         self._command_guard = CommandGuard(
@@ -701,6 +735,7 @@ class Container:
             ),
             *self._patient_commands(adapters, platform, patient_ports),
             *self._credential_commands(adapters, platform, unit_of_work, credentials),
+            *self._dashboard_commands(adapters, monitoring, dashboard),
             *self._consent_commands(adapters, consents, unit_of_work),
         ]
         self.command_bus: CommandBus = InMemoryCommandBus(
@@ -786,6 +821,21 @@ class Container:
         )
         self.treatment_router = self._build_treatment_router(
             adapters, monitoring, treatment
+        )
+        self.dashboard_router = self._build_dashboard_router(
+            adapters, monitoring, dashboard
+        )
+        self.clinical_notes_router = self._build_clinical_notes_router(
+            adapters, monitoring, dashboard
+        )
+        self.overview_router = self._build_overview_router(
+            adapters, monitoring, treatment, targets, alerts, dashboard
+        )
+        self.clinic_kpi_router = self._build_clinic_kpi_router(
+            adapters, alerts, dashboard
+        )
+        self.reports_router = self._build_reports_router(
+            adapters, monitoring, treatment, alerts, patient_ports, platform
         )
         self.audit_router = self._build_audit_router(adapters, audit)
         self.messaging_router = self._build_messaging_router(
@@ -916,6 +966,214 @@ class Container:
                 uow=uow, gate=own, plans=treatment.plans
             ),
             staff_actor=self.full_session_actor,
+        )
+
+    def _dashboard_commands(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        dashboard: DashboardAdapters,
+    ) -> list[Registration]:
+        """The triage reviews and the clinical notes (P13), audited by the guard."""
+        guard, clock, ids = self._command_guard, self.clock, adapters.ids
+        gate = AssignedPatientGate(monitoring.patient_records)
+        return [
+            bind(
+                MarkPatientReviewedCommand,
+                guard.wrap(
+                    MarkPatientReviewedCommandHandler(
+                        gate=gate, reviews=dashboard.reviews, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                CreateClinicalNoteCommand,
+                guard.wrap(
+                    CreateClinicalNoteCommandHandler(
+                        gate=gate, notes=dashboard.notes, ids=ids, clock=clock
+                    )
+                ),
+            ),
+        ]
+
+    def _build_dashboard_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        dashboard: DashboardAdapters,
+    ) -> DashboardRouter:
+        """Wire the triage list (P10) and the review command (API.md 8.11)."""
+        return DashboardRouter(
+            commands=self.command_bus,
+            triage=DoctorDashboardFacade(
+                uow=adapters.unit_of_work,
+                roster=dashboard.roster,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                open_alerts=dashboard.open_alerts,
+                reviews=dashboard.reviews,
+                audit=dashboard.audit,
+                strategies=GlycemicTargetStrategyRegistry(),
+                clock=self.clock,
+            ),
+            messages=self.message_catalog,
+            staff_actor=self.full_session_actor,
+        )
+
+    def _build_clinical_notes_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        dashboard: DashboardAdapters,
+    ) -> ClinicalNotesRouter:
+        """Wire the clinical notes of the assigned team (API.md 8.11)."""
+        return ClinicalNotesRouter(
+            commands=self.command_bus,
+            list_notes=ListClinicalNotesUseCase(
+                uow=adapters.unit_of_work,
+                gate=AssignedPatientGate(monitoring.patient_records),
+                notes=dashboard.notes,
+            ),
+            staff_actor=self.full_session_actor,
+        )
+
+    def _build_overview_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        treatment: TreatmentAdapters,
+        targets: TargetsAdapters,
+        alerts: AlertsAdapters,
+        dashboard: DashboardAdapters,
+    ) -> PatientOverviewRouter:
+        """Wire the patient start page, for the doctor and the patient (API.md 8.6)."""
+        return PatientOverviewRouter(
+            overview=PatientOverviewFacade(
+                uow=adapters.unit_of_work,
+                assigned=AssignedPatientGate(monitoring.patient_records),
+                own=OwnPatientGate(adapters.consents),
+                targets=monitoring.targets,
+                series=monitoring.series,
+                readings=monitoring.readings,
+                plans=treatment.plans,
+                alerts=alerts.alerts,
+                open_alerts=dashboard.open_alerts,
+                reminders=targets.reminders,
+                strategies=GlycemicTargetStrategyRegistry(),
+                clock=self.clock,
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_clinic_kpi_router(
+        self,
+        adapters: IdentityAdapters,
+        alerts: AlertsAdapters,
+        dashboard: DashboardAdapters,
+    ) -> ClinicKpiRouter:
+        """Wire the clinic KPIs: counts only (API.md 8.11)."""
+        return ClinicKpiRouter(
+            kpis=GetClinicKpisUseCase(
+                uow=adapters.unit_of_work, kpis=dashboard.kpis, alerts=alerts.summary
+            ),
+            staff_actor=self.full_session_actor,
+        )
+
+    def _build_reports_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        treatment: TreatmentAdapters,
+        alerts: AlertsAdapters,
+        patients: PatientAdapters,
+        platform: PlatformAdapters,
+    ) -> ReportRouter:
+        """Wire the report endpoints (API.md 8.11) over the existing read use cases.
+
+        The clinical sections are read through the same use cases as the metrics,
+        timeline and plan endpoints, so the report audits each read it makes. The
+        rate limit shares the export counter of the user (API.md 5).
+        """
+        uow, clock = adapters.unit_of_work, self.clock
+        own = OwnPatientGate(adapters.consents)
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        sources = PatientReadSources(
+            metrics=ComputeGlycemicMetricsUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                strategies=GlycemicTargetStrategyRegistry(),
+                clock=clock,
+            ),
+            agp=GetAgpUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                targets=monitoring.targets,
+                series=monitoring.series,
+                clock=clock,
+            ),
+            timeline=GetTimelineUseCase(
+                uow=uow,
+                own_gate=own,
+                assigned_gate=assigned,
+                timeline=monitoring.timeline,
+            ),
+        )
+        export_limit = RateLimitCheck(
+            adapters.rate_limiter,
+            RateLimitRule(
+                family="exports_user_hour",
+                limit=self.settings.rate_limit_exports_per_user_per_hour,
+                window=timedelta(hours=1),
+            ),
+        )
+        renderer = ReportRenderingAdapter(self.message_catalog)
+        return ReportRouter(
+            patient=GeneratePatientReportUseCase(
+                uow=uow,
+                gate=assigned,
+                clinics=platform.clinics,
+                sources=sources,
+                plans=ListTreatmentPlansUseCase(
+                    uow=uow, gate=assigned, plans=treatment.plans
+                ),
+                rate_limit=export_limit,
+                renderer=renderer,
+                clock=clock,
+            ),
+            own=GenerateOwnReportUseCase(
+                uow=uow,
+                gate=own,
+                clinics=platform.clinics,
+                log=patients.access_log,
+                sources=sources,
+                own_plan=GetOwnTreatmentPlanUseCase(
+                    uow=uow, gate=own, plans=treatment.plans
+                ),
+                rate_limit=export_limit,
+                renderer=renderer,
+                clock=clock,
+            ),
+            clinic=GenerateClinicReportUseCase(
+                uow=uow,
+                clinics=platform.clinics,
+                log=patients.access_log,
+                patients=ListPatientsUseCase(
+                    uow=uow,
+                    roster=patients.roster,
+                    access_log=patients.access_log,
+                    clock=clock,
+                ),
+                alerts=GetAlertSummaryUseCase(uow=uow, summary=alerts.summary),
+                rate_limit=export_limit,
+                renderer=renderer,
+                clock=clock,
+                small_count_threshold=self.settings.report_small_count_threshold,
+            ),
+            session_actor=self.full_session_actor,
         )
 
     def _build_identity_services(
