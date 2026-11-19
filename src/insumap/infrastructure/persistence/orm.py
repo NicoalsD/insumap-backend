@@ -324,3 +324,75 @@ class LoginLockoutOrm(Base):
     last_failure_at: Mapped[datetime | None] = _timestamp(nullable=True)
     reset_at: Mapped[datetime | None] = _timestamp(nullable=True)
     updated_at: Mapped[datetime] = _timestamp()
+
+
+ALERTS = {"schema": "alerts"}
+
+
+class AlertRuleOrm(Base):
+    __tablename__ = "alert_rules"
+    __table_args__ = ALERTS
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID | None] = mapped_column(Uuid)
+    code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(120))
+    alert_type: Mapped[str] = mapped_column(String(14))
+    level: Mapped[int | None] = mapped_column(SmallInteger)
+    priority: Mapped[str] = mapped_column(String(8))
+    definition: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    escalation: Mapped[list[Any]] = mapped_column(JSONB)
+    bypass_quiet_hours: Mapped[bool] = mapped_column(Boolean)
+    patient_notice: Mapped[str | None] = mapped_column(String(300))
+    version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(7))
+    change_reason: Mapped[str | None] = mapped_column(String(500))
+    created_by: Mapped[UUID | None] = mapped_column(Uuid)
+    activated_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=NOW
+    )
+
+
+class AlertOrm(Base):
+    __tablename__ = "alerts"
+    __table_args__ = ALERTS
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    rule_id: Mapped[UUID] = mapped_column(Uuid)
+    alert_type: Mapped[str] = mapped_column(String(14))
+    level: Mapped[int | None] = mapped_column(SmallInteger)
+    priority: Mapped[str] = mapped_column(String(8))
+    status: Mapped[str] = mapped_column(String(12))
+    escalation_level: Mapped[int] = mapped_column(SmallInteger)
+    next_escalation_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    opened_at: Mapped[datetime] = _timestamp()
+    trigger_reading_id: Mapped[UUID | None] = mapped_column(Uuid)
+    forecast_id: Mapped[UUID | None] = mapped_column(Uuid)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    is_fallback: Mapped[bool] = mapped_column(Boolean)
+    acknowledged_by: Mapped[UUID | None] = mapped_column(Uuid)
+    acknowledged_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    resolved_by: Mapped[UUID | None] = mapped_column(Uuid)
+    resolved_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    resolution_note: Mapped[str | None] = mapped_column(String(500))
+    updated_at: Mapped[datetime] = _timestamp()
+    lock_version: Mapped[int] = mapped_column(Integer)
+
+
+class AlertStatusHistoryOrm(Base):
+    __tablename__ = "alert_status_history"
+    __table_args__ = ALERTS
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    alert_id: Mapped[UUID] = mapped_column(Uuid)
+    from_status: Mapped[str | None] = mapped_column(String(12))
+    to_status: Mapped[str] = mapped_column(String(12))
+    escalation_level: Mapped[int] = mapped_column(SmallInteger)
+    actor_user_id: Mapped[UUID | None] = mapped_column(Uuid)
+    actor_type: Mapped[str] = mapped_column(String(6))
+    note: Mapped[str | None] = mapped_column(String(500))
+    occurred_at: Mapped[datetime] = _timestamp()

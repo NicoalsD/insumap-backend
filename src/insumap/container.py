@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import Final, Never, final
 
 from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
+from insumap.api.routers.alerts import AlertRouter
 from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.care_team import CareTeamRouter
 from insumap.api.routers.clinics import ClinicRouter
@@ -24,6 +25,24 @@ from insumap.api.routers.targets import TargetProfileRouter
 from insumap.api.routers.treatment import TreatmentRouter
 from insumap.api.routers.users import UserRouter
 from insumap.api.security import ActorGuard, RefreshCookie, RefreshCsrfGuard
+from insumap.application.alerts.commands import (
+    AcknowledgeAlertCommand,
+    AcknowledgeAlertCommandHandler,
+    CreateAlertRuleCommand,
+    CreateAlertRuleCommandHandler,
+    CreateAlertRuleVersionCommand,
+    CreateAlertRuleVersionCommandHandler,
+    ResolveAlertCommand,
+    ResolveAlertCommandHandler,
+)
+from insumap.application.alerts.evaluation import EvaluateAlertRulesOnReading
+from insumap.application.alerts.queries import (
+    GetAlertRuleUseCase,
+    GetAlertSummaryUseCase,
+    GetAlertUseCase,
+    ListAlertRulesUseCase,
+    ListAlertsUseCase,
+)
 from insumap.application.care_team.commands import (
     AssignDoctorCommand,
     AssignDoctorCommandHandler,
@@ -271,7 +290,12 @@ from insumap.application.users.queries import GetStaffUseCase, ListStaffUseCase
 from insumap.domain.identity.password_policy import PasswordPolicy
 from insumap.domain.identity.refresh_token import RefreshTokenLifetime
 from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistry
+from insumap.domain.monitoring.events import GlucoseReadingRecorded
 from insumap.domain.monitoring.validation import build_validation_chain
+from insumap.infrastructure.alerts_adapters import (
+    AlertsAdapters,
+    build_alerts_adapters,
+)
 from insumap.infrastructure.clinic_admin_adapters import (
     ClinicAdminAdapters,
     build_clinic_admin_adapters,
@@ -344,6 +368,10 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     DeactivateStaffUserCommand,
     UnlockStaffUserCommand,
     ResetStaffMfaCommand,
+    CreateAlertRuleCommand,
+    CreateAlertRuleVersionCommand,
+    AcknowledgeAlertCommand,
+    ResolveAlertCommand,
     CreateProtocolTemplateCommand,
     CreateProtocolTemplateVersionCommand,
     RetireProtocolTemplateCommand,
@@ -438,6 +466,7 @@ class Container:
         targets_adapters: TargetsAdapters | None = None,
         credentials_adapters: CredentialsAdapters | None = None,
         email_channel: NotificationChannel | None = None,
+        alert_adapters: AlertsAdapters | None = None,
         treatment_adapters: TreatmentAdapters | None = None,
         notification_adapters: NotificationAdapters | None = None,
         clinic_admin_adapters: ClinicAdminAdapters | None = None,
@@ -486,6 +515,7 @@ class Container:
         )
         if email_channel is not None:
             platform = replace(platform, email_channel=email_channel)
+        alerts = alert_adapters or build_alerts_adapters(current=current)
         treatment = treatment_adapters or build_treatment_adapters(
             current=current, metrics_targets=monitoring.targets
         )
@@ -512,6 +542,7 @@ class Container:
             *self._clinic_commands(adapters, platform),
             *self._site_commands(adapters, platform),
             *self._users_commands(adapters, platform, unit_of_work),
+            *self._alert_commands(adapters, monitoring, alerts),
             *self._treatment_commands(adapters, treatment, monitoring),
             *self._targets_commands(adapters, monitoring, targets),
             *self._clinic_admin_commands(
@@ -576,6 +607,8 @@ class Container:
         )
         self.records_router = self._build_records_router(adapters, monitoring)
         self.metrics_router = self._build_metrics_router(adapters, monitoring)
+        self._subscribe_alert_evaluation(adapters, alerts)
+        self.alerts_router = self._build_alerts_router(adapters, monitoring, alerts)
         self.target_profile_router = self._build_target_profile_router(
             adapters, targets
         )
@@ -1370,6 +1403,101 @@ class Container:
                     events=adapters.security_events,
                 )
             ),
+        )
+
+    def _alert_commands(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        alerts: AlertsAdapters,
+    ) -> list[Registration]:
+        """The alert decisions (P13), each behind transaction and audit (P09)."""
+        guard, clock, ids = self._command_guard, self.clock, adapters.ids
+        own = OwnPatientGate(adapters.consents)
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        return [
+            bind(
+                CreateAlertRuleCommand,
+                guard.wrap(
+                    CreateAlertRuleCommandHandler(
+                        rules=alerts.rules, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                CreateAlertRuleVersionCommand,
+                guard.wrap(
+                    CreateAlertRuleVersionCommandHandler(
+                        rules=alerts.rules, ids=ids, clock=clock
+                    )
+                ),
+            ),
+            bind(
+                AcknowledgeAlertCommand,
+                guard.wrap(
+                    AcknowledgeAlertCommandHandler(
+                        alerts=alerts.alerts,
+                        own_gate=own,
+                        assigned_gate=assigned,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                ResolveAlertCommand,
+                guard.wrap(
+                    ResolveAlertCommandHandler(
+                        alerts=alerts.alerts,
+                        assigned_gate=assigned,
+                        ids=ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+        ]
+
+    def _subscribe_alert_evaluation(
+        self, adapters: IdentityAdapters, alerts: AlertsAdapters
+    ) -> None:
+        """Evaluate the rules after each committed reading (P17), if in-process."""
+        publisher = self.event_publisher
+        if not isinstance(publisher, InProcessDomainEventPublisher):
+            return
+        publisher.subscribe(
+            GlucoseReadingRecorded,
+            EvaluateAlertRulesOnReading(
+                uow=adapters.unit_of_work,
+                rules=alerts.rules,
+                alerts=alerts.alerts,
+                history=alerts.history,
+                ids=adapters.ids,
+                clock=self.clock,
+            ),
+        )
+
+    def _build_alerts_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        alerts: AlertsAdapters,
+    ) -> AlertRouter:
+        """Wire the rules and alerts reads (API.md 8.9) over the scoped gates."""
+        uow = adapters.unit_of_work
+        own = OwnPatientGate(adapters.consents)
+        assigned = AssignedPatientGate(monitoring.patient_records)
+        return AlertRouter(
+            commands=self.command_bus,
+            list_rules=ListAlertRulesUseCase(uow=uow, rules=alerts.rules),
+            get_rule=GetAlertRuleUseCase(uow=uow, rules=alerts.rules),
+            list_alerts=ListAlertsUseCase(
+                uow=uow, own_gate=own, assigned_gate=assigned, alerts=alerts.alerts
+            ),
+            get_summary=GetAlertSummaryUseCase(uow=uow, summary=alerts.summary),
+            get_alert=GetAlertUseCase(
+                uow=uow, own_gate=own, assigned_gate=assigned, alerts=alerts.alerts
+            ),
+            session_actor=self.full_session_actor,
         )
 
     def _build_records_router(

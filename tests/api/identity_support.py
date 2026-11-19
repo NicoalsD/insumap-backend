@@ -18,6 +18,7 @@ from insumap.infrastructure.targets_adapters import TargetsAdapters
 from insumap.infrastructure.treatment_adapters import TreatmentAdapters
 from insumap.main import create_app
 from tests.support.access_fakes import FakeDirectory, InMemoryDataAccessLog
+from tests.support.alerts_fakes import AlertsWorld
 from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
 from tests.support.clinic_admin_fakes import FakeClinicAdminProvisioning
 from tests.support.clinic_fakes import FakeClinics
@@ -88,6 +89,7 @@ class IdentityApi:
         )
         self.staff_directory = FakeStaffDirectory(self.world.users, self.world.factors)
         self.staff_invitations = FakeStaffInvitations()
+        self.alerts = AlertsWorld()
         self.login_lockouts = FakeLoginLockouts()
         self.templates = FakeTemplates()
         self.plans = FakePlans()
@@ -127,6 +129,7 @@ class IdentityApi:
                 activation_codes=DistinctActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
+            alert_adapters=self.alerts.adapters(),
             treatment_adapters=TreatmentAdapters(
                 templates=self.templates,
                 plans=self.plans,

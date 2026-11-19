@@ -37,11 +37,21 @@ class TransactionContext:
     user_id: UUID | None = None
     clinic_id: UUID | None = None
     role: Role | None = None
+    system: bool = False
+    """``True`` for the work of the system (a subscriber, a job): ``app.role = SYSTEM``.
+
+    ``SYSTEM`` is not a ``Role``: it never comes from a token or ``iam.roles``.
+    """
 
     @classmethod
     def anonymous(cls) -> TransactionContext:
         """Context of a request with no known user yet."""
         return cls()
+
+    @classmethod
+    def for_system(cls, clinic_id: UUID) -> TransactionContext:
+        """Context of the system acting inside one clinic (no user, no role)."""
+        return cls(clinic_id=clinic_id, system=True)
 
     @classmethod
     def for_actor(cls, actor: Actor) -> TransactionContext:
