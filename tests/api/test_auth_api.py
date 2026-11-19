@@ -548,7 +548,7 @@ def test_every_auth_route_declares_its_access_and_is_documented_in_spanish() -> 
         if path.startswith("/api/v1/auth")
         for method, operation in item.items()
     ]
-    assert len(operations) == 10
+    assert len(operations) == 12
     for path, method, operation in operations:
         assert operation["x-access"], (path, method)
         assert operation["operationId"]

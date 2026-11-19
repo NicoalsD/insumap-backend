@@ -3,7 +3,9 @@
 from fastapi.testclient import TestClient
 
 from insumap.container import Container
+from insumap.infrastructure.platform_adapters import PlatformAdapters
 from insumap.main import create_app
+from tests.support.commands import InMemoryAuditLog
 from tests.support.identity_world import IdentityWorld
 from tests.support.settings import make_settings
 
@@ -16,9 +18,13 @@ class IdentityApi:
 
     def __init__(self) -> None:
         self.world = IdentityWorld()
+        self.audit_log = InMemoryAuditLog()
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
-            settings, clock=self.world.clock, identity_adapters=self.world.adapters()
+            settings,
+            clock=self.world.clock,
+            identity_adapters=self.world.adapters(),
+            platform_adapters=PlatformAdapters(audit_log=self.audit_log),
         )
         self.app = create_app(container)
         self.client = TestClient(
