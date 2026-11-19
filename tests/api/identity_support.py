@@ -25,6 +25,12 @@ from tests.support.identity_world import (
     make_account,
 )
 from tests.support.monitoring_fakes import RecordsWorld, records_adapters
+from tests.support.notification_fakes import (
+    InMemoryNotificationStore,
+    InMemoryPreferences,
+    InMemoryPushSubscriptions,
+    notification_adapters,
+)
 from tests.support.notifications import InMemoryChannel
 from tests.support.settings import make_settings
 from tests.support.sites_fakes import FakeSites
@@ -58,6 +64,9 @@ class IdentityApi:
         self.staff_directory = FakeStaffDirectory(self.world.users, self.world.factors)
         self.staff_invitations = FakeStaffInvitations()
         self.login_lockouts = FakeLoginLockouts()
+        self.notification_store = InMemoryNotificationStore()
+        self.preferences = InMemoryPreferences()
+        self.push_subscriptions = InMemoryPushSubscriptions()
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -78,6 +87,11 @@ class IdentityApi:
                 activation_codes=FakeActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
+            notification_adapters=notification_adapters(
+                store=self.notification_store,
+                preferences=self.preferences,
+                subscriptions=self.push_subscriptions,
+            ),
         )
         self.app = create_app(container)
         self.client = TestClient(
