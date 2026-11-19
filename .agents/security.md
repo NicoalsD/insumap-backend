@@ -2,7 +2,7 @@
 
 > Guía operativa de [Seguridad](../docs/Seguridad.md). Responde: cómo se implementa cada control en este repositorio, con esqueletos en Python 3.13, y qué prueba lo protege. La política y las cifras canónicas están en `docs/Seguridad.md`; esta guía no inventa valores: donde la política no fija una cifra, se marca "propuesto". Si esta guía y la política no coinciden, gana la política y se corrige esta guía. Los paquetes y los nombres siguen [`architecture.md`](architecture.md); los patrones (P09, P11, P13, P17, P18) están en [`design-patterns.md`](design-patterns.md).
 
-Los números de sección de este archivo están enlazados desde `docs/Seguridad.md` (sección 2 para los valores por defecto, 5 para la rotación del refresh, 10 para la prueba de denegación por defecto y 19 para las pruebas). No se renumeran.
+Los números de sección de este archivo están enlazados desde `docs/Seguridad.md` (sección 2 para los valores por defecto, 5 para la rotación del refresh, 10 para la prueba de denegación por defecto y 19 para las pruebas) y entre sí (la 15 para las llaves y las columnas cifradas, la 20 para las diferencias con el código). No se renumeran.
 
 ## 1. Alcance y reglas que no se rompen
 
@@ -20,10 +20,12 @@ Los números de sección de este archivo están enlazados desde `docs/Seguridad.
 | `PatientRecordAccessProxy` | 12 | `infrastructure`, `domain` | `infrastructure/access`, `domain/access` |
 | Auditoría y eventos de seguridad | 13 | `infrastructure`, `application` | `infrastructure/access`, `application/commands` |
 | Redacción de logs | 14 | `infrastructure` | `infrastructure/logging` |
-| Llaves y columnas cifradas | 15 | `infrastructure` | `infrastructure/security` |
-| Rotación con `*_PREVIOUS` | 16 | `infrastructure`, `application` | `infrastructure/security`, `application/jobs` |
-| Cabeceras, CORS y tamaño de cuerpo | 17 | `api` | `api/middleware` |
-| Minimización hacia la IA | 18 | `domain`, `infrastructure` | `domain/ai`, `infrastructure/ai` |
+| Llaves y columnas cifradas | 15 | `shared`, `infrastructure`, `application` | `shared/key_material`, `infrastructure/security` |
+| Rotación con `*_PREVIOUS`, secretos y configuración | 16 | `shared`, `application`, `infrastructure` | `application/jobs`, `shared/config` |
+| Cabeceras, CORS, hosts y tamaño de cuerpo | 17 | `api`, `infrastructure` | `api/middleware`, `api/body_limits` |
+| Minimización y token de servicio hacia la IA | 18 | `domain`, `application`, `infrastructure` | `domain/ai`, `infrastructure/ai` |
+| Pruebas de seguridad | 19 | `tests` | `tests/support`, `tests/unit`, `tests/api`, `tests/integration` |
+| Diferencias con el código actual y pendientes | 20 | | |
 
 Reglas transversales (de [`architecture.md`](architecture.md), sección 3, y de la política):
 
@@ -2043,3 +2045,1021 @@ def test_uuid_is_not_altered() -> None:
 
 **Antipatrones:** `logger.info("body=%s", await request.body())`; registrar `request.headers`; un `print` de depuración con datos; usar el access log de uvicorn; incluir el valor de glucosa en el mensaje (`"reading %s"`); un `extra={"email": ...}` "porque el filtro lo enmascara" (el filtro es la red de seguridad, no el control).
 
+
+## 15. Columnas sensibles y gestión de llaves
+
+- **Dónde vive:** las funciones puras de formato de llave en `insumap/shared/key_material.py` (solo `base64` y `hashlib`, para que `Settings` pueda validar sin importar otra capa); `KeyRing`, `SubkeyHasher` y `ColumnCipher` en `insumap/infrastructure/security/keys.py` y `column_cipher.py`; el puerto `ColumnCipherPort` en `insumap/application/security/ports.py`. `container.py` arma un `KeyRing` por cada llave de la tabla 2.4 y los entrega por constructor.
+- **Qué se protege y cómo** (política 8): el documento del paciente (`ColumnCipher` con `FIELD_ENCRYPTION_KEY` más `document_hash` con `LOOKUP_HMAC_KEY`), el secreto TOTP (`ColumnCipher` con `MFA_ENCRYPTION_KEY`), los códigos de activación y de respaldo (`CodeHasher`, sección 8, con `CODE_HMAC_KEY`) y la IP y las claves de los contadores (`SubkeyHasher` con `APP_HMAC_KEY`). Contraseña y tokens opacos no usan llaves de aplicación (secciones 3 y 5).
+- **Regla de la huella:** toda fila protegida guarda el `key_id` de la llave que la protegió. Sin él no hay rotación posible.
+
+### 15.1 Formato de la llave y huella
+
+Cada llave son 32 bytes en base64 (estándar o url-safe). El cargador exige exactamente 32 bytes decodificados y **nunca** repite el valor en el error. La huella son los primeros 16 caracteres hexadecimales de `SHA-256("insumap-key-id|" ‖ llave)`: identifica la llave sin revelarla y es lo que va en `kid`, en `*_key_id` y en los logs de rotación.
+
+```python
+# insumap/shared/key_material.py
+import base64
+import binascii
+import hashlib
+from typing import Final
+
+KEY_BYTES: Final = 32
+FINGERPRINT_PREFIX: Final = b"insumap-key-id|"
+FINGERPRINT_HEX_CHARS: Final = 16
+STANDARD_ALPHABET_FIX: Final = str.maketrans("-_", "+/")
+
+
+def decode_key(encoded: str) -> bytes:
+    """Decode standard or url-safe base64 into exactly KEY_BYTES; the error never echoes the value."""
+    text = encoded.strip().translate(STANDARD_ALPHABET_FIX)
+    text += "=" * (-len(text) % 4)
+    try:
+        raw = base64.b64decode(text, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("the key is not valid base64") from None
+    if len(raw) != KEY_BYTES:
+        raise ValueError(f"the key must decode to {KEY_BYTES} bytes")
+    return raw
+
+
+def key_fingerprint(key: bytes) -> str:
+    """Public identifier of a key (``key_id``, JWT ``kid``)."""
+    return hashlib.sha256(FINGERPRINT_PREFIX + key).hexdigest()[:FINGERPRINT_HEX_CHARS]
+```
+
+El marcador `cambia-esto-...` de `.env.example` **no** es base64 de 32 bytes: copiarlo tal cual hace que la API no arranque, que es lo que se quiere. Cada persona genera sus llaves de desarrollo con el comando del comentario de `.env.example` (sección 16.2).
+
+### 15.2 `KeyRing`: actual y anterior
+
+Un `KeyRing` agrupa la llave **actual** y, si existe, la **anterior** de una misma variable (`<NOMBRE>` y `<NOMBRE>_PREVIOUS`). La actual firma, cifra o hashea; las dos verifican, descifran o buscan.
+
+- `current_key()` y `current_key_id`: lo que se usa para escribir.
+- `verification_key(kid)`: la llave cuya huella es `kid`. Un `kid` desconocido o ausente lanza `KeyError`; `JwtTokenService.decode` lo convierte en `401` (sección 4). Una huella que ya no está en el anillo es una llave retirada: sus tokens y sus filas dejan de ser válidos.
+- `all_keys()`: pares `(key_id, key)` con la actual primero, para búsquedas deterministas durante una rotación (`CodeHasher.hashes_for_lookup`, sección 8).
+- La anterior no puede ser igual a la actual: se rechaza al construir (una rotación que no cambia nada es un error de despliegue).
+
+```python
+# insumap/infrastructure/security/keys.py
+from typing import final
+
+from pydantic import SecretStr
+
+from insumap.shared.key_material import decode_key, key_fingerprint
+
+
+@final
+class KeyRing:
+    def __init__(self, *, current: SecretStr, previous: SecretStr | None = None) -> None:
+        current_key = decode_key(current.get_secret_value())
+        self._current_id = key_fingerprint(current_key)
+        self._keys: dict[str, bytes] = {self._current_id: current_key}
+        if previous is not None:
+            previous_key = decode_key(previous.get_secret_value())
+            previous_id = key_fingerprint(previous_key)
+            if previous_id == self._current_id:
+                raise ValueError("the previous key must differ from the current one")
+            self._keys[previous_id] = previous_key
+
+    @property
+    def current_key_id(self) -> str:
+        return self._current_id
+
+    def current_key(self) -> bytes:
+        return self._keys[self._current_id]
+
+    def verification_key(self, key_id: str | None) -> bytes:
+        """The key with this fingerprint; unknown or missing raises KeyError (a retired key)."""
+        if key_id is None or key_id not in self._keys:
+            raise KeyError("unknown key id")
+        return self._keys[key_id]
+
+    def all_keys(self) -> tuple[tuple[str, bytes], ...]:
+        """Current key first, then the previous one."""
+        return tuple(self._keys.items())
+```
+
+(`dict` conserva el orden de inserción, así que la actual queda primero.) El contenedor construye `KeyRing(current=settings.jwt_secret, previous=settings.jwt_secret_previous)`; `LOOKUP_HMAC_KEY` y `APP_HMAC_KEY` no tienen anterior y usan `KeyRing(current=...)`.
+
+### 15.3 `SubkeyHasher`: subllaves de `APP_HMAC_KEY`
+
+`APP_HMAC_KEY` es una llave raíz: nunca se usa directa. Cada propósito deriva su subllave con HKDF-SHA256 y un `info` propio, así que una huella calculada para uno (por ejemplo la `ip`) no sirve para otro (el `subject_ref`). Las subllaves de la política son `ip`, `subject-ref` y `cursor`; `rate-limit` es propuesta (sección 9).
+
+```python
+# insumap/infrastructure/security/keys.py (se agrega)
+import hashlib
+import hmac
+from enum import StrEnum
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+SUBKEY_BYTES = 32
+
+
+def derive_subkey(root_key: bytes, info: bytes) -> bytes:
+    """HKDF-SHA256 without salt; the same helper serves CodeHasher (sección 8)."""
+    return HKDF(algorithm=hashes.SHA256(), length=SUBKEY_BYTES, salt=None, info=info).derive(root_key)
+
+
+class Subkey(StrEnum):
+    IP = "ip"
+    SUBJECT_REF = "subject-ref"
+    CURSOR = "cursor"
+    RATE_LIMIT = "rate-limit"  # propuesto
+
+
+@final
+class SubkeyHasher:
+    """HMAC-SHA256 with the subkey of one purpose; derived once, at construction."""
+
+    def __init__(self, root_key: bytes, *, subkey: Subkey) -> None:
+        self._subkey = derive_subkey(root_key, f"insumap/app-hmac/{subkey.value}/v1".encode())
+
+    def hexdigest(self, message: str) -> str:
+        return hmac.new(self._subkey, message.encode(), hashlib.sha256).hexdigest()
+```
+
+`HmacIpFingerprinter` (sección 13) recibe un `SubkeyHasher(Subkey.IP)` y calcula `hexdigest(str(ipaddress.ip_address(ip)))`: la forma canónica evita que dos escrituras de la misma IPv6 den huellas distintas. El `subject_ref` de la IA usa `Subkey.SUBJECT_REF` (sección 18).
+
+### 15.4 `ColumnCipher`: AES-256-GCM con AAD
+
+Formato de la política (8.1): `nonce (12 bytes) ‖ texto cifrado ‖ tag (16 bytes)` en `bytea`, nonce aleatorio por cifrado, y la AAD ata el valor a su fila. `AESGCM.encrypt` de `cryptography` ya devuelve `texto cifrado ‖ tag`, así que solo se antepone el nonce.
+
+```python
+# insumap/application/security/ports.py (se agrega)
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SealedValue:
+    """What is stored: the ciphertext blob and the fingerprint of the key that sealed it."""
+
+    key_id: str
+    blob: bytes
+
+
+class ColumnDecryptionError(Exception):
+    """Wrong AAD, altered blob or retired key. The message never carries the value."""
+
+
+class ColumnCipherPort(ABC):
+    @abstractmethod
+    def encrypt(self, plaintext: str, *, aad: str) -> SealedValue: ...
+
+    @abstractmethod
+    def decrypt(self, value: SealedValue, *, aad: str) -> str: ...
+
+    @abstractmethod
+    def needs_reencryption(self, value: SealedValue) -> bool: ...
+```
+
+```python
+# insumap/infrastructure/security/column_cipher.py
+import secrets
+from typing import Final, final, override
+from uuid import UUID
+
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from insumap.application.security.ports import ColumnCipherPort, ColumnDecryptionError, SealedValue
+from insumap.infrastructure.security.keys import KeyRing
+
+NONCE_BYTES: Final = 12
+TAG_BYTES: Final = 16
+
+
+def document_aad(*, patient_id: UUID, clinic_id: UUID) -> str:
+    return f"clinic.patients.document|{patient_id}|{clinic_id}"
+
+
+def mfa_secret_aad(*, factor_id: UUID, user_id: UUID) -> str:
+    return f"iam.mfa_factors.secret|{factor_id}|{user_id}"
+
+
+@final
+class ColumnCipher(ColumnCipherPort):
+    def __init__(self, keys: KeyRing) -> None:
+        self._keys = keys
+
+    @override
+    def encrypt(self, plaintext: str, *, aad: str) -> SealedValue:
+        nonce = secrets.token_bytes(NONCE_BYTES)
+        sealed = AESGCM(self._keys.current_key()).encrypt(nonce, plaintext.encode(), aad.encode())
+        return SealedValue(key_id=self._keys.current_key_id, blob=nonce + sealed)
+
+    @override
+    def decrypt(self, value: SealedValue, *, aad: str) -> str:
+        if len(value.blob) < NONCE_BYTES + TAG_BYTES:
+            raise ColumnDecryptionError
+        try:
+            key = self._keys.verification_key(value.key_id)
+            nonce, sealed = value.blob[:NONCE_BYTES], value.blob[NONCE_BYTES:]
+            return AESGCM(key).decrypt(nonce, sealed, aad.encode()).decode()
+        except (KeyError, InvalidTag, UnicodeDecodeError):
+            raise ColumnDecryptionError from None
+
+    @override
+    def needs_reencryption(self, value: SealedValue) -> bool:
+        return value.key_id != self._keys.current_key_id
+```
+
+Reglas de uso:
+
+- **Una instancia por llave**, no una compartida: el contenedor crea `ColumnCipher(field_keys)` para el documento y `ColumnCipher(mfa_keys)` para el TOTP. Una fila cifrada con la llave del documento no se descifra con la del MFA aunque alguien se equivoque de instancia.
+- **La AAD sale de la fila ya guardada** (`patient_id`, `clinic_id`), nunca de la petición. Cambiarla al descifrar es exactamente lo que detecta GCM.
+- **Cada descifrado del documento queda en `audit.data_access_log` con `action = 'DECRYPT'`** (política 8.1), dentro de la misma transacción: si la auditoría falla, el descifrado falla (sección 13). Solo se descifra para exportar los datos del propio paciente o devolverlos a la clínica; ninguna respuesta incluye el documento completo (se muestra `document_last4`).
+- `ColumnDecryptionError` es un error interno: llega a `500 INTERNAL_ERROR` y se registra con el `key_id` y el nombre de la columna, **nunca** con el blob ni el texto.
+
+### 15.5 `document_hash` y `document_last4`
+
+`document_hash` es `HMAC-SHA256(LOOKUP_HMAC_KEY, clinic_id ‖ 0x1F ‖ document_type ‖ 0x1F ‖ número_normalizado)` en hexadecimal; sirve para buscar y deduplicar sin descifrar. La llave se usa **directa**, sin HKDF (así lo fija la política); el `clinic_id` dentro del mensaje impide correlacionar a una persona entre clínicas. El número llega ya normalizado por la validación de entrada: el hash y la comparación deben ver exactamente la misma cadena.
+
+```python
+# insumap/infrastructure/security/document_protector.py
+import hashlib
+import hmac
+from dataclasses import dataclass
+from typing import Final, final
+from uuid import UUID
+
+from insumap.application.security.ports import ColumnCipherPort, SealedValue
+from insumap.infrastructure.security.column_cipher import document_aad
+from insumap.infrastructure.security.keys import KeyRing
+
+FIELD_SEPARATOR: Final = b"\x1f"
+LAST_CHARS: Final = 4
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ProtectedDocument:
+    """The five columns of ``clinic.patients`` that replace the plain document."""
+
+    document_hash: str
+    document_hash_key_id: str
+    document_sealed: SealedValue
+    document_last4: str
+
+
+@final
+class DocumentProtector:
+    def __init__(self, *, cipher: ColumnCipherPort, lookup_keys: KeyRing) -> None:
+        self._cipher = cipher
+        self._lookup = lookup_keys
+
+    def lookup_hash(self, *, clinic_id: UUID, document_type: str, number: str) -> str:
+        message = FIELD_SEPARATOR.join([str(clinic_id).encode(), document_type.encode(), number.encode()])
+        return hmac.new(self._lookup.current_key(), message, hashlib.sha256).hexdigest()
+
+    def protect(
+        self, *, patient_id: UUID, clinic_id: UUID, document_type: str, number: str
+    ) -> ProtectedDocument:
+        return ProtectedDocument(
+            document_hash=self.lookup_hash(clinic_id=clinic_id, document_type=document_type, number=number),
+            document_hash_key_id=self._lookup.current_key_id,
+            document_sealed=self._cipher.encrypt(
+                number, aad=document_aad(patient_id=patient_id, clinic_id=clinic_id)
+            ),
+            document_last4=number[-LAST_CHARS:],
+        )
+```
+
+**Pruebas (sección 19):** `test_key_material.py` (31, 32 y 33 bytes; base64 estándar y url-safe equivalentes; texto que no es base64; el mensaje de error no contiene el valor; la huella tiene 16 caracteres hexadecimales y cambia con un byte), `test_key_ring.py` (la actual firma; la anterior verifica; `kid` desconocido o `None` lanza `KeyError`; anterior igual a actual se rechaza; `all_keys()` pone la actual primero), `test_subkey_hasher.py` (determinista; dos subllaves dan resultados distintos para el mismo mensaje; cambia con la llave raíz), `test_column_cipher.py` (el mismo texto da dos blobs distintos; descifrar con otra AAD falla; un byte alterado falla; blob corto falla; una llave retirada falla; la fila sellada con la anterior se descifra y `needs_reencryption` es verdadero), `test_document_protector.py` (mismo documento en dos clínicas: hashes distintos; el hash no cambia con el orden de llamadas; `document_last4` son los cuatro últimos) y de integración que `clinic.patients` no contiene el documento en claro.
+
+**Antipatrones:** usar `AESGCM` o `Fernet` directo en un repositorio; un nonce derivado del contenido o de un contador sin llave; AAD vacía; guardar el texto cifrado sin `key_id`; usar `APP_HMAC_KEY` o `JWT_SECRET` sin derivar, o la misma llave para dos propósitos; comparar huellas con `==` cuando son secretos (los `key_id` no lo son); capturar `InvalidTag` y devolver un valor por defecto; registrar el blob o el texto en un mensaje de error.
+
+## 16. Rotación de llaves, secretos y configuración de arranque
+
+### 16.1 Rotación con `*_PREVIOUS`
+
+La política (8.3) fija el procedimiento por llave; el código lo respalda así:
+
+| Llave | Qué debe hacer el código | Cuándo se retira la anterior |
+|---|---|---|
+| `JWT_SECRET` | `JwtTokenService` firma con la actual y acepta la anterior por `kid` (sección 4). Sin trabajo extra | Pasados `JWT_ACCESS_MINUTES` más `JWT_LEEWAY_SECONDS` |
+| `FIELD_ENCRYPTION_KEY`, `MFA_ENCRYPTION_KEY` | Job de recifrado (abajo) | Cuando ninguna fila tenga la huella de la anterior |
+| `CODE_HMAC_KEY` | `CodeHasher.hashes_for_lookup` busca con las dos (sección 8); los códigos de respaldo con la huella vieja se invalidan y la UI pide regenerarlos | Cuando no queden invitaciones vigentes con esa huella (7 días) |
+| `LOOKUP_HMAC_KEY` (sin anterior) | `RecomputeDocumentHashesJob`: descifra, recalcula con la llave nueva y actualiza `document_hash_key_id`. Hasta terminar, la búsqueda por documento falla para las filas pendientes; se corre en una ventana acordada (propuesto) | No aplica |
+| `APP_HMAC_KEY` (sin anterior) | Nada: los `ip_hmac` dejan de ser comparables, los cursores vencen y cambian los `subject_ref`. Se documenta la discontinuidad | No aplica |
+
+El recifrado es un caso de uso de `application/jobs` que habla con un puerto por columna, así que no importa SQLAlchemy ni `cryptography`:
+
+```python
+# insumap/application/jobs/reencrypt_column.py
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import final
+from uuid import UUID
+
+from insumap.application.security.ports import ColumnCipherPort, SealedValue
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StoredCiphertext:
+    row_id: UUID
+    aad: str
+    value: SealedValue
+
+
+class EncryptedColumnPort(ABC):
+    """One encrypted column, e.g. clinic.patients.document or iam.mfa_factors.secret."""
+
+    name: str
+
+    @abstractmethod
+    def fetch_stale(self, *, current_key_id: str, limit: int) -> list[StoredCiphertext]:
+        """Rows whose key_id is not the current one (FOR UPDATE SKIP LOCKED, propuesto)."""
+
+    @abstractmethod
+    def replace(self, row_id: UUID, value: SealedValue) -> None: ...
+
+    @abstractmethod
+    def count_sealed_with(self, key_id: str) -> int: ...
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ReencryptionReport:
+    column: str
+    rows_reencrypted: int
+    rows_left_with_previous_key: int
+
+
+@final
+class ReencryptColumnUseCase:
+    def __init__(self, *, column: EncryptedColumnPort, cipher: ColumnCipherPort, current_key_id: str,
+                 previous_key_id: str, batch_size: int) -> None:  # fmt: skip
+        self._column = column
+        self._cipher = cipher
+        self._current_key_id = current_key_id
+        self._previous_key_id = previous_key_id
+        self._batch_size = batch_size
+
+    def execute(self) -> ReencryptionReport:
+        done = 0
+        while batch := self._column.fetch_stale(current_key_id=self._current_key_id, limit=self._batch_size):
+            for stored in batch:
+                plain = self._cipher.decrypt(stored.value, aad=stored.aad)
+                self._column.replace(stored.row_id, self._cipher.encrypt(plain, aad=stored.aad))
+                done += 1
+        return ReencryptionReport(
+            column=self._column.name,
+            rows_reencrypted=done,
+            rows_left_with_previous_key=self._column.count_sealed_with(self._previous_key_id),
+        )
+```
+
+Reglas del job: **idempotente** (se puede repetir y retomar tras un corte), **por lotes** con una transacción por lote (nunca una gigante), sin registrar el texto en claro y sin que la fila quede sin cifrar en ningún momento. La BD necesita que `insumap_app` pueda leer y actualizar esas columnas de **todas** las clínicas sin contexto: es una función `SECURITY DEFINER` o una política de mantenimiento de `insumap-database` (propuesta; ver sección 21 de la política). El job devuelve el informe y **un comando de la aplicación** (`RotateSecretCommand`, P13, auditado) registra `SECRET_ROTATED` con el nombre de la llave y las huellas, nunca con los valores. La anterior se retira cuando `rows_left_with_previous_key` es `0`.
+
+### 16.2 Secretos y configuración (política 14)
+
+- **`Settings` valida las llaves al arrancar.** Cada llave es un `SecretStr` **sin valor por defecto** con un validador que llama a `decode_key`; la anterior es opcional (`None`, y una cadena vacía cuenta como ausente). Con `hide_input_in_errors=True` (ya activo) el error nombra el campo y nunca el valor. Si una llave falta o no mide 32 bytes, la API no arranca.
+- **`KeyRing` y `Settings` no duplican la validación:** ambos usan `decode_key`; `Settings` rechaza además que la anterior sea igual a la actual y que dos propósitos compartan la misma llave (propuesto).
+- **El contenedor es el único que abre los `SecretStr`** para armar los `KeyRing`; nada más llama a `get_secret_value()` sobre una llave.
+
+```python
+# insumap/shared/config.py (se agrega)
+from pydantic import AfterValidator, BeforeValidator, model_validator
+
+from insumap.shared.key_material import decode_key
+
+
+def require_key(value: SecretStr) -> SecretStr:
+    decode_key(value.get_secret_value())
+    return value
+
+
+def blank_to_none(value: object) -> object:
+    return None if isinstance(value, str) and not value.strip() else value
+
+
+type KeySecret = Annotated[SecretStr, AfterValidator(require_key)]
+type PreviousKeySecret = Annotated[KeySecret | None, BeforeValidator(blank_to_none)]
+
+# dentro de Settings (sin valor por defecto: ninguna llave tiene uno)
+#     jwt_secret: KeySecret
+#     jwt_secret_previous: PreviousKeySecret = None
+#     field_encryption_key: KeySecret
+#     field_encryption_key_previous: PreviousKeySecret = None
+#     mfa_encryption_key: KeySecret
+#     mfa_encryption_key_previous: PreviousKeySecret = None
+#     code_hmac_key: KeySecret
+#     code_hmac_key_previous: PreviousKeySecret = None
+#     lookup_hmac_key: KeySecret
+#     app_hmac_key: KeySecret
+#     allowed_hosts: Annotated[list[str], NoDecode]   # sin valor por defecto (sección 17)
+#     llm_real_data_allowed: bool = False
+```
+
+```python
+# insumap/container.py (fragmento)
+self.jwt_keys = KeyRing(current=settings.jwt_secret, previous=settings.jwt_secret_previous)
+self.document_cipher = ColumnCipher(
+    KeyRing(current=settings.field_encryption_key, previous=settings.field_encryption_key_previous)
+)
+self.ip_fingerprinter = HmacIpFingerprinter(
+    SubkeyHasher(decode_key(settings.app_hmac_key.get_secret_value()), subkey=Subkey.IP)
+)
+```
+
+- **`.env.example`** lista cada variable con `cambia-esto-...` y, en un comentario, el comando que la genera (`openssl rand -base64 32`; el token de servicio, `python -c "import secrets; print(secrets.token_urlsafe(32))"`). Nunca lleva un valor real, y `.env` y `.env.*` (salvo el ejemplo) están en `.gitignore`.
+- **Secreto o llave nueva, en el mismo PR:** campo en `Settings`, fila en `.env.example`, fila en la tabla 6.1 de [`configuration.md`](configuration.md), fila en la tabla 2.4 de esta guía y, si es llave, fila en la 8.3 de la política y una entrada en 16.1.
+- **Dónde viven:** variables de Render con `sync: false` en `render.yaml`; en Vercel solo `VITE_*` públicas; en los secretos de GitHub Actions solo lo que la CI necesite (las pruebas con Testcontainers no necesitan ninguno). La imagen Docker nunca los contiene: `.dockerignore` excluye `.env*` y el contenedor corre sin privilegios ([`deployment.md`](deployment.md)).
+- **Perfil de pruebas:** `tests/support/keys.py` define constantes de llaves de prueba (32 bytes en base64, claramente falsas) y `make_settings` las incluye por defecto, para que agregar un campo secreto no rompa las pruebas existentes.
+- **Filtración:** se rota de inmediato (16.1), se revoca lo que dependa de la llave y se abre un incidente (política 17).
+
+**Pruebas:** `test_settings.py` crece con una prueba por secreto de que **falta** (`ValidationError` que nombra el campo y no contiene un valor sembrado), una de longitud incorrecta, una de la anterior igual a la actual y una de que `repr(settings)` no muestra ninguna llave; `test_reencrypt_column_use_case.py` con un puerto en memoria (recifra todo, es idempotente, se retoma tras un corte simulado, el informe cuenta las filas que quedan con la anterior); y una prueba de integración de la rotación completa: sellar con A, rotar a B con A como anterior, recifrar y descifrar solo con B.
+
+**Antipatrones:** un valor por defecto en un secreto "para desarrollo"; `os.getenv("JWT_SECRET")` fuera de `Settings`; `get_secret_value()` en un log o en un `f-string`; retirar la anterior sin contar las filas; recifrar dentro de la transacción de una petición; el job registrando texto en claro; una llave de desarrollo reutilizada en producción.
+
+## 17. Superficie HTTP: cabeceras, CORS, hosts y tamaño de cuerpo
+
+- **Dónde vive:** `insumap/api/middleware.py` (ya tiene `RequestIdMiddleware` y `BodySizeLimitMiddleware`) y `create_app` en `insumap/main.py`. Los valores fijos de la política (13) son constantes con nombre; los que cambian por entorno (`CORS_ORIGINS`, `ALLOWED_HOSTS`) salen de `Settings`.
+- **Un solo lugar por control:** un middleware ASGI por cabecera o límite, no código repetido en los routers. Un router nunca pone una cabecera de seguridad.
+
+### 17.1 Cabeceras de seguridad
+
+`SecurityHeadersMiddleware` agrega las cabeceras de la tabla 13.1 de la política a **toda** respuesta HTTP, incluidos los errores y las respuestas de los demás middleware (por eso es el más externo). Usa `setdefault`: una ruta que necesita otro valor lo fija ella misma (`GET /meta/field-limits` envía `Cache-Control: public, max-age=300`).
+
+| Cabecera | Valor en la API |
+|---|---|
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` (sin `preload`) |
+| `Content-Security-Policy` | `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `no-referrer` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=()` |
+| `Cross-Origin-Resource-Policy` | `same-site` |
+| `Cache-Control` | `no-store` en toda respuesta de `/api/v1` |
+| `Server`, `X-Powered-By` | Ausentes (uvicorn con `--no-server-header`; el middleware además borra `server`) |
+
+`/docs` carga recursos de `cdn.jsdelivr.net` y usa un script en línea, así que la CSP estricta lo rompe. La política propone servir esos recursos desde la API con un *nonce* y, mientras tanto, una CSP relajada **solo** en las rutas de Swagger (por verificar al integrarla). El esqueleto no pone CSP en esas rutas y deja el valor relajado como pendiente.
+
+```python
+# insumap/api/middleware.py (se agrega)
+from collections.abc import Mapping
+from typing import Final, final
+
+from starlette.datastructures import MutableHeaders
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from insumap.api.openapi import DOCS_URL, OPENAPI_URL
+
+API_PREFIX: Final = "/api/v1"
+HSTS_MAX_AGE_SECONDS: Final = 31_536_000
+DOCS_PATHS: Final = frozenset({DOCS_URL, OPENAPI_URL})
+SERVER_HEADER: Final = "server"
+API_CONTENT_SECURITY_POLICY: Final = (
+    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+)
+FIXED_HEADERS: Final[Mapping[str, str]] = {
+    "Strict-Transport-Security": f"max-age={HSTS_MAX_AGE_SECONDS}; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    "Cross-Origin-Resource-Policy": "same-site",
+}
+
+
+@final
+class SecurityHeadersMiddleware:
+    """Adds the security headers of política 13.1 to every response; routes may override one."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != HTTP_SCOPE:
+            await self._app(scope, receive, send)
+            return
+        path = str(scope["path"])
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == HTTP_RESPONSE_START_MESSAGE:
+                headers = MutableHeaders(scope=message)
+                for name, value in FIXED_HEADERS.items():
+                    headers.setdefault(name, value)
+                if path not in DOCS_PATHS:  # Swagger gets its own, relaxed CSP (pending)
+                    headers.setdefault("Content-Security-Policy", API_CONTENT_SECURITY_POLICY)
+                if path.startswith(API_PREFIX):
+                    headers.setdefault("Cache-Control", "no-store")
+                del headers[SERVER_HEADER]
+            await send(message)
+
+        await self._app(scope, receive, send_with_headers)
+```
+
+### 17.2 CORS y hosts
+
+`create_app` ya monta `CORSMiddleware` con la lista explícita y `Settings` rechaza `*`. Lo que la política pide y el código aún no tiene está en la sección 20. La configuración completa:
+
+```python
+# insumap/main.py (cambios propuestos)
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+CORS_ALLOWED_HEADERS: Final = [
+    "Authorization", "Content-Type", "X-Requested-With", REQUEST_ID_HEADER, "Idempotency-Key",
+]  # fmt: skip
+CORS_EXPOSED_HEADERS: Final = [REQUEST_ID_HEADER, "Retry-After"]
+CORS_MAX_AGE_SECONDS: Final = 600
+
+# Orden de montaje: el último que se agrega es el más externo.
+app.add_middleware(BodySizeLimitMiddleware, responses=container.error_responses, limits=container.body_limits)
+app.add_middleware(RequestIdMiddleware)
+if settings.cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=CORS_ALLOWED_METHODS,
+        allow_headers=CORS_ALLOWED_HEADERS,
+        expose_headers=CORS_EXPOSED_HEADERS,
+        max_age=CORS_MAX_AGE_SECONDS,
+    )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+app.add_middleware(SecurityHeadersMiddleware)
+```
+
+- `allow_credentials=True` solo con esa lista. En producción la lista tiene únicamente el origen del frontend (despliegue en el mismo sitio, política 2.5).
+- `ALLOWED_HOSTS` no tiene valor por defecto (sin él, cualquier `Host` pasaría). En desarrollo se declara `localhost,127.0.0.1` en `.env`.
+- El orden importa: `SecurityHeadersMiddleware` envuelve a todos, `TrustedHostMiddleware` rechaza el `Host` ajeno antes de gastar trabajo, CORS envuelve a `RequestIdMiddleware` y al límite de cuerpo (así el navegador lee también el `413`) y el límite de cuerpo va pegado a la app.
+- TLS 1.2 o superior y `sslmode=verify-full` hacia Neon son de despliegue ([`deployment.md`](deployment.md)); aquí solo se valida que `DATABASE_URL` en producción lo traiga (propuesto: el validador de `Settings` lo exige cuando `APP_ENV=production`).
+
+### 17.3 Tamaño del cuerpo por ruta
+
+El límite de la política no es uno solo: 64 KiB en general, 512 KiB y 500 elementos en el lote offline, y 2 MiB a 10 MiB en las importaciones, que se leen como cuerpo crudo contando bytes. `BodySizeLimitMiddleware` ya cuenta el *stream* aunque falte o mienta `Content-Length`; lo que falta es que el tope dependa de la ruta. Se resuelve con una tabla de reglas que arma el contenedor con constantes de `FieldLimits` (las del lote y las importaciones son propuestas: hoy solo existe `MAX_REQUEST_BODY_BYTES`).
+
+```python
+# insumap/api/body_limits.py
+import re
+from dataclasses import dataclass
+from typing import final
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BodyLimitRule:
+    method: str
+    path_pattern: re.Pattern[str]
+    max_bytes: int
+
+
+@final
+class BodyLimitResolver:
+    """First matching rule wins; anything else gets the general limit."""
+
+    def __init__(self, rules: tuple[BodyLimitRule, ...], *, default_max_bytes: int) -> None:
+        self._rules = rules
+        self._default = default_max_bytes
+
+    def limit_for(self, method: str, path: str) -> int:
+        for rule in self._rules:
+            if rule.method == method and rule.path_pattern.fullmatch(path):
+                return rule.max_bytes
+        return self._default
+```
+
+El middleware recibe el `BodyLimitResolver` en lugar de `max_body_bytes` y pregunta `limits.limit_for(scope["method"], scope["path"])`. Una ruta nueva con un cuerpo grande **debe** agregar su regla: sin ella se aplica el tope general. Las reglas de importación de la política (13.3) completan el control en el router: `Content-Type` exacto (`application/fhir+json`, `text/csv`) o `415 UNSUPPORTED_MEDIA_TYPE`, sin multipart, solo UTF-8 y sin archivos comprimidos. La cabecera `Authorization` de más de `AUTH_HEADER_MAX_BYTES` se rechaza en `CurrentActor` (sección 4).
+
+### 17.4 Salidas: CSV, push, PDF y correo
+
+- **CSV exportado:** toda **celda de texto** que empiece con `=`, `+`, `-`, `@`, tabulador o retorno de carro se prefija con `'`. Los números se escriben como números, no como texto (un `-5` numérico no es una fórmula).
+- **Endpoint de push** (lo manda el navegador, es dato no confiable): solo `https`, host en `PUSH_ENDPOINT_ALLOWED_HOSTS`, sin IP literales ni credenciales en la URL, sin seguir redirecciones y con timeout de 5 segundos (`PUSH_TIMEOUT_SECONDS`, propuesto; la política fija el 5). Un rechazo registra `PUSH_ENDPOINT_REJECTED`.
+- **PDF y HTML:** plantillas con autoescape y un `url_fetcher` que solo admite recursos empaquetados (sin SSRF ni lectura de archivos). **Correo:** Jinja2 con `autoescape=True`, `email.message.EmailMessage` (ningún encabezado con datos del usuario) y asunto y cuerpo sin valores clínicos ni documento. **Web Push:** carga visible sin valores clínicos.
+
+```python
+# insumap/infrastructure/export/csv_cells.py
+from typing import Final
+
+FORMULA_PREFIXES: Final = ("=", "+", "-", "@", "\t", "\r")
+ESCAPE_PREFIX: Final = "'"
+
+
+def neutralize_text_cell(value: str) -> str:
+    """Stop spreadsheets from reading a text cell as a formula (CSV injection)."""
+    return f"{ESCAPE_PREFIX}{value}" if value.startswith(FORMULA_PREFIXES) else value
+```
+
+```python
+# insumap/infrastructure/notifications/push_endpoint_policy.py
+import fnmatch
+import ipaddress
+from typing import final
+from urllib.parse import urlsplit
+
+
+@final
+class PushEndpointPolicy:
+    """Decides whether a browser-supplied push endpoint may be called."""
+
+    def __init__(self, allowed_hosts: tuple[str, ...]) -> None:
+        self._allowed = tuple(host.lower() for host in allowed_hosts)
+
+    def is_allowed(self, endpoint: str) -> bool:
+        try:
+            parts = urlsplit(endpoint)
+            host = (parts.hostname or "").lower()
+        except ValueError:
+            return False
+        if parts.scheme != "https" or not host or parts.username or parts.password:
+            return False
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            return any(fnmatch.fnmatchcase(host, pattern) for pattern in self._allowed)
+        return False  # IP literals are never accepted
+```
+
+`*.notify.windows.com` coincide con subdominios, no con el dominio desnudo: esa es la lista de la política y no se amplía. El cliente HTTP del envío se crea con `follow_redirects=False` y `timeout` desde `Settings`.
+
+**Pruebas (sección 19):** `test_security_headers.py` (una petición a un endpoint y a una ruta inexistente trae todas las cabeceras de la tabla; un error `413` y un `500` también; `Cache-Control: no-store` bajo `/api/v1`, y `public, max-age=300` en `meta/field-limits`; no hay `Server`), `test_cors.py` (un origen fuera de `CORS_ORIGINS` no recibe `Access-Control-Allow-Origin`; el *preflight* de uno permitido devuelve los métodos, las cabeceras y `max_age` de la política; `Retry-After` está expuesta; `*` en la lista impide el arranque), `test_trusted_host.py` (un `Host` ajeno se rechaza), `test_body_limit_resolver.py` y `test_middleware.py` (64 KiB pasa y 64 KiB + 1 da `413`, con y sin `Content-Length`, con `Content-Length` mentiroso; el lote acepta 512 KiB; el `413` lleva `X-Request-ID` y las cabeceras CORS), `test_csv_cells.py` (`=HYPERLINK(...)`, `+1`, `@x`, tabulador y retorno de carro quedan con `'`; un texto normal no cambia) y `test_push_endpoint_policy.py` (`http://`, IP literal, `https://fcm.googleapis.com@evil.test`, host fuera de la lista y `*.notify.windows.com` sin subdominio se rechazan; los hosts de la lista pasan).
+
+**Antipatrones:** poner cabeceras de seguridad en un router; `allow_origins=["*"]` o `allow_origin_regex=".*"`; `allow_credentials=True` con una lista que no controlamos; confiar en `Content-Length` sin contar los bytes; subir el límite global para que quepa una importación (una regla por ruta); aceptar el `endpoint` de push y llamarlo con `follow_redirects=True`; construir un CSV con `f"{a},{b}"` en vez de `csv.writer`; relajar la CSP de toda la API por culpa de Swagger.
+
+## 18. Minimización y token de servicio hacia `insumap-ai`
+
+- **Dónde vive:** `SubjectRef` y `KnownIdentifierRedactor` en `insumap/domain/ai/`; `HmacPseudonymizer` y `ServiceTokenAuth` en `insumap/infrastructure/ai/`; `LlmDataPolicy` y la validación de la salida en `insumap/application/ai/`. `AiServiceClientAdapter` (P06) es la **única** clase que conoce el JSON de `insumap-ai` ([`architecture.md`](architecture.md)); `RemoteAiServiceProxy` (P11) aplica el circuit breaker y el respaldo. El contrato es [`Contrato-IA.md`](../docs/Contrato-IA.md).
+- **Principio** (política 9): `insumap-ai` es un servicio sin estado que recibe lo mínimo y **nunca** un identificador directo. El control es una lista blanca: el adaptador arma el cuerpo campo por campo desde un modelo de entrada propio; no serializa una entidad ni un `*Orm`.
+
+### 18.1 `subject_ref`: el seudónimo
+
+`"sub_"` más los primeros 32 caracteres hexadecimales de `HMAC-SHA256(subllave "subject-ref" de APP_HMAC_KEY, patient_id)`. Es determinista (la IA puede correlacionar llamadas del mismo paciente) y no reversible sin la llave. Rotar `APP_HMAC_KEY` cambia todos los seudónimos (sección 16.1).
+
+```python
+# insumap/domain/ai/subject_ref.py
+import re
+from dataclasses import dataclass
+from typing import Final
+
+SUBJECT_REF_PATTERN: Final = re.compile(r"sub_[0-9a-f]{32}")
+SUBJECT_REF_PREFIX: Final = "sub_"
+SUBJECT_REF_HEX_CHARS: Final = 32
+
+
+@dataclass(frozen=True, slots=True)
+class SubjectRef:
+    value: str
+
+    def __post_init__(self) -> None:
+        if not SUBJECT_REF_PATTERN.fullmatch(self.value):
+            raise ValueError("a subject ref must match ^sub_[0-9a-f]{32}$")
+```
+
+```python
+# insumap/infrastructure/ai/pseudonymizer.py
+from typing import final
+from uuid import UUID
+
+from insumap.domain.ai.subject_ref import SUBJECT_REF_HEX_CHARS, SUBJECT_REF_PREFIX, SubjectRef
+from insumap.infrastructure.security.keys import SubkeyHasher
+
+
+@final
+class HmacPseudonymizer:
+    def __init__(self, hasher: SubkeyHasher) -> None:  # built with Subkey.SUBJECT_REF
+        self._hasher = hasher
+
+    def subject_ref(self, patient_id: UUID) -> SubjectRef:
+        digest = self._hasher.hexdigest(str(patient_id))
+        return SubjectRef(f"{SUBJECT_REF_PREFIX}{digest[:SUBJECT_REF_HEX_CHARS]}")
+```
+
+### 18.2 Qué sale y qué nunca sale
+
+| Se envía | Nunca se envía |
+|---|---|
+| `subject_ref`; series en mg/dL, dosis, carbohidratos, actividad, códigos de síntomas, métricas, metas y `clinic_timezone`; marcas de tiempo ISO-8601 con offset | Nombres, documento, MRN, correo, teléfono, dirección, `patient_id`, `user_id`, fecha de nacimiento, nombre de la clínica o del personal, IP y datos de sesión, notas y mensajes en texto libre (salvo los campos redactados) |
+
+- **Texto libre redactado dos veces** (IA6 y los `detail` o `description` que viajen). Primero el backend reemplaza con marcadores los identificadores **conocidos** de ese paciente; después `insumap-ai` aplica `PhiRedactingTextGenerator`. La validación de entrada ya rechazó los caracteres de formato, incluidos los *tag* Unicode U+E0000 a U+E007F (*ASCII smuggling*).
+- **Capa gratuita = solo datos simulados o seudonimizados.** `LlmDataPolicy` decide: una clínica con `is_demo = false` **no** se envía a los endpoints que usan el LLM (IA5 e IA6) mientras `LLM_REAL_DATA_ALLOWED=false`; se usa el respaldo determinista y se registra `LLM_DATA_POLICY_BLOCKED` (alta) en `security_events`.
+- **Consentimiento:** IA6 con LLM externo exige `ai_external_processing`; sin él, respuestas predefinidas.
+- **Cada envío de datos de un paciente a `insumap-ai` queda auditado** (`purpose = 'AI_PROCESSING'` en `data_access_log`, política 7.1; sección 13).
+
+```python
+# insumap/domain/ai/identifier_redactor.py
+import re
+import unicodedata
+from dataclasses import dataclass
+from typing import Final, final
+
+NAME_MARKER: Final = "[NAME]"
+DOCUMENT_MARKER: Final = "[DOCUMENT]"
+CONTACT_MARKER: Final = "[CONTACT]"
+MIN_NAME_PART_LENGTH: Final = 3  # shorter parts ("de", "la") are not identifiers on their own
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PatientIdentifiers:
+    name_parts: tuple[str, ...]
+    document: str
+    mrn: str
+    email: str | None
+    phone: str | None
+
+
+def _normalize(text: str) -> str:
+    return unicodedata.normalize("NFKC", text)
+
+
+@final
+class KnownIdentifierRedactor:
+    """Replaces the patient's own identifiers in free text with neutral markers."""
+
+    def __init__(self, identifiers: PatientIdentifiers) -> None:
+        names = [p for p in identifiers.name_parts if len(p) >= MIN_NAME_PART_LENGTH]
+        contacts = [v for v in (identifiers.email, identifiers.phone) if v]
+        groups = (
+            (names, NAME_MARKER),
+            ([identifiers.document, identifiers.mrn], DOCUMENT_MARKER),
+            (contacts, CONTACT_MARKER),
+        )
+        self._rules = [
+            (re.compile(re.escape(_normalize(value)), re.IGNORECASE), marker)
+            for values, marker in groups
+            for value in values
+        ]
+
+    def redact(self, text: str) -> str:
+        redacted = _normalize(text)
+        for pattern, marker in self._rules:
+            redacted = pattern.sub(marker, redacted)
+        return redacted
+```
+
+La comparación es por NFKC e ignorando mayúsculas, así que `JOSÉ` y la forma de ancho completo coinciden con `José`. No cubre variantes sin tilde ni errores de tipeo: por eso el segundo filtro de `insumap-ai` y la regla de no enviar texto libre que no haga falta.
+
+```python
+# insumap/application/ai/llm_data_policy.py
+from typing import final
+
+
+@final
+class LlmDataPolicy:
+    def __init__(self, *, real_data_allowed: bool) -> None:  # from LLM_REAL_DATA_ALLOWED
+        self._real_data_allowed = real_data_allowed
+
+    def allows(self, *, clinic_is_demo: bool) -> bool:
+        return clinic_is_demo or self._real_data_allowed
+```
+
+### 18.3 Salida del LLM y de la IA: dato no confiable
+
+El adaptador valida cada respuesta con un modelo Pydantic **estricto**: números finitos (`allow_inf_nan=False`), cuantiles ordenados (p10 ≤ p50 ≤ p90), longitudes máximas de `FieldLimits` y campos desconocidos ignorados (como fija el contrato). El texto del LLM se entrega al frontend como **texto plano**: sin HTML, sin imágenes y sin enlaces externos (evita la exfiltración por URLs de imágenes Markdown). La IA nunca da dosis al paciente: IA4 es una propuesta que el médico aprueba, modifica o rechaza con motivo (P13).
+
+### 18.4 Token de servicio (lado backend)
+
+La política (10) y el contrato (sección 2) fijan el protocolo; al backend le toca:
+
+- **`AI_SERVICE_TOKEN`** es un `SecretStr` sin valor por defecto, de **32 bytes o más** (`secrets.token_urlsafe(32)`): `Settings` lo valida igual que las llaves (sección 16.2), con una longitud mínima en lugar de base64. `AI_SERVICE_URL` debe ser `https://` cuando `APP_ENV=production` (propuesto: validador de `Settings`).
+- **Transporte:** `Authorization: Bearer <token>` y `X-Request-Id` en cada llamada; el token se aplica con un `httpx.Auth` para que nunca esté en una cadena que se pueda registrar. El cliente no sigue redirecciones.
+- **`401 INVALID_SERVICE_TOKEN`** (con `WWW-Authenticate: Bearer`) se trata como `AI_ERROR`: respaldo determinista y alerta operativa; no se reintenta con otro token.
+- **Rotación sin corte:** (1) `insumap-ai` recibe el nuevo como actual y el viejo como anterior; (2) el backend recibe el nuevo; (3) se retira el anterior de `insumap-ai`. Cada rotación registra `SECRET_ROTATED` mediante `RotateSecretCommand` (sección 16.1).
+
+```python
+# insumap/infrastructure/ai/service_token_auth.py
+from collections.abc import Generator
+from typing import final, override
+
+import httpx
+from pydantic import SecretStr
+
+
+@final
+class ServiceTokenAuth(httpx.Auth):
+    def __init__(self, token: SecretStr) -> None:
+        self._token = token
+
+    @override
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
+        request.headers["Authorization"] = f"Bearer {self._token.get_secret_value()}"
+        yield request
+```
+
+**Pruebas (sección 19):** `test_hmac_pseudonymizer.py` (cumple `^sub_[0-9a-f]{32}$`; es determinista; cambia con la llave y con otro `patient_id`; no contiene el UUID), `test_known_identifier_redactor.py` (nombre con tilde y en mayúsculas, documento, MRN, correo y teléfono desaparecen; "de" no se enmascara), `test_llm_data_policy.py` (los cuatro casos de `is_demo` por `LLM_REAL_DATA_ALLOWED`), y las del adaptador con un servidor simulado (`httpx.MockTransport`): **minimización**, con un paciente cuyos datos son valores centinela (`SENTINEL-NOMBRE`, un UUID real, un correo, un documento) y la comprobación de que el cuerpo serializado no contiene ninguno de ellos ni la fecha de nacimiento; el encabezado `Authorization` y `X-Request-Id` viajan; un `401` activa el respaldo y no reintenta; un `NaN`, cuantiles desordenados o un campo de texto con `![x](https://...)` se rechazan o se entregan como texto plano; una clínica no demo con `LLM_REAL_DATA_ALLOWED=false` no hace la llamada y deja `LLM_DATA_POLICY_BLOCKED`.
+
+**Antipatrones:** serializar un `Patient` o un `*Orm` hacia la IA; enviar `patient_id` "porque es un UUID"; construir el cuerpo con `**vars(entity)`; mandar notas libres sin redactar; el token en la URL, en un log, en `repr` o en un mensaje de excepción; comparar el token con `==` (eso es del lado de `insumap-ai`: `hmac.compare_digest` contra el actual y el anterior, siempre los dos); activar `LLM_REAL_DATA_ALLOWED` en un entorno sin la base legal y el proveedor que la política exige; mostrar la respuesta del LLM como HTML.
+
+## 19. Pruebas de seguridad
+
+La política (18) exige que cada control tenga **al menos una prueba que falle si el control se rompe**. Esta sección dice cómo escribirlas; las pruebas concretas de cada control están al final de su sección (3 a 18). El plan general está en [`testing-plan.md`](testing-plan.md) (secciones 4.2 y 6) y esta guía no lo reemplaza.
+
+### 19.1 Reglas
+
+1. **Tres niveles, el más barato que pruebe el control.**
+   - *Unitaria* (`tests/unit/`): una clase con sus puertos en memoria y `FixedClock`. Aquí viven el hasher, el `KeyRing`, `ColumnCipher`, las políticas y los casos de uso.
+   - *API* (`tests/api/`): `create_app(Container(settings=make_settings(...)))` con fakes y `TestClient`. Aquí vive todo lo que depende de la forma HTTP: cabeceras, CORS, tamaño, el cuerpo idéntico de los errores y la matriz de rutas.
+   - *Integración* (`tests/integration/`, `@pytest.mark.integration`): Testcontainers con PostgreSQL 18, las migraciones de la etiqueta de `db-schema.lock` y sesiones con `insumap_app`. Obligatoria para RLS, auditoría, atomicidad del refresh y contadores compartidos. **La suite se detiene** si el rol de la sesión es `rolsuper` o `rolbypassrls` (un superusuario salta la RLS y la prueba pasaría sin probar nada).
+2. **Los límites salen de `Settings` y `FieldLimits`**, no de números escritos en la prueba. Las únicas cifras literales son las que la política **fija** y que una prueba debe congelar a propósito: los parámetros de producción de Argon2id (se verifica una sola vez), la longitud mínima de contraseña (11 falla, 12 pasa, 129 falla) y los valores de las cabeceras de la tabla 13.1.
+3. **La hora la mueve el `FixedClock`** (`advance`); nada de `sleep` ni de la hora real. Tampoco se mide tiempo de pared para probar "tiempo constante": se **cuenta** el trabajo (el doble de `PasswordHasher` registra cuántas veces se llamó `verify`).
+4. **Comparar respuestas completas** cuando la política exige que dos casos no se distingan: mismo estado, mismo cuerpo y mismas cabeceras (correo inexistente frente a contraseña incorrecta; paciente ajeno frente a inexistente; código vencido frente a usado).
+5. **Valores centinela** para lo que no debe aparecer (logs, cuerpo hacia la IA, respuestas, la BD): se siembra un valor reconocible (`SENTINEL-...`, un UUID, un correo, un documento) y se comprueba que no está en ningún lado que no debe.
+6. **Los secretos de prueba son constantes de `tests/support/`**, claramente falsas, nunca reales. Las pruebas no leen el entorno ni un `.env`: `make_settings` pasa `_env_file=None`.
+7. **Una prueba, un comportamiento** (`testing-plan.md`, sección 4.1). Una `parametrize` por tabla de casos (cada cabecera, cada parte sensible de la lista de redacción, cada fila de la sección 12 de la política).
+8. **Se prueba el control, no la biblioteca.** No se verifica que `AESGCM` cifre; se verifica que nuestro `ColumnCipher` ata el valor a su AAD y que el blob alterado falla.
+
+### 19.2 Utilería compartida
+
+```python
+# tests/support/keys.py
+import base64
+
+TEST_KEY_A = base64.b64encode(bytes([1]) * 32).decode()
+TEST_KEY_B = base64.b64encode(bytes([2]) * 32).decode()
+TEST_KEY_C = base64.b64encode(bytes([3]) * 32).decode()
+TEST_SERVICE_TOKEN = "t" * 43  # same length as secrets.token_urlsafe(32); obviously fake
+```
+
+`make_settings` (en `tests/support/settings.py`) suma por defecto una llave distinta por propósito (`jwt_secret=TEST_KEY_A`, `field_encryption_key=TEST_KEY_B`, ...), `allowed_hosts=["testserver"]` y `ai_service_token=TEST_SERVICE_TOKEN`; una prueba cambia lo que necesita con `make_settings(jwt_secret_previous=TEST_KEY_C)`. Se agrega un secreto nuevo a `make_settings` en el mismo PR que lo crea.
+
+```python
+# tests/unit/infrastructure/test_key_ring.py
+import pytest
+from pydantic import SecretStr
+
+from insumap.infrastructure.security.keys import KeyRing
+from tests.support.keys import TEST_KEY_A, TEST_KEY_B
+
+
+def test_previous_key_verifies_but_the_current_key_signs() -> None:
+    ring = KeyRing(current=SecretStr(TEST_KEY_A), previous=SecretStr(TEST_KEY_B))
+    previous_id = ring.all_keys()[1][0]
+
+    assert ring.verification_key(previous_id) != ring.current_key()
+    assert ring.current_key_id != previous_id
+
+
+def test_unknown_key_id_raises_key_error() -> None:
+    ring = KeyRing(current=SecretStr(TEST_KEY_A))
+
+    with pytest.raises(KeyError):
+        ring.verification_key("0123456789abcdef")
+```
+
+```python
+# tests/api/test_security_headers.py
+import pytest
+from fastapi.testclient import TestClient
+
+from insumap.container import Container
+from insumap.main import create_app
+from tests.support.settings import make_settings
+
+EXPECTED_HEADERS = {
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Resource-Policy": "same-site",
+}
+
+
+@pytest.fixture
+def client() -> TestClient:
+    return TestClient(create_app(Container(make_settings())))
+
+
+@pytest.mark.parametrize("path", ["/api/v1/does-not-exist", "/health"])
+def test_every_response_carries_the_security_headers(client: TestClient, path: str) -> None:
+    response = client.get(path)
+
+    for name, value in EXPECTED_HEADERS.items():
+        assert response.headers[name] == value
+    assert "server" not in response.headers
+```
+
+```python
+# tests/unit/infrastructure/test_ai_adapter_minimization.py (forma de la prueba con centinelas)
+SENTINELS = ("SENTINEL-FIRST-NAME", "SENTINEL-LAST-NAME", "1234567890", "sentinel@example.test")
+
+
+def test_request_body_to_the_ai_service_has_no_direct_identifiers(adapter, transport, patient) -> None:
+    adapter.forecast(patient)  # the patient carries every sentinel in its personal fields
+
+    body = transport.last_request.content.decode()
+    for sentinel in (*SENTINELS, str(patient.patient_id), str(patient.user_id)):
+        assert sentinel not in body
+    assert SUBJECT_REF_PATTERN.fullmatch(transport.last_request_json()["subject_ref"])
+```
+
+### 19.3 De la tabla de la política a los archivos
+
+| Control (política 18) | Sección | Archivo principal | Nivel |
+|---|---|---|---|
+| Argon2id; política de contraseña; login genérico | 3 | `test_password_hasher.py`, `test_password_policy.py`, `test_password_verifier.py` | Unitaria y API |
+| Bloqueos; cuenta o clínica inactiva | 3.2, 9.1 | `test_login_lock.py`, `test_login_use_case.py` | Unitaria, API e integración |
+| JWT; `token_version`; MFA obligatorio | 4, 4.1 | `test_jwt_token_service.py`, `test_actor_authenticator.py` | Unitaria y API |
+| Refresh; reutilización | 5 | `test_rotate_refresh_token_use_case.py`, `test_refresh_tokens.py` | Unitaria e integración |
+| Cookie y CSRF | 6 | `test_csrf.py`, `test_refresh_cookie.py` | API |
+| Activación; consentimiento | 8 | `test_credential_invitation.py`, `test_code_hasher.py` | Unitaria y API |
+| MFA | 7 | `test_totp_verifier.py`, `test_mfa_recovery_codes.py` | Unitaria y API |
+| Límites de tasa | 9 | `test_rate_limiters.py` | Unitaria e integración (dos instancias) |
+| Permisos y denegación por defecto | 10 | `test_route_security.py` | API |
+| RLS | 11 | `test_rls_context.py` | Integración |
+| Proxy (P11) | 12 | `test_patient_record_access_proxy.py` | Unitaria e integración |
+| Auditoría (P09) y eventos | 13 | `test_phi_access_audit_decorator.py`, `test_security_event_severity.py` | Unitaria e integración |
+| Logs | 14 | `test_logging.py` | Unitaria y API |
+| Columnas cifradas; llaves; rotación | 15, 16 | `test_column_cipher.py`, `test_key_ring.py`, `test_reencrypt_column_use_case.py`, `test_settings.py` | Unitaria e integración |
+| Cabeceras y CORS; tamaño e importación; salidas | 17 | `test_security_headers.py`, `test_cors.py`, `test_middleware.py`, `test_csv_cells.py`, `test_push_endpoint_policy.py` | Unitaria y API |
+| Minimización IA; token de servicio | 18 | `test_hmac_pseudonymizer.py`, `test_ai_adapter_minimization.py` | Unitaria (con `httpx.MockTransport`) |
+| Errores | `api/errors.py` | `test_error_handlers.py` (ya existe) | API |
+
+El "token de servicio" **en `insumap-ai`** (el actual y el anterior pasan, 31 bytes impide el arranque, uno incorrecto da `401 INVALID_SERVICE_TOKEN`) se prueba en ese repositorio; aquí solo se prueba lo del backend (18.4).
+
+### 19.4 Que falle sin el cambio
+
+La lista de verificación de la política (19) pide que la prueba "falle sin el cambio". Para comprobarlo antes de abrir el PR:
+
+1. Escribir la prueba y ver que **pasa** con el control puesto.
+2. Anular el control de la forma más pequeña posible (comentar la línea, devolver el valor sin proteger, quitar el `middleware`) y ver que **falla** por el motivo correcto, no por un error de importación.
+3. Restaurar y dejar en la descripción del PR qué se anuló y qué prueba falló.
+
+Dos trampas frecuentes: una prueba que pasa también sin el control (se comparó con un valor que el control no cambia) y una prueba de integración que corre con un superusuario (pasa sin RLS). La de arquitectura y las pruebas de deriva (`testing-plan.md`, secciones 7 y 8) completan estas: `ARCH-09` prohíbe la hora del sistema, `S608` el SQL armado con texto.
+
+**Antipatrones:** una prueba que lee `.env` o variables del entorno; un secreto real en una fixture; `time.sleep` para esperar un vencimiento; asertar solo el estado HTTP cuando la política exige un cuerpo idéntico; probar el control con un doble que no lo ejecuta (un `Mock` del `RateLimiter` en la prueba del límite); `@pytest.mark.skip` en una prueba de seguridad "hasta que haya BD" (se marca `integration`, no se salta).
+
+## 20. Diferencias con el código actual y pendientes
+
+La guía describe el diseño que se implementa; el código del repositorio hoy solo tiene el esqueleto (configuración, errores canónicos, `RequestIdMiddleware`, `BodySizeLimitMiddleware`, CORS, logging y `/health`). Esta sección dice en qué difieren la guía, la política y el código, y quién decide. Las tablas se actualizan en el mismo PR que cierra cada diferencia.
+
+### 20.1 Diferencias entre la guía, la política y el código
+
+| # | Tema | Qué dicen los documentos | Qué hace el código hoy | Decisión o pendiente |
+|---|---|---|---|---|
+| 1 | Límite de hashes concurrentes (sección 3) | La política 2.1 dice `anyio.to_thread.run_sync` con `CapacityLimiter`. ADR-02 fija endpoints y puertos síncronos (`def`) | Aún no hay hasher | La guía sigue **ADR-02**: `threading.BoundedSemaphore`. Corregir la frase de la política 2.1. Pendiente de decidir (propuesto): si el que espera el semáforo lo hace con un tiempo máximo, porque cada espera ocupa un hilo del pool de FastAPI |
+| 2 | Código del `401` (secciones 4, 4.1, 5) | Política, `API.md`, `Actores-y-permisos.md` y las historias de usuario usan `UNAUTHORIZED` | El enum, `STATUS_BY_CODE`, `CODE_BY_HTTP_STATUS`, `messages_es.json` y dos pruebas usan `UNAUTHENTICATED` | Renombrar a `UNAUTHORIZED` (enum, clave `unauthorized`, mapeos y pruebas) en el PR que agrega la primera ruta autenticada. Mientras tanto, los esqueletos dicen `UNAUTHENTICATED` y el JSON que ve el cliente debe decir `UNAUTHORIZED`. Los demás códigos de la política 2.6 (`SESSION_REVOKED`, `MFA_REQUIRED`, ...) se agregan con su clave y su estado ([`design-patterns.md`](design-patterns.md), sección 2.3) |
+| 3 | `Depends` y `app.state` (sección 4.1) | [`architecture.md`](architecture.md) admite `Depends` solo para `CurrentActor` y la paginación; `container.py` es el único lugar donde se arman las dependencias | No hay autenticación ni uso de `app.state` | El esqueleto de 4.1 lee `request.app.state.actor_authenticator`, que es un localizador. Opción recomendada abajo (20.2): `ActorDependencies` que recibe el autenticador por constructor. Si el equipo prefiere `app.state`, se anota como **única** excepción en `architecture.md` |
+| 4 | Cabeceras en errores de negocio (sección 9, `Retry-After`) | `429` lleva `Retry-After` (política 12) | `InsumapError` no tiene `headers`; `handle_insumap_error` no los pasa, aunque `ErrorResponseFactory.create` ya los acepta | Agregar `headers` opcional (vacío por defecto) a `InsumapError` y pasarlo en el manejador (20.2) |
+| 5 | Ventana del bloqueo de login (sección 9.1) | Política 2.2: 5 fallos **en 15 minutos** (`LOGIN_FAILURE_WINDOW_MINUTES`); cada nivel duplica el bloqueo | Aún no hay registro de intentos | La derivación de 9.1 cuenta fallos consecutivos desde el último éxito y no usa la ventana al escalar. Propuesto: el nivel 1 solo cuenta los fallos dentro de la ventana; los niveles siguientes usan el historial de bloqueos. Lo confirma el dueño de la política |
+| 6 | Contexto de las transacciones independientes (sección 11) | La fila `DENIED` de `data_access_log` acepta el `clinic_id` del actor; `login_attempts`, `rate_limit_buckets` y eventos sin clínica no tienen actor | Aún no hay `UnitOfWorkFactory` | `begin_independent(actor)` fija el contexto del actor para la fila `DENIED`. Para el resto hacen falta funciones `SECURITY DEFINER` o políticas de inserción en `insumap-database` (política 21, puntos 10 y 11) |
+| 7 | `''` o `NULL` tras `set_config` (sección 11) | Las políticas de `insumap-database` deben tratar la cadena vacía como "sin contexto" (`NULLIF(current_setting('app.clinic_id', true), '')`) | Sin BD aún | Verificarlo con `test_rls_context.py` en la imagen de PostgreSQL 18 y pedir el `NULLIF` en `insumap-database` si falta |
+| 8 | Lista de redacción de logs (sección 14) | Política 11.4: `password`, `passwd`, `secret`, `token`, `authorization`, `cookie`, `code`, `otp`, `api_key`, `document`, `email`, `phone`, `birth`. [`Arquitectura.md`](../docs/Arquitectura.md) (sección 15) lista otra: `activation_code`, `name`, `mrn`, `note`, `message`, `value` y no tiene `secret`, `otp` ni `birth` | `SENSITIVE_KEY_PARTS` tiene `document_number` y no tiene `code`, `otp`, `phone` ni `birth`; la clase se llama `RedactionFilter` (Arquitectura dice `PhiRedactionFilter`) | Gana la **política**. Corregir `Arquitectura.md` para que remita a ella. No se agregan `name`, `message` ni `value`: la coincidencia es por subcadena y enmascararía campos legítimos (`logger_name`, `message`); los datos con esos nombres se evitan en origen (14.1) |
+| 9 | `X-Request-ID` entrante (sección 14.2) | Política 11.2: solo un UUID válido | `REQUEST_ID_PATTERN` acepta `[A-Za-z0-9._-]{1,64}` y una prueba verifica `front-42.a_b` | Cambiar el patrón (y `REQUEST_ID_MAX_LENGTH` a 36) y la prueba `test_accepts_a_safe_incoming_request_id` en el PR de redacción |
+| 10 | Tamaño del cuerpo (sección 17.3) | Política 13.3: 64 KiB en general, y límites propios por ruta | `MAX_REQUEST_BODY_BYTES` es 1 MiB para todo | Bajarlo a 64 KiB y pasar a `BodyLimitResolver` cuando exista la primera ruta con un tope distinto |
+| 11 | CORS, hosts y cabeceras (sección 17) | Política 13.1 y 13.2 | CORS sin `X-Requested-With` ni `Idempotency-Key`, sin `max_age` y sin exponer `Retry-After`; no hay `TrustedHostMiddleware`, `ALLOWED_HOSTS` ni `SecurityHeadersMiddleware` | Se agregan con el diseño de 17.1 y 17.2. Un `Host` ajeno hoy lo rechazaría Starlette con texto plano y no con el formato canónico: decidir el código del error (la política no fija uno) |
+| 12 | `Settings` (sección 16.2) | Todas las llaves de la tabla 2.4 y los parámetros de la sección 2 | Solo `app_env`, `log_level`, `database_url`, `cors_origins` y `api_docs_enabled`; `app_env` acepta `local`, `test` y `production` y [`configuration.md`](configuration.md) dice `development` | Crecen campo a campo con cada PR que los usa. Unificar el nombre del entorno de desarrollo en un lado |
+| 13 | Dependencias (secciones 3 a 8, 15) | `argon2-cffi`, `PyJWT`, `cryptography` y `pyotp` (esta última por confirmar en la fase 3) | `pyproject.toml` no las tiene | Cada una entra fijada (`==`) en el PR que la usa, con `pip-audit` limpio |
+
+### 20.2 Detalle de las propuestas
+
+**Dependencias del actor sin `app.state` (diferencia 3).** El contenedor crea un objeto con el autenticador y los routers reciben sus `Depends` por constructor, como reciben sus casos de uso:
+
+```python
+# insumap/api/security.py (alternativa a leer app.state)
+from collections.abc import Callable
+from typing import final
+
+from fastapi import Request
+
+from insumap.application.common.actor import Actor
+from insumap.application.identity.authenticate import ActorAuthenticator, SessionScope
+
+
+@final
+class ActorDependencies:
+    """Built once in container.py; routers take ``.current`` (or the other two) in their constructor."""
+
+    def __init__(self, authenticator: ActorAuthenticator) -> None:
+        self._authenticator = authenticator
+        self.current = self._for(SessionScope.FULL)
+        self.enrollment = self._for(SessionScope.ENROLLMENT)
+        self.any_session = self._for(SessionScope.ANY)
+
+    def _for(self, scope: SessionScope) -> Callable[[Request], Actor]:
+        def dependency(request: Request) -> Actor:
+            return self._authenticator.authenticate(bearer_token(request), scope)
+
+        return dependency
+```
+
+Un router usa `Depends(self._actors.current)` y la prueba de denegación por defecto de la sección 10.2 sigue funcionando, porque la dependencia sigue siendo un `Depends` verificable en `app.routes`.
+
+**Cabeceras en `InsumapError` (diferencia 4).**
+
+```python
+# insumap/shared/errors.py (cambio propuesto)
+def __init__(self, code: ErrorCode, *, message_key: str | None = None,
+             params: Mapping[str, object] | None = None, detail: Mapping[str, object] | None = None,
+             headers: Mapping[str, str] | None = None) -> None:  # fmt: skip
+    ...
+    self.headers: Mapping[str, str] = MappingProxyType(dict(headers or {}))
+
+# insumap/api/errors.py (cambio propuesto en handle_insumap_error)
+return self._responses.create(
+    error.code, message_key=error.message_key, params=error.params,
+    detail=error.detail, headers=error.headers,
+)  # fmt: skip
+```
+
+`shared` sigue sin depender de ninguna capa: las cabeceras son un `Mapping[str, str]`, no un tipo de Starlette. Un `RateLimitedError` (por ejemplo) pone `Retry-After` con los segundos que calculó la política.
+
+**Pruebas:** cada diferencia que se cierra agrega la prueba que la fija: el renombrado de `UNAUTHORIZED` actualiza `test_error_status_mapping.py` y `test_error_handlers.py`; las cabeceras de errores, un caso con `Retry-After` en `test_error_handlers.py`; el `X-Request-ID`, los casos `parametrize` de `test_middleware.py`.
+
+**Antipatrones:** cerrar una diferencia solo en la guía sin tocar la política o el código que corresponde; dejar un esqueleto de esta guía que contradiga al código sin una fila en 20.1; resolver la diferencia 1 con un `anyio.CapacityLimiter` en un endpoint `def` (el limitador no se comparte con el semáforo de hilos y ADR-02 prohíbe volver `async` al puerto).
+
+### 20.3 Pendientes que viven en otros repositorios o documentos
+
+| Pendiente | Dónde se resuelve |
+|---|---|
+| Funciones `SECURITY DEFINER` para el login, la invitación y el refresh; RLS por rol; `NULLIF` en las políticas; tablas `rate_limit_buckets` y `auth_challenges`; columnas de documento y de `key_id` | `insumap-database` (política 21, puntos 7 a 11) |
+| Recifrado y recálculo de `document_hash` sobre todas las clínicas (16.1) | `insumap-database` (privilegio de mantenimiento) y este repositorio (los jobs) |
+| Sección 2.1 de la política (`CapacityLimiter`) y la lista de redacción de `Arquitectura.md` | Documentos canónicos de este repositorio |
+| Campo `data_origin` y días relativos en IA5; rotación del token de servicio en `insumap-ai` | [`Contrato-IA.md`](../docs/Contrato-IA.md) e `insumap-ai` |
+| CSP de `/docs` (Swagger) con *nonce* | Este repositorio, antes de `v1.0.0` (política 13.1 y 20) |
+| `SECURITY.md` con el canal de reporte de vulnerabilidades | Este repositorio (política 21, punto 19) |
