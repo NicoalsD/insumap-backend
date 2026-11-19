@@ -6,5 +6,15 @@
   "conflict": "La solicitud entra en conflicto con el estado actual del recurso.",
   "rate.limited": "Hiciste demasiadas solicitudes. Inténtalo de nuevo más tarde.",
   "payload.too_large": "El cuerpo de la solicitud supera el tamaño máximo permitido.",
-  "internal.error": "Ocurrió un error interno. Inténtalo de nuevo más tarde."
+  "internal.error": "Ocurrió un error interno. Inténtalo de nuevo más tarde.",
+  "session.revoked": "Tu sesión terminó. Inicia sesión de nuevo.",
+  "invalid.credentials": "Usuario o contraseña incorrectos.",
+  "account.not_active": "Tu cuenta no está activa. Comunícate con tu clínica.",
+  "clinic.suspended": "Tu clínica está suspendida. Comunícate con el administrador de la plataforma.",
+  "mfa.required": "Debes activar el segundo factor para continuar.",
+  "consent.required": "Debes aceptar el consentimiento vigente para continuar.",
+  "email.unavailable": "El correo ya pertenece a otra cuenta.",
+  "consent.version_outdated": "La versión del aviso de privacidad ya no es la vigente.",
+  "invalid.state_transition": "La transición de estado no está permitida.",
+  "invitation.invalid": "El código no es válido o venció. Pide uno nuevo a tu clínica."
 }

@@ -35,6 +35,16 @@ STATUS_BY_CODE: Final[Mapping[ErrorCode, HTTPStatus]] = {
     ErrorCode.RATE_LIMITED: HTTPStatus.TOO_MANY_REQUESTS,
     ErrorCode.PAYLOAD_TOO_LARGE: HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
     ErrorCode.INTERNAL_ERROR: HTTPStatus.INTERNAL_SERVER_ERROR,
+    ErrorCode.SESSION_REVOKED: HTTPStatus.UNAUTHORIZED,
+    ErrorCode.INVALID_CREDENTIALS: HTTPStatus.UNAUTHORIZED,
+    ErrorCode.ACCOUNT_NOT_ACTIVE: HTTPStatus.FORBIDDEN,
+    ErrorCode.CLINIC_SUSPENDED: HTTPStatus.FORBIDDEN,
+    ErrorCode.MFA_REQUIRED: HTTPStatus.FORBIDDEN,
+    ErrorCode.CONSENT_REQUIRED: HTTPStatus.FORBIDDEN,
+    ErrorCode.EMAIL_UNAVAILABLE: HTTPStatus.CONFLICT,
+    ErrorCode.CONSENT_VERSION_OUTDATED: HTTPStatus.CONFLICT,
+    ErrorCode.INVALID_STATE_TRANSITION: HTTPStatus.CONFLICT,
+    ErrorCode.INVITATION_INVALID: HTTPStatus.GONE,
 }
 """HTTP status of every error code."""
 
@@ -168,6 +178,7 @@ class ApiExceptionHandlers:
             message_key=error.message_key,
             params=error.params,
             detail=error.detail,
+            headers=error.headers or None,
         )
 
     async def handle_validation_error(

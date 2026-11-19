@@ -39,6 +39,10 @@ def build_app() -> FastAPI:
             detail={"field": "document"},
         )
 
+    @app.get("/rate-limited")
+    def rate_limited() -> None:
+        raise InsumapError(ErrorCode.RATE_LIMITED, headers={"Retry-After": "42"})
+
     @app.get("/unknown-key")
     def unknown_key() -> None:
         raise InsumapError(ErrorCode.FORBIDDEN, message_key="missing.text")
@@ -176,3 +180,11 @@ def test_unexpected_error_answers_500_without_internals(client: TestClient) -> N
     assert SENSITIVE_VALUE not in response.text
     assert "RuntimeError" not in response.text
     assert "Traceback" not in response.text
+
+
+def test_business_error_headers_reach_the_response(client: TestClient) -> None:
+    response = client.get("/rate-limited")
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == "42"
+    assert response.json()["error"]["code"] == "RATE_LIMITED"
