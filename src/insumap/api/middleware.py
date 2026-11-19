@@ -33,8 +33,8 @@ SAFE_REQUEST_ID: Final = re.compile(FieldLimits.REQUEST_ID_PATTERN)
 class RequestIdMiddleware:
     """Gives every request a correlation id and echoes it in ``X-Request-ID``.
 
-    A client supplied id is kept only if it fits ``REQUEST_ID_MAX_LENGTH`` and
-    matches ``REQUEST_ID_PATTERN``; otherwise a new UUID4 replaces it. The id is
+    A client supplied id is kept only if it is a valid UUID (``REQUEST_ID_PATTERN``,
+    Seguridad 11.2); otherwise a new UUID4 replaces it. The id is
     bound for the logs and stored in ``request.state``, where the handler of
     unexpected errors (which runs outside the user middleware) finds it.
     """

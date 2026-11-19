@@ -16,13 +16,13 @@ class FieldLimits:
 
     # Correlation id.
 
-    REQUEST_ID_MAX_LENGTH: ClassVar[int] = 64
-    """Maximum length of a client supplied ``X-Request-ID``."""
+    REQUEST_ID_MAX_LENGTH: ClassVar[int] = 36
+    """Maximum length of a client supplied ``X-Request-ID`` (a UUID in text form)."""
 
     REQUEST_ID_PATTERN: ClassVar[str] = (
-        rf"^[A-Za-z0-9._-]{{1,{REQUEST_ID_MAX_LENGTH}}}$"
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     )
-    """Characters accepted in a client supplied ``X-Request-ID`` (use fullmatch)."""
+    """Shape of a client supplied ``X-Request-ID``: a UUID (use fullmatch)."""
 
     # Accounts.
 
