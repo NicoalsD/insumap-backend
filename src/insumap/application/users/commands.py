@@ -342,7 +342,8 @@ class UpdateStaffUserCommandHandler(
             else current.professional_license
         )
         specialty = command.specialty if "specialty" in provided else current.specialty
-        ensure_license_for_role(current.role, license_number)
+        if "professional_license" in provided:
+            ensure_license_for_role(current.role, license_number)
         self._directory.update_profile(
             command.user_id,
             full_name=full_name,
