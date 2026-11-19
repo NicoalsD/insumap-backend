@@ -37,5 +37,9 @@
   "notification.mfa_reset.external": "Se restableció el segundo factor (MFA) de tu cuenta de Insumap. Al volver a iniciar sesión deberás configurarlo de nuevo. Si no fuiste tú, comunícate con tu clínica.",
   "notification.alert_raised.title": "Nueva alerta en Insumap",
   "notification.alert_raised.body": "Tienes una alerta nueva en Insumap. Ábrela para ver el detalle.",
-  "notification.alert_raised.external": "Tienes una alerta nueva en Insumap. Inicia sesión para ver el detalle."
+  "notification.alert_raised.external": "Tienes una alerta nueva en Insumap. Inicia sesión para ver el detalle.",
+  "reminder.measurement": "Es hora de medir tu glucosa.",
+  "reminder.insulin_dose": "Es hora de registrar tu dosis de insulina.",
+  "reminder.control": "Es hora de tu control con el equipo de salud.",
+  "reminder.registration": "Es hora de registrar tus datos del día."
 }
