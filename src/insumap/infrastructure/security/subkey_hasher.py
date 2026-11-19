@@ -18,6 +18,7 @@ class Subkey(StrEnum):
     """Purposes of ``APP_HMAC_KEY``; each one has its own HKDF subkey."""
 
     RATE_LIMIT = "rate-limit"
+    PATIENT_DOCUMENT = "patient-document"
 
 
 @final

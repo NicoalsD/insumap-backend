@@ -181,6 +181,56 @@ class FieldLimits:
     """Longest pagination cursor accepted (the records cursor carries a time and
     an id); a longer one is invalid."""
 
+    # Patient import (clinic.patients, clinic.import_rows and API.md 8.4).
+
+    MRN_MAX_LENGTH: ClassVar[int] = 40
+    """Maximum length of a medical record number (``clinic.patients.mrn``)."""
+
+    MRN_PATTERN: ClassVar[str] = r"[A-Za-z0-9][A-Za-z0-9._/-]*"
+    """Shape of a medical record number (use fullmatch)."""
+
+    PATIENT_FULL_NAME_MAX_LENGTH: ClassVar[int] = 120
+    """Maximum length of a patient's full name (``clinic.patients.full_name``)."""
+
+    PATIENT_PHONE_MAX_LENGTH: ClassVar[int] = 32
+    """Maximum length of a contact phone (``clinic.patients.contact_phone``)."""
+
+    DOCUMENT_NUMBER_MIN_LENGTH: ClassVar[int] = 5
+    """Shortest identity document number, after normalization."""
+
+    DOCUMENT_NUMBER_MAX_LENGTH: ClassVar[int] = 20
+    """Longest identity document number, after normalization."""
+
+    DOCUMENT_NUMBER_PATTERN: ClassVar[str] = r"[A-Z0-9-]+"
+    """Characters of a normalized document number (use fullmatch)."""
+
+    DOCUMENT_LAST4_LENGTH: ClassVar[int] = 4
+    """Characters kept in clear to show a masked document (``document_last4``)."""
+
+    FHIR_BUNDLE_MAX_BYTES: ClassVar[int] = 10 * 1024 * 1024
+    """Body size of one FHIR Bundle import (10 MiB)."""
+
+    FHIR_BUNDLE_MAX_ENTRIES: ClassVar[int] = 5000
+    """Entries of one FHIR Bundle import."""
+
+    FHIR_BUNDLE_MAX_DEPTH: ClassVar[int] = 32
+    """Nesting depth of one FHIR Bundle import."""
+
+    PATIENT_CSV_MAX_BYTES: ClassVar[int] = 2 * 1024 * 1024
+    """Body size of one patient CSV import (2 MiB)."""
+
+    PATIENT_CSV_MAX_ROWS: ClassVar[int] = 5000
+    """Data rows of one patient CSV import."""
+
+    PATIENT_CSV_MAX_COLUMNS: ClassVar[int] = 40
+    """Columns of one patient CSV import."""
+
+    PATIENT_CSV_MAX_CELL_LENGTH: ClassVar[int] = 1000
+    """Characters of one cell of a patient CSV import."""
+
+    IMPORT_PREVIEW_MAX_AGE_MINUTES: ClassVar[int] = 60
+    """How long a previewed batch waits for its confirmation before it expires."""
+
     # Alerts (alerts.alert_rules and alerts.alerts).
 
     ALERT_NAME_MAX_LENGTH: ClassVar[int] = 120

@@ -24,7 +24,7 @@ from sqlalchemy import (
     Uuid,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 IAM = {"schema": "iam"}
@@ -242,8 +242,63 @@ class PatientOrm(Base):
     diabetes_type: Mapped[str] = mapped_column(String(5))
     contact_email: Mapped[str | None] = mapped_column(String(254))
     mrn: Mapped[str] = mapped_column(String(40))
+    sex: Mapped[str] = mapped_column(String(7))
+    contact_phone: Mapped[str | None] = mapped_column(String(32))
+    document_type: Mapped[str] = mapped_column(String(3))
+    document_hash: Mapped[str] = mapped_column(CHAR(64))
+    document_hash_key_id: Mapped[str] = mapped_column(CHAR(16))
+    document_ciphertext: Mapped[bytes] = mapped_column(LargeBinary)
+    document_key_id: Mapped[str] = mapped_column(CHAR(16))
     document_last4: Mapped[str] = mapped_column(String(4))
     import_batch_id: Mapped[UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = _timestamp()
+    updated_at: Mapped[datetime] = _timestamp()
+    lock_version: Mapped[int] = mapped_column(Integer)
+
+
+class ImportBatchOrm(Base):
+    """``clinic.import_batches``: one upload; the file itself is never stored."""
+
+    __tablename__ = "import_batches"
+    __table_args__ = CLINIC
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    source_format: Mapped[str] = mapped_column(String(4))
+    data_origin: Mapped[str] = mapped_column(String(9))
+    status: Mapped[str] = mapped_column(String(10))
+    file_sha256: Mapped[str] = mapped_column(CHAR(64))
+    file_size_bytes: Mapped[int] = mapped_column(Integer)
+    simulator_version: Mapped[str | None] = mapped_column(String(40))
+    total_rows: Mapped[int] = mapped_column(Integer)
+    valid_rows: Mapped[int] = mapped_column(Integer)
+    warning_rows: Mapped[int] = mapped_column(Integer)
+    error_rows: Mapped[int] = mapped_column(Integer)
+    created_rows: Mapped[int] = mapped_column(Integer)
+    skipped_rows: Mapped[int] = mapped_column(Integer)
+    created_by: Mapped[UUID] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = _timestamp()
+    finished_at: Mapped[datetime | None] = _timestamp(nullable=True)
+
+
+class ImportRowOrm(Base):
+    """``clinic.import_rows``: the result of one row; the raw row is never stored."""
+
+    __tablename__ = "import_rows"
+    __table_args__ = CLINIC
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    batch_id: Mapped[UUID] = mapped_column(Uuid)
+    row_number: Mapped[int] = mapped_column(Integer)
+    resource_type: Mapped[str | None] = mapped_column(String(24))
+    status: Mapped[str] = mapped_column(String(17))
+    issue_codes: Mapped[list[str]] = mapped_column(ARRAY(String(40)))
+    mrn: Mapped[str | None] = mapped_column(String(40))
+    patient_id: Mapped[UUID | None] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=NOW
+    )
 
 
 class PrivacyNoticeVersionOrm(Base):

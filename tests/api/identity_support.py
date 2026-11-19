@@ -46,6 +46,7 @@ from tests.support.notification_fakes import (
     notification_adapters,
 )
 from tests.support.notifications import InMemoryChannel
+from tests.support.onboarding_fakes import OnboardingWorld
 from tests.support.patient_fakes import FakePatientRoster, FakePendingInvitations
 from tests.support.settings import make_settings
 from tests.support.sites_fakes import FakeSites
@@ -91,6 +92,7 @@ class IdentityApi:
         self.staff_invitations = FakeStaffInvitations()
         self.alerts = AlertsWorld()
         self.login_lockouts = FakeLoginLockouts()
+        self.onboarding = OnboardingWorld()
         self.templates = FakeTemplates()
         self.plans = FakePlans()
         self.snapshots = FakeSnapshots()
@@ -129,6 +131,7 @@ class IdentityApi:
                 activation_codes=DistinctActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
+            onboarding_adapters=self.onboarding.adapters(),
             alert_adapters=self.alerts.adapters(),
             treatment_adapters=TreatmentAdapters(
                 templates=self.templates,

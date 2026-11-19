@@ -14,6 +14,7 @@ from insumap.api.routers.care_team import CareTeamRouter
 from insumap.api.routers.clinics import ClinicRouter
 from insumap.api.routers.credentials import CredentialRouter
 from insumap.api.routers.health import HealthRouter
+from insumap.api.routers.imports import ImportRouter
 from insumap.api.routers.meta import MetaRouter
 from insumap.api.routers.metrics import MetricsRouter
 from insumap.api.routers.notifications import NotificationRouter
@@ -193,6 +194,20 @@ from insumap.application.notifications.web_push import (
     RegisterWebPushSubscriptionUseCase,
     RemoveWebPushSubscriptionUseCase,
 )
+from insumap.application.onboarding.commands import (
+    ConfirmImportCommand,
+    ConfirmImportCommandHandler,
+    PreviewImportCommand,
+    PreviewImportCommandHandler,
+)
+from insumap.application.onboarding.pipeline import PatientImportPipeline
+from insumap.application.onboarding.queries import (
+    DownloadCsvTemplateUseCase,
+    ExportImportErrorsUseCase,
+    GetImportBatchUseCase,
+    ListImportBatchesUseCase,
+    ListImportRowsUseCase,
+)
 from insumap.application.patients.commands import (
     DeactivatePatientCommand,
     DeactivatePatientCommandHandler,
@@ -292,6 +307,7 @@ from insumap.domain.identity.refresh_token import RefreshTokenLifetime
 from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistry
 from insumap.domain.monitoring.events import GlucoseReadingRecorded
 from insumap.domain.monitoring.validation import build_validation_chain
+from insumap.domain.onboarding.vocabulary import SourceFormat
 from insumap.infrastructure.alerts_adapters import (
     AlertsAdapters,
     build_alerts_adapters,
@@ -310,6 +326,8 @@ from insumap.infrastructure.identity_adapters import (
     build_identity_adapters,
     load_common_passwords,
 )
+from insumap.infrastructure.integration.csv.pipeline import CsvPatientImportPipeline
+from insumap.infrastructure.integration.fhir.pipeline import FhirPatientImportPipeline
 from insumap.infrastructure.logging import JsonLoggingConfigurator
 from insumap.infrastructure.monitoring_adapters import (
     MonitoringAdapters,
@@ -318,6 +336,10 @@ from insumap.infrastructure.monitoring_adapters import (
 from insumap.infrastructure.notification_adapters import (
     NotificationAdapters,
     build_notification_adapters,
+)
+from insumap.infrastructure.onboarding.adapters import (
+    OnboardingAdapters,
+    build_onboarding_adapters,
 )
 from insumap.infrastructure.patient_adapters import (
     PatientAdapters,
@@ -331,6 +353,7 @@ from insumap.infrastructure.platform_adapters import (
     PlatformAdapters,
     build_platform_adapters,
 )
+from insumap.infrastructure.security.keys import KeyRing
 from insumap.infrastructure.targets_adapters import (
     TargetsAdapters,
     build_targets_adapters,
@@ -368,6 +391,8 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     DeactivateStaffUserCommand,
     UnlockStaffUserCommand,
     ResetStaffMfaCommand,
+    PreviewImportCommand,
+    ConfirmImportCommand,
     CreateAlertRuleCommand,
     CreateAlertRuleVersionCommand,
     AcknowledgeAlertCommand,
@@ -466,6 +491,7 @@ class Container:
         targets_adapters: TargetsAdapters | None = None,
         credentials_adapters: CredentialsAdapters | None = None,
         email_channel: NotificationChannel | None = None,
+        onboarding_adapters: OnboardingAdapters | None = None,
         alert_adapters: AlertsAdapters | None = None,
         treatment_adapters: TreatmentAdapters | None = None,
         notification_adapters: NotificationAdapters | None = None,
@@ -515,6 +541,15 @@ class Container:
         )
         if email_channel is not None:
             platform = replace(platform, email_channel=email_channel)
+        onboarding = onboarding_adapters or build_onboarding_adapters(
+            current=current,
+            clock=self.clock,
+            app_hmac_key=decode_key(self.settings.app_hmac_key.get_secret_value()),
+            encryption=KeyRing(
+                current=self.settings.mfa_encryption_key,
+                previous=self.settings.mfa_encryption_key_previous,
+            ),
+        )
         alerts = alert_adapters or build_alerts_adapters(current=current)
         treatment = treatment_adapters or build_treatment_adapters(
             current=current, metrics_targets=monitoring.targets
@@ -542,6 +577,7 @@ class Container:
             *self._clinic_commands(adapters, platform),
             *self._site_commands(adapters, platform),
             *self._users_commands(adapters, platform, unit_of_work),
+            *self._onboarding_commands(adapters, onboarding, unit_of_work),
             *self._alert_commands(adapters, monitoring, alerts),
             *self._treatment_commands(adapters, treatment, monitoring),
             *self._targets_commands(adapters, monitoring, targets),
@@ -607,6 +643,7 @@ class Container:
         )
         self.records_router = self._build_records_router(adapters, monitoring)
         self.metrics_router = self._build_metrics_router(adapters, monitoring)
+        self.import_router = self._build_import_router(adapters, onboarding)
         self._subscribe_alert_evaluation(adapters, alerts)
         self.alerts_router = self._build_alerts_router(adapters, monitoring, alerts)
         self.target_profile_router = self._build_target_profile_router(
@@ -903,6 +940,77 @@ class Container:
                 guard.wrap(EndAssignmentCommandHandler(teams=teams, clock=clock)),
             ),
         ]
+
+    def _onboarding_commands(
+        self,
+        adapters: IdentityAdapters,
+        onboarding: OnboardingAdapters,
+        current: CurrentUnitOfWork,
+    ) -> list[Registration]:
+        """The patient import decisions (P13), behind transaction and audit (P09)."""
+        guard, clock = self._command_guard, self.clock
+        pipelines = self._import_pipelines(adapters, onboarding)
+        return [
+            bind(
+                PreviewImportCommand,
+                guard.wrap(
+                    PreviewImportCommandHandler(
+                        pipelines=pipelines,
+                        staged=onboarding.staged,
+                        current=current,
+                    )
+                ),
+            ),
+            bind(
+                ConfirmImportCommand,
+                guard.wrap(
+                    ConfirmImportCommandHandler(
+                        batches=onboarding.batches,
+                        accounts=onboarding.accounts,
+                        staged=onboarding.staged,
+                        current=current,
+                        ids=adapters.ids,
+                        clock=clock,
+                    )
+                ),
+            ),
+        ]
+
+    def _import_pipelines(
+        self, adapters: IdentityAdapters, onboarding: OnboardingAdapters
+    ) -> dict[SourceFormat, PatientImportPipeline]:
+        """One P20 pipeline per P03 family; the command picks by source format."""
+        return {
+            SourceFormat.FHIR: FhirPatientImportPipeline(
+                batches=onboarding.batches,
+                vault=onboarding.vault,
+                ids=adapters.ids,
+                clock=self.clock,
+            ),
+            SourceFormat.CSV: CsvPatientImportPipeline(
+                batches=onboarding.batches,
+                vault=onboarding.vault,
+                ids=adapters.ids,
+                clock=self.clock,
+            ),
+        }
+
+    def _build_import_router(
+        self, adapters: IdentityAdapters, onboarding: OnboardingAdapters
+    ) -> ImportRouter:
+        """Wire the patient import endpoints (API.md 8.4)."""
+        uow = adapters.unit_of_work
+        return ImportRouter(
+            commands=self.command_bus,
+            list_batches=ListImportBatchesUseCase(uow=uow, batches=onboarding.batches),
+            get_batch=GetImportBatchUseCase(uow=uow, batches=onboarding.batches),
+            list_rows=ListImportRowsUseCase(uow=uow, batches=onboarding.batches),
+            export_errors=ExportImportErrorsUseCase(
+                uow=uow, batches=onboarding.batches
+            ),
+            csv_template=DownloadCsvTemplateUseCase(),
+            staff_actor=self.full_session_actor,
+        )
 
     def _clinic_commands(
         self, adapters: IdentityAdapters, platform: PlatformAdapters

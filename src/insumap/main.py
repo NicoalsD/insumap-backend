@@ -12,6 +12,7 @@ from insumap.api.middleware import (
     RequestIdMiddleware,
 )
 from insumap.api.openapi import InsumapApi
+from insumap.api.paths import API_V1_PREFIX
 from insumap.container import Container
 from insumap.shared.field_limits import FieldLimits
 
@@ -25,6 +26,13 @@ CORS_ALLOWED_HEADERS: Final = [
     REQUEST_ID_HEADER,
 ]
 CORS_EXPOSED_HEADERS: Final = [REQUEST_ID_HEADER, RETRY_AFTER_HEADER]
+
+
+IMPORT_BODY_LIMITS: Final = {
+    f"{API_V1_PREFIX}/imports/fhir": FieldLimits.FHIR_BUNDLE_MAX_BYTES,
+    f"{API_V1_PREFIX}/imports/csv": FieldLimits.PATIENT_CSV_MAX_BYTES,
+}
+"""Body size of the import routes, which read raw bodies (API.md 5)."""
 
 
 def create_app(container: Container | None = None) -> FastAPI:
@@ -43,6 +51,7 @@ def create_app(container: Container | None = None) -> FastAPI:
         BodySizeLimitMiddleware,
         responses=container.error_responses,
         max_body_bytes=FieldLimits.MAX_REQUEST_BODY_BYTES,
+        path_limits=IMPORT_BODY_LIMITS,
     )
     app.add_middleware(RequestIdMiddleware)
     if settings.cors_origins:
@@ -66,6 +75,7 @@ def create_app(container: Container | None = None) -> FastAPI:
     app.include_router(container.target_profile_router.router)
     app.include_router(container.reminder_router.router)
     app.include_router(container.user_router.router)
+    app.include_router(container.import_router.router)
     app.include_router(container.treatment_router.router)
     app.include_router(container.notification_router.router)
     app.include_router(container.patient_router.router)

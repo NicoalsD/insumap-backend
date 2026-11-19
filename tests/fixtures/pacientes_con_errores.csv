@@ -1,0 +1,6 @@
+mrn,birth_date,full_name,document_type,document_number,sex,diabetes_type,contact_email,contact_phone
+DEMO-000010,1972-04-10,Carlos Paciente Demo,CC,SIM-5060708,male,T2D,carlos@example.test,
+DEMO-000011,,Sin Fecha Demo,CC,SIM-6070809,female,T1D,,
+DEMO-000012,1990-09-09,Documento Malo Demo,CC,ABC#!,male,T2D,,
+DEMO-000010,1985-02-02,Repetido En Archivo Demo,CC,SIM-7080910,male,T2D,,
+DEMO-000013,1966-01-20,Tipo Desconocido Demo,XX,SIM-8091011,male,T2D,,
