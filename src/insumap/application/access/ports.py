@@ -125,3 +125,8 @@ class DataAccessLogPort(ABC):
     @abstractmethod
     def record_denied(self, record: DataAccessRecord) -> None:
         """Short independent transaction: it stays even if the request rolls back."""
+
+    def record_granted_many(self, records: Sequence[DataAccessRecord]) -> None:
+        """Granted rows of one list in the same transaction (a loop by default)."""
+        for record in records:
+            self.record_granted(record)
