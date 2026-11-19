@@ -1,8 +1,11 @@
-"""Activation of an imported patient with a single-use code.
+"""Activation of an imported patient or of invited staff with a single-use code.
 
-Step 1 checks the code and the birth date and opens an activation session.
-Step 2 sets the password and the email, records the consent and activates the
-account in one transaction; ``PatientActivated`` is published after commit.
+Step 1 checks the code (and the birth date of a patient) and opens an
+activation session. Step 2 sets the password, activates the account and, for a
+patient, sets the email and records the consent, in one transaction;
+``PatientActivated`` is published after commit. Staff (``STAFF_ACTIVATION``) give
+no birth date and no consent, keep the email they were invited with and leave
+with an MFA enrollment session (``Seguridad.md``, 3.7).
 Every failure of either step answers the same ``410 INVITATION_INVALID``.
 """
 
@@ -14,7 +17,11 @@ from typing import Final, final
 from uuid import UUID
 
 from insumap.application.common.ids import IdGenerator
-from insumap.application.common.unit_of_work import TransactionContext, UnitOfWorkPort
+from insumap.application.common.unit_of_work import (
+    TransactionContext,
+    UnitOfWork,
+    UnitOfWorkPort,
+)
 from insumap.application.identity.challenges import ChallengePolicy, ChallengeService
 from insumap.application.identity.email_verification import EmailVerificationIssuer
 from insumap.application.identity.passwords import NewPasswordService
@@ -26,13 +33,14 @@ from insumap.application.identity.ports import (
     UserRepositoryPort,
 )
 from insumap.application.identity.session import AuthenticationResult, SessionIssuer
+from insumap.application.notifications.notification import PendingNotification
 from insumap.application.security.events import (
     SecurityEvent,
     SecurityEventPort,
     SecurityEventType,
 )
 from insumap.application.security.rate_limit import RateLimitCheck
-from insumap.domain.identity.auth_challenge import ChallengePurpose
+from insumap.domain.identity.auth_challenge import AuthChallenge, ChallengePurpose
 from insumap.domain.identity.codes import ActivationCode
 from insumap.domain.identity.consent import ConsentAction, ConsentRecord, ConsentScope
 from insumap.domain.identity.email import EmailAddress
@@ -49,6 +57,7 @@ from insumap.domain.identity.invitation import (
     InvitationStatus,
 )
 from insumap.domain.identity.password_policy import PersonalData
+from insumap.domain.identity.user import UserAccount
 from insumap.shared.errors import ErrorCode, InsumapError
 from insumap.shared.time import Clock
 
@@ -56,6 +65,7 @@ FILLER_CODE: Final = "0" * 16
 """Hashed when the input is malformed, so every attempt costs the same."""
 
 EMAIL_FIELD: Final = "body.email"
+CONSENT_FIELD: Final = "body.consent"
 MISSING: Final = "missing"
 
 
@@ -73,8 +83,8 @@ class VerifyActivationCodeResult:
     """The activation session; never the patient's name or other data."""
 
     activation_token: str
-    clinic_name: str
-    privacy_notice_version_id: UUID
+    clinic_name: str | None
+    privacy_notice_version_id: UUID | None
     email_required: bool
 
 
@@ -127,10 +137,12 @@ class VerifyActivationCodeUseCase:
         now = self._clock.now()
         with self._uow.begin(TransactionContext.anonymous()) as uow:
             found = self._activations.find_invitation(hashes)
+            if code is None or found is None:
+                raise InvitationInvalidError
+            if found.purpose is InvitationPurpose.STAFF_ACTIVATION:
+                return self._verify_staff(uow, found, now)
             if (
-                code is None
-                or found is None
-                or found.purpose is not InvitationPurpose.PATIENT_ACTIVATION
+                found.purpose is not InvitationPurpose.PATIENT_ACTIVATION
                 or found.clinic_id is None
             ):
                 raise InvitationInvalidError
@@ -173,6 +185,38 @@ class VerifyActivationCodeUseCase:
             email_required=profile.contact_email is None,
         )
 
+    def _verify_staff(
+        self, uow: UnitOfWork, found: CredentialInvitation, now: datetime
+    ) -> VerifyActivationCodeResult:
+        """Staff prove possession of the emailed code: no birth date, no notice."""
+        uow.apply_context(
+            TransactionContext(user_id=found.user_id, clinic_id=found.clinic_id)
+        )
+        invitation = self._activations.get_invitation(found.invitation_id)
+        if invitation is None:
+            raise InvitationInvalidError
+        verified = invitation.verified(now=now)
+        self._activations.save_invitation(verified)
+        token = self._challenges.issue(
+            purpose=ChallengePurpose.ACTIVATION,
+            policy=self._policy.session,
+            user_id=verified.user_id,
+            clinic_id=verified.clinic_id,
+            invitation_id=verified.invitation_id,
+        )
+        clinic_name = (
+            None
+            if verified.clinic_id is None
+            else self._activations.clinic_name(verified.clinic_id)
+        )
+        uow.commit()
+        return VerifyActivationCodeResult(
+            activation_token=token,
+            clinic_name=clinic_name,
+            privacy_notice_version_id=None,
+            email_required=False,
+        )
+
     def _record_failure(self, invitation: CredentialInvitation) -> None:
         self._events.record(
             SecurityEvent(
@@ -198,12 +242,15 @@ class ConsentInput:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class CompleteActivationInput:
-    """The activation session, the new password, the email and the consent."""
+    """The activation session, the new password, the email and the consent.
+
+    Staff send neither the email nor the consent: both are ignored.
+    """
 
     activation_token: str
     new_password: str
     email: str | None
-    consent: ConsentInput
+    consent: ConsentInput | None
     client_ip: str
 
 
@@ -261,80 +308,153 @@ class CompleteActivationUseCase:
                 else self._activations.get_invitation(challenge.invitation_id)
             )
             account = self._users.get(challenge.user_id)
-            if (
-                invitation is None
-                or invitation.patient_id is None
-                or invitation.clinic_id is None
-                or account is None
-            ):
+            if invitation is None or account is None:
                 raise InvitationInvalidError
-            profile = self._activations.activation_profile(invitation.patient_id)
-            if profile is None:
+            if invitation.purpose is InvitationPurpose.STAFF_ACTIVATION:
+                activated = self._activate_staff(
+                    uow, challenge, invitation, account, input, now
+                )
+            elif invitation.purpose is InvitationPurpose.PATIENT_ACTIVATION:
+                activated = self._activate_patient(
+                    uow, challenge, invitation, account, input, now
+                )
+            else:
                 raise InvitationInvalidError
-            if not input.consent.accepted:
-                raise ConsentRequiredError
-            notice = self._consents.current_notice(invitation.clinic_id)
-            if (
-                notice is None
-                or notice.version_id != input.consent.privacy_notice_version_id
-            ):
-                raise ConsentVersionOutdatedError
-            email = _email(input.email or profile.contact_email)
-            if self._users.email_taken(
-                email.normalized, except_user_id=account.user_id
-            ):
-                raise EmailUnavailableError
-            password_hash = self._passwords.accepted_hash(
-                account.user_id,
-                input.new_password,
-                PersonalData(
-                    email_local_part=email.local_part, full_name=profile.full_name
-                ),
+        if activated.verification is not None:
+            activated.verification.send()
+        return activated.result
+
+    def _activate_staff(
+        self,
+        uow: UnitOfWork,
+        challenge: AuthChallenge,
+        invitation: CredentialInvitation,
+        account: UserAccount,
+        input: CompleteActivationInput,
+        now: datetime,
+    ) -> _Activated:
+        """Staff keep the invited email, give no consent and must enroll MFA."""
+        if account.email is None:
+            raise InvitationInvalidError
+        email = EmailAddress.from_input(account.email)
+        password_hash = self._passwords.accepted_hash(
+            account.user_id,
+            input.new_password,
+            PersonalData(
+                email_local_part=email.local_part, full_name=account.full_name or ""
+            ),
+        )
+        used = invitation.use(now=now)
+        activated = account.activated(password_hash=password_hash, email=email)
+        self._users.save(activated)
+        self._passwords.remember(account.user_id, password_hash)
+        self._activations.save_invitation(used)
+        self._challenges.save(challenge.consumed(now=now))
+        self._events.record(
+            SecurityEvent(
+                event_type=SecurityEventType.ACCOUNT_ACTIVATED,
+                user_id=account.user_id,
+                clinic_id=invitation.clinic_id,
             )
-            used = invitation.use(now=now)
-            activated = account.activated(password_hash=password_hash, email=email)
-            self._users.save(activated)
-            self._passwords.remember(account.user_id, password_hash)
-            self._activations.save_invitation(used)
-            self._challenges.save(challenge.consumed(now=now))
-            self._consents.add(
-                _consent_records(
-                    input.consent,
-                    ids=self._ids,
-                    clinic_id=invitation.clinic_id,
+        )
+        verification = (
+            None
+            if self._email_verification is None
+            else self._email_verification.issue(activated, email.original)
+        )
+        result = (
+            self._sessions.enrollment_session(activated)
+            if activated.requires_mfa
+            else self._sessions.open_full_session(activated)
+        )
+        uow.commit()
+        return _Activated(result=result, verification=verification)
+
+    def _activate_patient(
+        self,
+        uow: UnitOfWork,
+        challenge: AuthChallenge,
+        invitation: CredentialInvitation,
+        account: UserAccount,
+        input: CompleteActivationInput,
+        now: datetime,
+    ) -> _Activated:
+        if invitation.patient_id is None or invitation.clinic_id is None:
+            raise InvitationInvalidError
+        profile = self._activations.activation_profile(invitation.patient_id)
+        if profile is None:
+            raise InvitationInvalidError
+        consent = input.consent
+        if consent is None:
+            raise InsumapError(
+                ErrorCode.VALIDATION_ERROR,
+                detail={"errors": [{"field": CONSENT_FIELD, "type": MISSING}]},
+            )
+        if not consent.accepted:
+            raise ConsentRequiredError
+        notice = self._consents.current_notice(invitation.clinic_id)
+        if notice is None or notice.version_id != consent.privacy_notice_version_id:
+            raise ConsentVersionOutdatedError
+        email = _email(input.email or profile.contact_email)
+        if self._users.email_taken(email.normalized, except_user_id=account.user_id):
+            raise EmailUnavailableError
+        password_hash = self._passwords.accepted_hash(
+            account.user_id,
+            input.new_password,
+            PersonalData(
+                email_local_part=email.local_part, full_name=profile.full_name
+            ),
+        )
+        used = invitation.use(now=now)
+        activated = account.activated(password_hash=password_hash, email=email)
+        self._users.save(activated)
+        self._passwords.remember(account.user_id, password_hash)
+        self._activations.save_invitation(used)
+        self._challenges.save(challenge.consumed(now=now))
+        self._consents.add(
+            _consent_records(
+                consent,
+                ids=self._ids,
+                clinic_id=invitation.clinic_id,
+                patient_id=invitation.patient_id,
+                user_id=account.user_id,
+                now=now,
+            )
+        )
+        self._events.record(
+            SecurityEvent(
+                event_type=SecurityEventType.ACCOUNT_ACTIVATED,
+                user_id=account.user_id,
+                clinic_id=invitation.clinic_id,
+            )
+        )
+        uow.collect(
+            [
+                PatientActivated(
+                    event_id=self._ids.new_id(),
+                    occurred_at=now,
+                    user_id=account.user_id,
                     patient_id=invitation.patient_id,
-                    user_id=account.user_id,
-                    now=now,
-                )
-            )
-            self._events.record(
-                SecurityEvent(
-                    event_type=SecurityEventType.ACCOUNT_ACTIVATED,
-                    user_id=account.user_id,
                     clinic_id=invitation.clinic_id,
                 )
-            )
-            uow.collect(
-                [
-                    PatientActivated(
-                        event_id=self._ids.new_id(),
-                        occurred_at=now,
-                        user_id=account.user_id,
-                        patient_id=invitation.patient_id,
-                        clinic_id=invitation.clinic_id,
-                    )
-                ]
-            )
-            verification = (
-                None
-                if self._email_verification is None
-                else self._email_verification.issue(activated, email.original)
-            )
-            result = self._sessions.open_full_session(activated)
-            uow.commit()
-        if verification is not None:
-            verification.send()
-        return result
+            ]
+        )
+        verification = (
+            None
+            if self._email_verification is None
+            else self._email_verification.issue(activated, email.original)
+        )
+        result = self._sessions.open_full_session(activated)
+        uow.commit()
+        return _Activated(result=result, verification=verification)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _Activated:
+    """The session of an activation and the verification email to send after commit."""
+
+    result: AuthenticationResult
+    verification: PendingNotification | None
 
 
 def _same_date(expected: date, given: date | None) -> bool:

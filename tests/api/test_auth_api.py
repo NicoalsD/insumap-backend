@@ -10,6 +10,8 @@ from tests.support.identity_world import (
     NEW_PASSWORD,
     NOTICE_ID,
     PASSWORD,
+    STAFF_CODE,
+    STAFF_EMAIL,
 )
 
 PATIENT = {"email": "paciente@example.test", "password": PASSWORD}
@@ -481,6 +483,44 @@ def test_activation_errors_of_the_second_step() -> None:
         409,
         "CONSENT_VERSION_OUTDATED",
     )
+
+
+def test_staff_activation_needs_no_birth_date_nor_consent() -> None:
+    api = IdentityApi()
+    verified = api.client.post(
+        "/api/v1/auth/activation/verify", json={"activation_code": STAFF_CODE}
+    )
+    token = verified.json()["activation_token"]
+
+    done = api.client.post(
+        "/api/v1/auth/activation/complete",
+        json={"activation_token": token, "new_password": NEW_PASSWORD},
+    )
+    login = api.client.post(
+        "/api/v1/auth/login", json={"email": STAFF_EMAIL, "password": NEW_PASSWORD}
+    )
+
+    assert verified.status_code == 200
+    assert verified.json()["privacy_notice_version_id"] is None
+    assert verified.json()["email_required"] is False
+    assert done.status_code == 200
+    assert done.json()["status"] == "MFA_ENROLLMENT_REQUIRED"
+    assert done.json()["access_token"]
+    assert "set-cookie" not in done.headers
+    assert login.json()["status"] == "MFA_ENROLLMENT_REQUIRED"
+
+
+def test_a_patient_without_consent_is_a_validation_error() -> None:
+    api = IdentityApi()
+    token = activation_token(api)
+
+    response = api.client.post(
+        "/api/v1/auth/activation/complete",
+        json={"activation_token": token, "new_password": NEW_PASSWORD},
+    )
+
+    assert response.status_code == 422
+    assert error_code(response) == "VALIDATION_ERROR"
 
 
 @pytest.mark.parametrize(

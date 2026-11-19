@@ -31,7 +31,8 @@ def build_client(*allowed_hosts: str) -> TestClient:
 
 def get_with_host(client: TestClient, host: str | None) -> int:
     headers = {"Host": host} if host is not None else None
-    return client.get("/ping", headers=headers).status_code
+    status: int = client.get("/ping", headers=headers).status_code
+    return status
 
 
 @pytest.mark.parametrize(

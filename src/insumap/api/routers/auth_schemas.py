@@ -160,7 +160,7 @@ class ConsentRequest(StrictRequest):
 
 
 class CompleteActivationRequest(StrictRequest):
-    """Contraseña, correo y consentimiento del paciente."""
+    """Contraseña, correo y consentimiento (el personal solo envía la contraseña)."""
 
     activation_token: OpaqueTokenInput = Field(
         description="Token de la sesión de activación (15 minutos, un solo uso)."
@@ -172,7 +172,12 @@ class CompleteActivationRequest(StrictRequest):
         pattern=FieldLimits.EMAIL_PATTERN,
         description="Obligatorio si la importación no traía correo.",
     )
-    consent: ConsentRequest
+    consent: ConsentRequest | None = Field(
+        default=None,
+        description=(
+            "Obligatorio para pacientes. El personal no consiente y lo omite."
+        ),
+    )
 
 
 class AuthenticationResponse(BaseModel):
@@ -308,10 +313,17 @@ class VerifyActivationCodeResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     activation_token: str = Field(description="Opaco, 15 minutos, un solo uso.")
-    clinic_name: str
-    privacy_notice_version_id: UUID
+    clinic_name: str | None = Field(
+        description="Nombre de la clínica. Nulo solo para personal sin clínica."
+    )
+    privacy_notice_version_id: UUID | None = Field(
+        description="Versión vigente del aviso. Nulo para el personal (no consiente)."
+    )
     email_required: bool = Field(
-        description="`true` si hay que pedir el correo en el paso siguiente."
+        description=(
+            "`true` si hay que pedir el correo en el paso siguiente. Siempre `false` "
+            "para el personal."
+        )
     )
 
     @classmethod
