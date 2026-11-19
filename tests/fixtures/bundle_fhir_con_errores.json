@@ -1,0 +1,26 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "identifier": [{"system": "urn:insumap:demo:mrn", "value": "DEMO-000030"}],
+        "name": [{"family": "Sin Documento", "given": ["Nora"]}],
+        "birthDate": "1977-07-07",
+        "gender": "female"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "identifier": [
+          {"system": "urn:insumap:demo:mrn", "value": "DEMO-000031"},
+          {"type": {"coding": [{"code": "CC"}]}, "value": "SIM-1415161"}
+        ],
+        "name": [{"family": "Sin Fecha", "given": ["Jorge"]}],
+        "gender": "male"
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "meta": {
+    "tag": [{
+      "system": "https://insumap.example.test/fhir/CodeSystem/data-origin",
+      "code": "SIMULATED",
+      "display": "Datos simulados"
+    }]
+  },
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "identifier": [
+          {"system": "urn:insumap:demo:mrn", "value": "DEMO-000040"},
+          {"type": {"coding": [{"code": "CC"}]}, "value": "SIM-1617181"}
+        ],
+        "name": [{"family": "Simulado", "given": ["Julia"]}],
+        "birthDate": "1964-05-05",
+        "gender": "female"
+      }
+    }
+  ]
+}

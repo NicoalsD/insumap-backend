@@ -16,6 +16,7 @@ from insumap.domain.onboarding.patient import PatientCandidate
 from insumap.domain.onboarding.vocabulary import (
     DocumentType,
     ImportIssue,
+    RowVerdict,
     SourceFormat,
 )
 
@@ -43,7 +44,9 @@ class FhirPatientAdapter(PatientRecordMapper):
             not isinstance(resource, dict)
             or resource.get("resourceType") != PATIENT_RESOURCE
         ):
-            raise SourceRowError(ImportIssue.RESOURCE_UNSUPPORTED)
+            raise SourceRowError(
+                ImportIssue.RESOURCE_UNSUPPORTED, RowVerdict.UNSUPPORTED
+            )
         mrn, document_type, document_number = _identifiers(resource.get("identifier"))
         names = resource.get("name")
         first_name = names[0] if isinstance(names, list) and names else {}

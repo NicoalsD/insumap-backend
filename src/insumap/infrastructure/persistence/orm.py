@@ -295,7 +295,9 @@ class ImportRowOrm(Base):
     issue_codes: Mapped[list[str]] = mapped_column(ARRAY(String(40)))
     mrn: Mapped[str | None] = mapped_column(String(40))
     patient_id: Mapped[UUID | None] = mapped_column(Uuid)
-    created_at: Mapped[datetime] = _timestamp()
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=NOW
+    )
 
 
 class PrivacyNoticeVersionOrm(Base):

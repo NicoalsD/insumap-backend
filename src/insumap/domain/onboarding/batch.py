@@ -48,9 +48,11 @@ class RowOutcome:
 class ImportTotals:
     """Counters of a batch (the ``*_rows`` columns of ``clinic.import_batches``).
 
-    ``valid`` and ``warning`` count rows that can become patients; ``error``
-    counts rejected rows; ``skipped`` counts duplicates; ``created`` counts the
-    patients a confirmation created. Unsupported rows only count in ``total``.
+    ``valid`` counts rows that can become patients as they are; ``warning``
+    counts those that can become patients with a dropped optional value;
+    ``error`` counts rejected rows; ``skipped`` counts duplicates; ``created``
+    counts the patients a confirmation created. Unsupported rows only count in
+    ``total``.
     """
 
     total: int = 0

@@ -1,0 +1,37 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "identifier": [
+          {"system": "urn:insumap:demo:mrn", "value": "DEMO-000020"},
+          {"type": {"coding": [{"code": "CC"}]}, "value": "SIM-9101112"}
+        ],
+        "name": [{"family": "Paciente", "given": ["Carlos"]}],
+        "birthDate": "1972-04-10",
+        "gender": "male"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Patient",
+        "identifier": [
+          {"system": "urn:insumap:demo:mrn", "value": "DEMO-000021"},
+          {"type": {"coding": [{"code": "TI"}]}, "value": "SIM-1213141"}
+        ],
+        "name": [{"family": "Ejemplo", "given": ["Rosa"]}],
+        "birthDate": "1990-12-01",
+        "gender": "female"
+      }
+    },
+    {
+      "resource": {
+        "resourceType": "Observation",
+        "status": "final",
+        "code": {"coding": [{"system": "http://loinc.org", "code": "2339-0"}]}
+      }
+    }
+  ]
+}

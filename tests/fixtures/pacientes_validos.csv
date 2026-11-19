@@ -1,0 +1,4 @@
+mrn,birth_date,full_name,document_type,document_number,sex,diabetes_type,contact_email,contact_phone
+DEMO-000001,1968-03-02,Pedro Paciente Demo,CC,SIM-1020304,male,T2D,pedro.paciente@example.test,+57 300 000 0001
+DEMO-000002,1975-06-15,Ana Invitada Demo,CC,SIM-2030405,female,T1D,ana.invitada@example.test,
+DEMO-000003,1981-11-30,Luis Ejemplo Demo,TI,SIM-3040506,unknown_value,T9,no-es-correo,
