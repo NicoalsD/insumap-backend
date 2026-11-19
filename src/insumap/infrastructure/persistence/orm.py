@@ -106,13 +106,19 @@ class CredentialInvitationOrm(Base):
     user_id: Mapped[UUID] = mapped_column(Uuid)
     patient_id: Mapped[UUID | None] = mapped_column(Uuid)
     purpose: Mapped[str] = mapped_column(String(20))
+    channel: Mapped[str] = mapped_column(String(5))
     status: Mapped[str] = mapped_column(String(8))
     code_hash: Mapped[str] = mapped_column(CHAR(64))
     code_key_id: Mapped[str] = mapped_column(CHAR(16))
     failed_attempts: Mapped[int] = mapped_column(SmallInteger)
     expires_at: Mapped[datetime] = _timestamp()
+    issued_by: Mapped[UUID] = mapped_column(Uuid)
+    issued_at: Mapped[datetime] = _timestamp()
     verified_at: Mapped[datetime | None] = _timestamp(nullable=True)
     used_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    revoked_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    revoked_by: Mapped[UUID | None] = mapped_column(Uuid)
+    delivery_status: Mapped[str] = mapped_column(String(14))
 
 
 class AuthChallengeOrm(Base):
@@ -195,8 +201,15 @@ class ClinicOrm(Base):
 
     id: Mapped[UUID] = _id()
     name: Mapped[str] = mapped_column(String(120))
+    tax_id: Mapped[str] = mapped_column(String(32))
+    timezone: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(9))
+    suspended_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    suspended_reason: Mapped[str | None] = mapped_column(String(500))
     is_demo: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = _timestamp()
+    updated_at: Mapped[datetime] = _timestamp()
+    lock_version: Mapped[int] = mapped_column(Integer)
 
 
 class StaffProfileOrm(Base):
@@ -206,6 +219,10 @@ class StaffProfileOrm(Base):
     user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     clinic_id: Mapped[UUID] = mapped_column(Uuid)
     full_name: Mapped[str] = mapped_column(String(120))
+    professional_license: Mapped[str | None] = mapped_column(String(40))
+    specialty: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = _timestamp()
+    updated_at: Mapped[datetime] = _timestamp()
 
 
 class PatientOrm(Base):
@@ -243,3 +260,44 @@ class PatientConsentOrm(Base):
     action: Mapped[str] = mapped_column(String(9))
     occurred_at: Mapped[datetime] = _timestamp()
     recorded_by: Mapped[UUID] = mapped_column(Uuid)
+
+
+class SiteOrm(Base):
+    __tablename__ = "sites"
+    __table_args__ = CLINIC
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    name: Mapped[str] = mapped_column(String(120))
+    is_active: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = _timestamp()
+    updated_at: Mapped[datetime] = _timestamp()
+
+
+class StaffSiteOrm(Base):
+    __tablename__ = "staff_sites"
+    __table_args__ = CLINIC
+
+    user_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    site_id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    created_at: Mapped[datetime] = _timestamp()
+
+
+class CareAssignmentOrm(Base):
+    __tablename__ = "care_team_assignments"
+    __table_args__ = CLINIC
+
+    id: Mapped[UUID] = _id()
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    doctor_user_id: Mapped[UUID] = mapped_column(Uuid)
+    is_primary: Mapped[bool] = mapped_column(Boolean)
+    assigned_by: Mapped[UUID] = mapped_column(Uuid)
+    assigned_at: Mapped[datetime] = _timestamp()
+    ended_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    ended_by: Mapped[UUID | None] = mapped_column(Uuid)
+    end_reason: Mapped[str | None] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=NOW
+    )
