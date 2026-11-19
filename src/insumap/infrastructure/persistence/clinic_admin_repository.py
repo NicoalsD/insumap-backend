@@ -1,20 +1,28 @@
-"""``iam.create_first_clinic_admin`` over PostgreSQL (API.md 8.3, ``db-v0.3.0``).
+"""``iam.create_first_clinic_admin`` and the access reset over PostgreSQL (API.md 8.3).
 
-The function checks that the session is a PLATFORM_ADMIN and does the writes
-under SECURITY DEFINER, so the adapter only calls it with bound parameters.
-Its business errors are plain ``RAISE EXCEPTION`` messages (SQLSTATE P0001),
+The functions check that the session is a PLATFORM_ADMIN and do the writes
+under SECURITY DEFINER, so the adapter only calls them with bound parameters.
+Their business errors are plain ``RAISE EXCEPTION`` messages (SQLSTATE P0001),
 matched on the primary message, never on the whole text.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Final, final, override
+from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from insumap.application.clinic_admins.commands import CREATE_ACTION
+from insumap.application.clinic_admins.commands import (
+    ADMIN_MACHINE,
+    CREATE_ACTION,
+    RESET_ACTION,
+)
 from insumap.application.clinic_admins.ports import (
+    ClinicAdminAccessReset,
+    ClinicAdminContact,
     ClinicAdminProvisioningPort,
     NewClinicAdmin,
     ProvisionedClinicAdmin,
@@ -33,10 +41,27 @@ CREATE_FIRST_CLINIC_ADMIN = text(
 )
 """Named arguments and explicit casts: the signature in ``db-v0.3.0``."""
 
+RESET_ACCESS = text(
+    "SELECT iam.reset_clinic_admin_access("
+    "p_clinic_id => :clinic_id, p_user_id => :user_id, "
+    "p_code_hash => CAST(:code_hash AS char(64)), "
+    "p_code_key_id => CAST(:code_key_id AS char(16)), "
+    "p_expires_at => :expires_at) AS invitation_id"
+)
+"""``iam.reset_clinic_admin_access`` (``db-v0.5.0``): returns the new invitation id."""
+
+CLINIC_ADMIN_CONTACT = text(
+    "SELECT email, full_name FROM iam.clinic_admin_contact("
+    "p_clinic_id => :clinic_id, p_user_id => :user_id)"
+)
+"""``iam.clinic_admin_contact`` (``db-v0.5.0``): PLATFORM_ADMIN reads it only."""
+
 EMAIL_INDEX: Final = "ux_users_email_normalized"
 EMAIL_TAKEN: Final = "email_taken"
 CLINIC_NOT_FOUND: Final = "clinic not found"
 CLINIC_NOT_ACTIVE: Final = "clinic is not ACTIVE"
+NOT_FOUND: Final = "not found"
+STATUS_NOT_RESETTABLE: Final = re.compile(r"^user status (\S+) cannot be reset$")
 
 
 def _primary_message(error: DBAPIError) -> str:
@@ -88,3 +113,49 @@ class ClinicAdminProvisioningRepository(ClinicAdminProvisioningPort):
         return ProvisionedClinicAdmin(
             user_id=row.user_id, invitation_id=row.invitation_id
         )
+
+    @override
+    def reset_access(self, reset: ClinicAdminAccessReset) -> UUID:
+        try:
+            invitation_id: UUID = (
+                self._current.get()
+                .execute(
+                    RESET_ACCESS,
+                    {
+                        "clinic_id": reset.clinic_id,
+                        "user_id": reset.user_id,
+                        "code_hash": reset.code_hash,
+                        "code_key_id": reset.code_key_id,
+                        "expires_at": reset.expires_at,
+                    },
+                )
+                .scalar_one()
+            )
+        except DBAPIError as error:
+            message = _primary_message(error)
+            if message == NOT_FOUND:
+                raise ResourceNotFoundError from None
+            status = STATUS_NOT_RESETTABLE.match(message)
+            if status is not None:
+                raise InvalidStateTransitionError(
+                    ADMIN_MACHINE, status.group(1), RESET_ACTION
+                ) from None
+            raise
+        return invitation_id
+
+    @override
+    def contact(self, clinic_id: UUID, user_id: UUID) -> ClinicAdminContact:
+        try:
+            row = (
+                self._current.get()
+                .execute(
+                    CLINIC_ADMIN_CONTACT,
+                    {"clinic_id": clinic_id, "user_id": user_id},
+                )
+                .one()
+            )
+        except DBAPIError as error:
+            if _primary_message(error) == NOT_FOUND:
+                raise ResourceNotFoundError from None
+            raise
+        return ClinicAdminContact(email=row.email, full_name=row.full_name)

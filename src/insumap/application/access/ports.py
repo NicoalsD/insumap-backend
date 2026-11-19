@@ -47,6 +47,14 @@ class DataResource(StrEnum):
     PATIENT_DOCUMENT = "PATIENT_DOCUMENT"
 
 
+class DataAccessAction(StrEnum):
+    """What was done with the data (``audit.data_access_log.action``)."""
+
+    READ = "READ"
+    EXPORT = "EXPORT"
+    DECRYPT = "DECRYPT"
+
+
 class DataAccessOutcome(StrEnum):
     """Whether the read was allowed (``audit.data_access_log.outcome``)."""
 
@@ -113,6 +121,7 @@ class DataAccessRecord:
     purpose: AccessPurpose
     outcome: DataAccessOutcome
     request_id: str | None
+    action: DataAccessAction = DataAccessAction.READ
 
 
 class DataAccessLogPort(ABC):
