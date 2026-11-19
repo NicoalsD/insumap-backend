@@ -14,6 +14,7 @@ from tests.support.identity_world import (
     DOCTOR_USER,
     ENROLLING_DOCTOR,
     PATIENT_USER,
+    STAFF_INVITED_USER,
     make_account,
 )
 
@@ -124,6 +125,7 @@ def test_listing_returns_the_clinic_staff_filtered_by_role(api: IdentityApi) -> 
     assert {item["id"] for item in body["items"]} == {
         str(DOCTOR_USER),
         str(ENROLLING_DOCTOR),
+        str(STAFF_INVITED_USER),
     }
     assert body["next_cursor"] is None
     assert "clinical" not in response.text
