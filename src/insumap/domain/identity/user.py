@@ -69,6 +69,22 @@ class UserAccount:
         """This account with ``token_version + 1``: every access token dies."""
         return replace(self, token_version=self.token_version + 1)
 
+    def suspended(self, *, reason: str) -> UserAccount:
+        """This account blocked (``ACTIVE -> SUSPENDED``), with its reason.
+
+        The state object refuses any other origin with ``409``.
+        """
+        next_state = self.state.suspend()
+        return replace(self, status=next_state.status, status_reason=reason)
+
+    def reactivated(self) -> UserAccount:
+        """This account back in use (``SUSPENDED -> ACTIVE``).
+
+        The reason of the suspension no longer applies, so it is cleared.
+        """
+        next_state = self.state.reactivate()
+        return replace(self, status=next_state.status, status_reason=None)
+
     def deactivated(self, *, reason: str) -> UserAccount:
         """This account closed for good (``-> DEACTIVATED``), with its reason.
 
@@ -76,6 +92,21 @@ class UserAccount:
         """
         next_state = self.state.deactivate()
         return replace(self, status=next_state.status, status_reason=reason)
+
+    def invited(self) -> UserAccount:
+        """The patient account after an activation code was issued (P18).
+
+        ``IMPORTED -> INVITED``; re-issuing keeps ``INVITED``. The state object
+        refuses it for any other status.
+        """
+        return replace(self, status=self.state.issue_credentials().status)
+
+    def reverted_to_imported(self) -> UserAccount:
+        """The patient account once its invitation was revoked.
+
+        ``INVITED -> IMPORTED``.
+        """
+        return replace(self, status=self.state.revoke_invitation().status)
 
     def with_password_hash(self, password_hash: str) -> UserAccount:
         """This account with a new password hash (rehash or change)."""

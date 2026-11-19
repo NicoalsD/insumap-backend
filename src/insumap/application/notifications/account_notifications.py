@@ -150,6 +150,48 @@ class StaffActivationNotification(Notification):
         )
 
 
+ACTIVATION_PATH = "activar"
+"""Route of the web app that takes the code from its fragment (Seguridad 3.3)."""
+
+
+class PatientActivationNotification(Notification):
+    """The activation link of an imported patient, with the code in its fragment.
+
+    The code is a single-use secret: it travels only in this external message,
+    never in-app and never in a log. The fragment is not sent to the server.
+
+    Pattern: P07 Bridge
+    """
+
+    def __init__(
+        self,
+        channel: NotificationChannel,
+        messages: MessageCatalog,
+        *,
+        base_url: str,
+        code: str,
+        days: int,
+    ) -> None:
+        super().__init__(channel, messages)
+        self._link = f"{base_url.rstrip('/')}/{ACTIVATION_PATH}#code={code}"
+        self._days = days
+
+    @override
+    def compose_in_app(self) -> tuple[str, str]:
+        raise ChannelNotSupportedError("notification.patient_activation")
+
+    @override
+    def compose_external(self) -> tuple[str, str]:
+        return (
+            self._messages.render("notification.patient_activation.subject"),
+            self._messages.render(
+                "notification.patient_activation.external",
+                link=self._link,
+                days=self._days,
+            ),
+        )
+
+
 class MfaResetNotification(Notification):
     """The notice that the second factor was reset (no code, no link).
 

@@ -159,6 +159,9 @@ class FieldLimits:
     READINGS_BATCH_MAX_BYTES: ClassVar[int] = 512 * 1024
     """Body size of one offline batch (512 KiB)."""
 
+    CREDENTIAL_BATCH_MAX_ITEMS: ClassVar[int] = 100
+    """Patients in one credential batch (``Seguridad.md`` 3.3)."""
+
     CGM_CSV_MAX_BYTES: ClassVar[int] = 10 * 1024 * 1024
     """Body size of one CGM CSV import (10 MiB)."""
 
@@ -200,3 +203,20 @@ class FieldLimits:
 
     INTEGER_MAX: ClassVar[int] = 2147483647
     """Largest value of an ``integer`` column (minimum readings for the CV)."""
+
+    # Notifications (alerts.push_subscriptions and alerts.notification_preferences).
+
+    PUSH_ENDPOINT_MAX_LENGTH: ClassVar[int] = 2048
+    """Longest Web Push endpoint URL (``alerts.push_subscriptions.endpoint``)."""
+
+    PUSH_ENDPOINT_PATTERN: ClassVar[str] = r"^https://[^\s]+$"
+    """A Web Push endpoint is an https URL without spaces (use fullmatch)."""
+
+    PUSH_KEY_MAX_LENGTH: ClassVar[int] = 255
+    """Longest public key of a subscription (``alerts.push_subscriptions.p256dh``)."""
+
+    PUSH_AUTH_SECRET_MAX_LENGTH: ClassVar[int] = 64
+    """Longest auth secret of a subscription, before it is encrypted."""
+
+    PUSH_KEY_PATTERN: ClassVar[str] = r"^[A-Za-z0-9_-]+$"
+    """Subscription keys are base64url without padding (use fullmatch)."""

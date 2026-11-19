@@ -33,6 +33,7 @@ class SecurityEventType(StrEnum):
     PASSWORD_RESET_REQUESTED = "PASSWORD_RESET_REQUESTED"  # noqa: S105 - event name
     ACCOUNT_UNLOCKED = "ACCOUNT_UNLOCKED"
     MFA_RESET = "MFA_RESET"
+    PUSH_ENDPOINT_REJECTED = "PUSH_ENDPOINT_REJECTED"
 
     @property
     def severity(self) -> SecuritySeverity:
@@ -43,6 +44,7 @@ class SecurityEventType(StrEnum):
 _SEVERITY = {
     SecurityEventType.REFRESH_TOKEN_REUSE_DETECTED: SecuritySeverity.HIGH,
     SecurityEventType.MFA_FAILED: SecuritySeverity.MEDIUM,
+    SecurityEventType.PUSH_ENDPOINT_REJECTED: SecuritySeverity.MEDIUM,
     SecurityEventType.MFA_RECOVERY_CODE_USED: SecuritySeverity.MEDIUM,
     SecurityEventType.ACTIVATION_LOCKED: SecuritySeverity.MEDIUM,
     SecurityEventType.CSRF_CHECK_FAILED: SecuritySeverity.MEDIUM,
