@@ -161,7 +161,7 @@ Unicidad y reglas entre columnas: `email_normalized` (índice único parcial `WH
 
 ### `iam.memberships`
 
-Vínculo de una persona con una clínica y un rol. En el MVP cada usuario tiene una sola membresía (`user_id` único): un usuario pertenece a una clínica. El `PLATFORM_ADMIN` tiene una membresía sin clínica.
+Vínculo de una persona con una clínica y un rol. Existe para todo usuario: el personal y los pacientes (la importación crea la cuenta `IMPORTED` y su membresía `PATIENT` en la misma transacción) y de ella salen el `role` y el `clinic_id` del JWT. En el MVP cada usuario tiene una sola membresía (`user_id` único): un usuario pertenece a una clínica. El `PLATFORM_ADMIN` tiene una membresía sin clínica.
 
 | Columna | Tipo | Nulo | Por defecto | Restricción | Descripción |
 |---|---|---|---|---|---|
@@ -184,7 +184,7 @@ Invitaciones de un solo uso: activación de paciente, activación de personal y 
 | Columna | Tipo | Nulo | Por defecto | Restricción | Descripción |
 |---|---|---|---|---|---|
 | `id` | `uuid` | No | `uuidv7()` | PK | Identificador de la fila (UUID v7). |
-| `clinic_id` | `uuid` | No |  | FK clinic.clinics(id) | Clínica dueña de la fila (tenant). La RLS filtra por esta columna. |
+| `clinic_id` | `uuid` | Sí |  | FK clinic.clinics(id); CHECK clinic_id IS NOT NULL OR purpose = 'STAFF_ACTIVATION' | Clínica de la invitación. Nulo solo en la activación del `PLATFORM_ADMIN` (Seguridad 3.7), que no pertenece a ninguna clínica. |
 | `user_id` | `uuid` | No |  | FK iam.users(id) | Cuenta invitada. |
 | `patient_id` | `uuid` | Sí |  | FK clinic.patients(id) | Paciente invitado. Nulo para invitaciones de personal. |
 | `purpose` | `varchar(20)` | No |  | CHECK IN ('PATIENT_ACTIVATION','STAFF_ACTIVATION','PASSWORD_RESET') | Propósito de la invitación. |
@@ -355,7 +355,7 @@ Clínica contratante (tenant). La bandera `is_demo` marca la clínica de "Datos 
 | `id` | `uuid` | No | `uuidv7()` | PK | Identificador de la fila (UUID v7). |
 | `name` | `varchar(120)` | No |  | UNIQUE (`lower(name)`); FieldLimits.CLINIC_NAME_MAX_LENGTH (propuesta) | Nombre de la clínica. Repetido responde `409 CONFLICT`. |
 | `tax_id` | `varchar(32)` | No |  | FieldLimits.TAX_ID_MAX_LENGTH (propuesta) | Identificación fiscal. |
-| `timezone` | `varchar(64)` | No |  | FieldLimits.TIMEZONE_MAX_LENGTH (propuesta); validada contra `pg_timezone_names` | Zona IANA de la clínica (por ejemplo `America/Bogota`). Base de los cálculos por día y de la noche. |
+| `timezone` | `varchar(64)` | No |  | FieldLimits.TIMEZONE_MAX_LENGTH (propuesta); validada por trigger (`pg_timezone_names`) o en la aplicación; un `CHECK` no admite subconsultas | Zona IANA de la clínica (por ejemplo `America/Bogota`). Base de los cálculos por día y de la noche. |
 | `status` | `varchar(9)` | No | `'ACTIVE'` | CHECK IN ('ACTIVE','SUSPENDED') | Estado de la clínica. |
 | `suspended_at` | `timestamptz` | Sí |  | CHECK (status = 'SUSPENDED') = (suspended_at IS NOT NULL) | Momento de la suspensión. |
 | `suspended_reason` | `varchar(500)` | Sí |  | CHECK char_length BETWEEN REASON_MIN_LENGTH AND REASON_MAX_LENGTH | Motivo de la suspensión. |
@@ -559,20 +559,21 @@ Unicidad y reglas entre columnas: (`batch_id`, `row_number`, `resource_type`) co
 
 ### `clinic.clinic_settings` (propuesta)
 
-Parámetros operativos de negocio de la clínica, una fila por clínica (propuesta). Son datos configurables, nunca constantes del código.
+Parámetros operativos de negocio de la clínica (propuesta). Una fila global sembrada (`clinic_id` nulo) con los valores por defecto y, opcionalmente, una fila por clínica que la sustituye. Son datos configurables, nunca constantes del código.
 
 | Columna | Tipo | Nulo | Por defecto | Restricción | Descripción |
 |---|---|---|---|---|---|
-| `clinic_id` | `uuid` | No |  | PK; FK clinic.clinics(id) | Clínica. |
+| `id` | `uuid` | No | `uuidv7()` | PK | Identificador de la fila (UUID v7). |
+| `clinic_id` | `uuid` | Sí |  | FK clinic.clinics(id) | Clínica. Nulo en la fila global sembrada. |
 | `recommendation_expiry_hours` | `integer` | No |  | CHECK > 0 | Plazo para decidir una recomendación antes de `EXPIRED`. |
 | `forecast_refresh_minutes` | `integer` | No |  | CHECK > 0 | Intervalo mínimo entre pronósticos de IA1 por paciente. |
 | `dropout_inactivity_days` | `integer` | No |  | CHECK > 0 | Días sin registros para el respaldo por reglas de IA7 y la alerta de adherencia. |
 | `kpi_min_cell_size` | `integer` | No |  | CHECK > 0 | Tamaño mínimo de celda en los KPI del administrador; las menores se agrupan. |
-| `updated_by` | `uuid` | No |  | FK iam.users(id) | Último administrador que cambió los valores. |
+| `updated_by` | `uuid` | Sí |  | FK iam.users(id) | Último administrador que cambió los valores. Nulo en la semilla. |
 | `updated_at` | `timestamptz` | No | `now()` |  | Fecha de la última modificación (UTC). |
 | `lock_version` | `integer` | No | `0` | CHECK >= 0 | Versión para el bloqueo optimista (`409` si no coincide). |
 
-Unicidad y reglas entre columnas: PK (`clinic_id`).
+Unicidad y reglas entre columnas: `clinic_id` con `NULLS NOT DISTINCT` (una fila por clínica y una global).
 
 ## 6. Esquema `care`: Plan de tratamiento, metas y seguimiento
 
