@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-SPOT_MIN = 1
-SPOT_MAX = 4
+from insumap.shared.field_limits import FieldLimits
+
+SPOT_MIN = FieldLimits.INJECTION_SPOT_MIN
+SPOT_MAX = FieldLimits.INJECTION_SPOT_MAX
 ALL_SPOTS: tuple[int, ...] = tuple(range(SPOT_MIN, SPOT_MAX + 1))
 
 

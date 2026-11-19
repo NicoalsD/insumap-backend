@@ -1,5 +1,6 @@
 """Insulin, meals, activities, symptoms and lab results."""
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -25,6 +26,7 @@ from insumap.application.monitoring.records import (
     RecordWriter,
 )
 from insumap.domain.identity.errors import ConsentRequiredError, PermissionDeniedError
+from insumap.domain.monitoring.injection_sites import SiteCode
 from insumap.domain.monitoring.records import (
     ActivityIntensity,
     InsulinKind,
@@ -78,6 +80,33 @@ def test_an_insulin_dose_keeps_what_the_patient_said_and_the_active_plan(
     assert recorded.record.patient_id == PATIENT_ID
     assert world.uow.commits == 1
     assert len(world.records.rows[ClinicalRecordKind.INSULIN_DOSES]) == 1
+
+
+def test_an_insulin_dose_keeps_the_site_and_the_spot_the_patient_gave(
+    world: RecordsWorld,
+) -> None:
+    use_case = RecordInsulinDoseUseCase(
+        uow=world.uow,
+        gate=world.own_gate,
+        writer=writer(world),
+        plans=world.plans,
+        ids=world.ids,
+        clock=world.clock,
+    )
+    data = replace(INSULIN, injection_site=SiteCode.THIGH_LEFT, injection_spot=3)
+
+    recorded = use_case.execute(
+        RecordInput(actor=patient_actor(), data=data, client_record_id=uid(9))
+    )
+
+    assert recorded.record.injection_site is SiteCode.THIGH_LEFT
+    assert recorded.record.injection_spot == 3
+    other_site = replace(data, injection_site=SiteCode.THIGH_RIGHT)
+    with pytest.raises(InsumapError) as caught:
+        use_case.execute(
+            RecordInput(actor=patient_actor(), data=other_site, client_record_id=uid(9))
+        )
+    assert caught.value.code is ErrorCode.CONFLICT
 
 
 def test_the_same_client_id_is_idempotent_and_a_changed_one_conflicts(

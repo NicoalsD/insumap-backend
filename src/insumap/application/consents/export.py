@@ -44,6 +44,10 @@ class JsonEventVisitor(ClinicalEventVisitor[JsonObject]):
             "insulin_kind": event.insulin_kind.value,
             "product_name": event.product_name,
             "units": str(event.units),
+            "injection_site": None
+            if event.injection_site is None
+            else event.injection_site.value,
+            "injection_spot": event.injection_spot,
             "note": event.note,
         }
 

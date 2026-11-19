@@ -185,6 +185,8 @@ class CorrectRecordUseCase:
                 product_name=data.product_name,
                 units=data.units,
                 note=data.note,
+                injection_site=data.injection_site,
+                injection_spot=data.injection_spot,
             )
         if isinstance(original, Meal) and isinstance(data, MealData):
             return original.corrected(

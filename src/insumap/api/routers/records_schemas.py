@@ -4,10 +4,17 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Self
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    model_validator,
+)
 
 from insumap.application.monitoring.data import (
     ActivityData,
@@ -29,6 +36,7 @@ from insumap.domain.monitoring.glucose import (
     ReadingContext,
     ReadingSource,
 )
+from insumap.domain.monitoring.injection_sites import SiteCode
 from insumap.domain.monitoring.record import ClinicalRecord, EntryType
 from insumap.domain.monitoring.records import (
     ActivityIntensity,
@@ -148,6 +156,23 @@ class InsulinFields(RecordFields):
     )
     administered_at: AwareDatetime
     note: NoteInput = None
+    injection_site: SiteCode | None = Field(
+        default=None,
+        description="Sitio donde se aplicó la dosis; opcional. Los códigos son los "
+        "de `GET /patients/own/injection-sites`.",
+    )
+    injection_spot: int | None = Field(
+        default=None,
+        ge=FieldLimits.INJECTION_SPOT_MIN,
+        le=FieldLimits.INJECTION_SPOT_MAX,
+        description="Punto dentro del sitio, de 1 a 4. Exige `injection_site`.",
+    )
+
+    @model_validator(mode="after")
+    def _spot_needs_a_site(self) -> Self:
+        if self.injection_spot is not None and self.injection_site is None:
+            raise ValueError("injection_spot requires injection_site")
+        return self
 
     def to_data(self) -> InsulinData:
         return InsulinData(
@@ -156,6 +181,8 @@ class InsulinFields(RecordFields):
             product_name=self.product_name,
             units=self.units,
             note=self.note,
+            injection_site=self.injection_site,
+            injection_spot=self.injection_spot,
         )
 
 
@@ -345,6 +372,8 @@ class InsulinDoseResponse(RecordResponse):
     administered_at: datetime
     treatment_plan_id: UUID | None
     note: str | None
+    injection_site: SiteCode | None
+    injection_spot: int | None
 
     @classmethod
     def of(cls, dose: InsulinDose, *, simulated: bool) -> InsulinDoseResponse:
@@ -356,6 +385,8 @@ class InsulinDoseResponse(RecordResponse):
             administered_at=dose.administered_at,
             treatment_plan_id=dose.plan_id,
             note=dose.note,
+            injection_site=dose.injection_site,
+            injection_spot=dose.injection_spot,
         )
 
 

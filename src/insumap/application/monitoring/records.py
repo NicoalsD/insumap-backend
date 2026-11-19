@@ -140,6 +140,8 @@ class RecordInsulinDoseUseCase:
                 units=data.units,
                 plan_id=self._plans.active_plan_id(scope.patient_id),
                 note=data.note,
+                injection_site=data.injection_site,
+                injection_spot=data.injection_spot,
             )
             recorded = self._writer.write(uow, ClinicalRecordKind.INSULIN_DOSES, dose)
             uow.commit()

@@ -144,6 +144,12 @@ class FieldLimits:
     INSULIN_UNITS_INPUT_MAX: ClassVar[int] = 1000
     """Largest number of insulin units accepted in one record."""
 
+    INJECTION_SPOT_MIN: ClassVar[int] = 1
+    """First spot of an injection site (``insulin_doses.injection_spot``)."""
+
+    INJECTION_SPOT_MAX: ClassVar[int] = 4
+    """Last spot of an injection site: four points per site."""
+
     CARBS_G_INPUT_MAX: ClassVar[int] = 1000
     """Largest carbohydrate estimate, in grams, accepted in one meal."""
 

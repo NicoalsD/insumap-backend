@@ -110,6 +110,8 @@ class InsulinDoseOrm(RecordColumnsMixin, Base):
     plan_id: Mapped[UUID | None] = mapped_column(Uuid)
     source: Mapped[str] = mapped_column(String(6), server_default="MANUAL")
     note: Mapped[str | None] = mapped_column(String(500))
+    injection_site: Mapped[str | None] = mapped_column(String(14))
+    injection_spot: Mapped[int | None] = mapped_column(SmallInteger)
 
 
 class MealOrm(RecordColumnsMixin, Base):
