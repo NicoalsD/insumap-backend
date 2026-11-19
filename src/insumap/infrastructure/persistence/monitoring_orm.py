@@ -185,14 +185,3 @@ class ReadingValidationSettingsOrm(Base):
     duplicate_window_seconds: Mapped[int] = mapped_column(Integer)
     max_rate_mg_dl_per_min: Mapped[Decimal] = mapped_column(Numeric(5, 2))
     unit_mismatch_ratio: Mapped[Decimal] = mapped_column(Numeric(5, 2))
-
-
-class TreatmentPlanOrm(Base):
-    """Only the columns the records need: the active plan of a patient."""
-
-    __tablename__ = "treatment_plans"
-    __table_args__ = CARE
-
-    id: Mapped[UUID] = _id()
-    patient_id: Mapped[UUID] = mapped_column(Uuid)
-    status: Mapped[str] = mapped_column(String(10))
