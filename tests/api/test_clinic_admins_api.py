@@ -177,7 +177,10 @@ def test_an_unknown_field_is_422(api: IdentityApi) -> None:
 def test_an_invalid_email_or_name_is_422(
     api: IdentityApi, fields: dict[str, str]
 ) -> None:
-    response = create(api, platform(api), **fields)
+    body = {"email": EMAIL, "full_name": "Ana Administradora"} | fields
+    response = api.client.post(
+        f"{BASE}/{DEMO_CLINIC}/admins", headers=platform(api), json=body
+    )
 
     assert response.status_code == 422, response.text
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
