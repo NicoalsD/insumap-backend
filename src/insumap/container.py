@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Final, Never, final
 
@@ -49,11 +49,20 @@ from insumap.application.identity.change_password import (
 )
 from insumap.application.identity.csrf import RefreshRequestGuard
 from insumap.application.identity.current_user import GetCurrentUserUseCase
+from insumap.application.identity.email_verification import (
+    ConfirmEmailVerificationUseCase,
+    EmailVerificationIssuer,
+)
 from insumap.application.identity.login import LoginUseCase
 from insumap.application.identity.mfa import (
     ConfirmMfaEnrollmentUseCase,
     StartMfaEnrollmentUseCase,
     VerifyMfaChallengeUseCase,
+)
+from insumap.application.identity.password_reset import (
+    CompletePasswordResetUseCase,
+    PasswordResetPolicy,
+    RequestPasswordResetUseCase,
 )
 from insumap.application.identity.passwords import NewPasswordService, PasswordRules
 from insumap.application.identity.recovery_codes import (
@@ -67,6 +76,7 @@ from insumap.application.identity.sessions import (
     LogoutUseCase,
     RefreshSessionUseCase,
 )
+from insumap.application.notifications.notification import NotificationChannel
 from insumap.application.readiness import (
     AlwaysReadyProbe,
     CheckReadinessUseCase,
@@ -92,6 +102,10 @@ from insumap.shared.field_limits import FieldLimits
 from insumap.shared.i18n import MessageCatalog
 from insumap.shared.time import Clock, SystemClock
 
+RESET_PASSWORD_PATH: Final = "reset-password"  # noqa: S105 - web route, not a secret
+VERIFY_EMAIL_PATH: Final = "verify-email"
+"""Routes of the web app the emailed links point at (``<base>/<path>#token=...``)."""
+
 ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     RegenerateMfaRecoveryCodesCommand,
     ChangePasswordCommand,
@@ -111,6 +125,8 @@ class IdentityServices:
     challenges: ChallengeService
     verifier: SecondFactorVerifier
     passwords: NewPasswordService
+    email_verification: EmailVerificationIssuer
+    reset_complete_limit: RateLimitCheck
 
 
 @final
@@ -163,6 +179,7 @@ class Container:
         identity_adapters: IdentityAdapters | None = None,
         event_publisher: DomainEventPublisher | None = None,
         platform_adapters: PlatformAdapters | None = None,
+        email_channel: NotificationChannel | None = None,
     ) -> None:
         self.settings: Settings = settings or get_settings()
         self.clock: Clock = clock or SystemClock.instance()
@@ -189,7 +206,9 @@ class Container:
             current=current,
         )
         platform = platform_adapters or build_platform_adapters(current=current)
-        services = self._build_identity_services(adapters)
+        if email_channel is not None:
+            platform = replace(platform, email_channel=email_channel)
+        services = self._build_identity_services(adapters, platform)
         self._command_guard = CommandGuard(
             uow=adapters.unit_of_work,
             audit_log=platform.audit_log,
@@ -202,9 +221,11 @@ class Container:
         self.command_bus: CommandBus = InMemoryCommandBus(
             registrations, required=ALL_COMMAND_TYPES
         )
-        self.auth_router = self._build_auth_router(adapters, services)
+        self.auth_router = self._build_auth_router(adapters, services, platform)
 
-    def _build_identity_services(self, adapters: IdentityAdapters) -> IdentityServices:
+    def _build_identity_services(
+        self, adapters: IdentityAdapters, platform: PlatformAdapters
+    ) -> IdentityServices:
         """The services several identity use cases and commands share."""
         settings, clock = self.settings, self.clock
         minute, hour = timedelta(minutes=1), timedelta(hours=1)
@@ -297,6 +318,25 @@ class Container:
             challenges=challenges,
             verifier=verifier,
             passwords=passwords,
+            email_verification=EmailVerificationIssuer(
+                challenges=challenges,
+                policy=ChallengePolicy(
+                    ttl=timedelta(hours=settings.email_verification_ttl_hours),
+                    max_attempts=settings.activation_max_attempts,
+                ),
+                channel=platform.email_channel,
+                messages=self.message_catalog,
+                link_base_url=settings.web_app_base_url,
+                link_path=VERIFY_EMAIL_PATH,
+            ),
+            reset_complete_limit=RateLimitCheck(
+                adapters.rate_limiter,
+                RateLimitRule(
+                    family="reset_complete_ip",
+                    limit=settings.rate_limit_reset_complete_per_ip_per_minute,
+                    window=minute,
+                ),
+            ),
         )
 
     def _identity_commands(
@@ -339,7 +379,10 @@ class Container:
         ]
 
     def _build_auth_router(
-        self, adapters: IdentityAdapters, services: IdentityServices
+        self,
+        adapters: IdentityAdapters,
+        services: IdentityServices,
+        platform: PlatformAdapters,
     ) -> AuthRouter:
         """Wire the identity use cases over ``adapters`` and mount their router."""
         settings, clock = self.settings, self.clock
@@ -462,6 +505,51 @@ class Container:
                 events=adapters.security_events,
                 rate_limit=activation_limit,
                 ids=adapters.ids,
+                clock=clock,
+                email_verification=services.email_verification,
+            ),
+            request_reset=RequestPasswordResetUseCase(
+                uow=adapters.unit_of_work,
+                users=adapters.users,
+                challenges=challenges,
+                events=adapters.security_events,
+                limiter=adapters.rate_limiter,
+                ip_rule=RateLimitRule(
+                    family="reset_request_ip",
+                    limit=settings.rate_limit_reset_request_per_ip_per_hour,
+                    window=timedelta(hours=1),
+                ),
+                email_rule=RateLimitRule(
+                    family="reset_request_account",
+                    limit=settings.rate_limit_reset_request_per_account_per_hour,
+                    window=timedelta(hours=1),
+                ),
+                policy=PasswordResetPolicy(
+                    ttl=timedelta(minutes=settings.password_reset_ttl_minutes),
+                    max_attempts=settings.activation_max_attempts,
+                    link_base_url=settings.web_app_base_url,
+                    link_path=RESET_PASSWORD_PATH,
+                ),
+                channel=platform.email_channel,
+                messages=self.message_catalog,
+            ),
+            complete_reset=CompletePasswordResetUseCase(
+                uow=adapters.unit_of_work,
+                challenges=challenges,
+                users=adapters.users,
+                passwords=passwords,
+                refresh_tokens=adapters.refresh_tokens,
+                events=adapters.security_events,
+                rate_limit=services.reset_complete_limit,
+                channel=platform.email_channel,
+                messages=self.message_catalog,
+                clock=clock,
+            ),
+            confirm_email=ConfirmEmailVerificationUseCase(
+                uow=adapters.unit_of_work,
+                challenges=challenges,
+                users=adapters.users,
+                rate_limit=services.reset_complete_limit,
                 clock=clock,
             ),
             session_actor=ActorGuard(authenticate, SessionScope.FULL),

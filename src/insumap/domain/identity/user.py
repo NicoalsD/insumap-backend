@@ -41,6 +41,7 @@ class UserAccount:
     membership_active: bool
     clinic: ClinicSummary | None
     patient_id: UUID | None = None
+    email_verified: bool = False
 
     @property
     def state(self) -> PatientAccountState:
@@ -70,8 +71,15 @@ class UserAccount:
         """This account with a new password hash (rehash or change)."""
         return replace(self, password_hash=password_hash)
 
+    def with_verified_email(self) -> UserAccount:
+        """This account once its email was confirmed with the emailed link."""
+        return replace(self, email_verified=True)
+
     def activated(self, *, password_hash: str, email: EmailAddress) -> UserAccount:
-        """The account after a successful activation (``INVITED -> ACTIVE``)."""
+        """The account after a successful activation (``INVITED -> ACTIVE``).
+
+        The email stays unverified until the holder confirms it with the link.
+        """
         next_state = self.state.activate()
         return replace(
             self,
@@ -79,4 +87,5 @@ class UserAccount:
             password_hash=password_hash,
             email=email.original,
             email_normalized=email.normalized,
+            email_verified=False,
         )

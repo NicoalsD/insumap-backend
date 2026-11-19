@@ -94,6 +94,29 @@ class ChangePasswordRequest(StrictRequest):
     new_password: PasswordInput
 
 
+class RequestPasswordResetRequest(StrictRequest):
+    """Correo de la cuenta que olvidó su contraseña."""
+
+    email: EmailInput
+
+
+class CompletePasswordResetRequest(StrictRequest):
+    """Token del enlace recibido por correo y contraseña nueva."""
+
+    token: OpaqueTokenInput = Field(
+        description="Token de un solo uso del fragmento `#token=` del enlace."
+    )
+    new_password: PasswordInput
+
+
+class ConfirmEmailVerificationRequest(StrictRequest):
+    """Token del enlace de verificación de correo."""
+
+    token: OpaqueTokenInput = Field(
+        description="Token de un solo uso del fragmento `#token=` del enlace."
+    )
+
+
 class VerifyActivationCodeRequest(StrictRequest):
     """Código de activación y fecha de nacimiento del paciente."""
 

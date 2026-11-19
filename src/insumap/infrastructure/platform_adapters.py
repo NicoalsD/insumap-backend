@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from insumap.application.commands.auditing import AuditLogPort
+from insumap.application.notifications.notification import NotificationChannel
 from insumap.infrastructure.audit.sql_audit_log import SqlAuditLog
+from insumap.infrastructure.notifications.logging_channel import LoggingEmailChannel
 from insumap.infrastructure.persistence.transactions import CurrentSession
 
 
@@ -17,8 +19,11 @@ class PlatformAdapters:
     """
 
     audit_log: AuditLogPort
+    email_channel: NotificationChannel
 
 
 def build_platform_adapters(*, current: CurrentSession) -> PlatformAdapters:
     """Build the production adapters over the session holder of the process."""
-    return PlatformAdapters(audit_log=SqlAuditLog(current))
+    return PlatformAdapters(
+        audit_log=SqlAuditLog(current), email_channel=LoggingEmailChannel()
+    )

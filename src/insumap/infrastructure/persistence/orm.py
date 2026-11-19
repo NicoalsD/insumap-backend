@@ -77,6 +77,7 @@ class UserOrm(Base):
     id: Mapped[UUID] = _id()
     email: Mapped[str | None] = mapped_column(String(254))
     email_normalized: Mapped[str | None] = mapped_column(String(254))
+    email_verified_at: Mapped[datetime | None] = _timestamp(nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255))
     password_changed_at: Mapped[datetime | None] = _timestamp(nullable=True)
     token_version: Mapped[int] = mapped_column(Integer)
