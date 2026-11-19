@@ -160,6 +160,7 @@ def test_a_doctor_reads_an_assigned_patient_through_the_access_port(
 
     assert len(page.items) == 5
     assert world.patients.reads[0][:2] == (doctor_actor().user_id, PATIENT_ID)
+    assert world.uow.commits == 1  # the audit row of the read is kept
 
 
 def test_a_patient_that_is_not_assigned_answers_not_found(world: RecordsWorld) -> None:
