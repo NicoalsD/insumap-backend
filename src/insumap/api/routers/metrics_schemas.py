@@ -27,7 +27,47 @@ def _number(value: Decimal | None) -> float | None:
     return None if value is None else float(value)
 
 
-class TargetProfileRef(BaseModel):
+class TargetThresholds(BaseModel):
+    """Cut points and goals of a profile; the screens draw their ranges from them."""
+
+    population: str
+    range_low_mg_dl: float
+    range_high_mg_dl: float
+    very_low_mg_dl: float
+    very_high_mg_dl: float
+    tir_min_pct: float
+    tbr_l1_max_pct: float
+    tbr_l2_max_pct: float
+    tar_l1_max_pct: float
+    tar_l2_max_pct: float
+    cv_max_pct: float
+    min_data_sufficiency_pct: float
+    min_days: int
+    night_start: str
+    night_end: str
+
+    @staticmethod
+    def values_of(profile: TargetProfile) -> dict[str, object]:
+        return {
+            "population": profile.population,
+            "range_low_mg_dl": float(profile.range_low_mg_dl),
+            "range_high_mg_dl": float(profile.range_high_mg_dl),
+            "very_low_mg_dl": float(profile.very_low_mg_dl),
+            "very_high_mg_dl": float(profile.very_high_mg_dl),
+            "tir_min_pct": float(profile.tir_min_pct),
+            "tbr_l1_max_pct": float(profile.tbr_l1_max_pct),
+            "tbr_l2_max_pct": float(profile.tbr_l2_max_pct),
+            "tar_l1_max_pct": float(profile.tar_l1_max_pct),
+            "tar_l2_max_pct": float(profile.tar_l2_max_pct),
+            "cv_max_pct": float(profile.cv_max_pct),
+            "min_data_sufficiency_pct": float(profile.min_data_sufficiency_pct),
+            "min_days": profile.min_days,
+            "night_start": profile.night_start.strftime("%H:%M"),
+            "night_end": profile.night_end.strftime("%H:%M"),
+        }
+
+
+class TargetProfileRef(TargetThresholds):
     """The profile of the targets a result was computed with."""
 
     id: UUID
@@ -36,7 +76,12 @@ class TargetProfileRef(BaseModel):
 
     @classmethod
     def of(cls, profile: TargetProfile) -> Self:
-        return cls(id=profile.id, code=profile.code, version=profile.version)
+        return cls(
+            id=profile.id,
+            code=profile.code,
+            version=profile.version,
+            **TargetThresholds.values_of(profile),  # type: ignore[arg-type]
+        )
 
 
 class GlycemicMetricsResponse(BaseModel):

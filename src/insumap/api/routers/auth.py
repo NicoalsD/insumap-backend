@@ -508,7 +508,8 @@ class AuthRouter:
             description=(
                 "Paso 1 de la activación: código y fecha de nacimiento abren una "
                 "sesión "
-                "de activación de 15 minutos. No devuelve el nombre del paciente. Todo "
+                "de activación de 15 minutos. El personal (`STAFF_ACTIVATION`) no "
+                "envía fecha de nacimiento. No devuelve el nombre del paciente. Todo "
                 "fallo responde el mismo `410 INVITATION_INVALID`; cinco fechas "
                 "incorrectas con un código real bloquean la invitación."
             ),
@@ -525,11 +526,11 @@ class AuthRouter:
             description=(
                 "Paso 2: fija la contraseña y el correo, guarda el consentimiento y "
                 "pasa "
-                "la cuenta de `INVITED` a `ACTIVE` en una sola transacción. Responde "
-                "la "
-                "sesión completa con la cookie de refresh. El evento "
-                "`PatientActivated` "
-                "se publica después del commit."
+                "la cuenta de `INVITED` a `ACTIVE` en una sola transacción. Para un "
+                "paciente responde la sesión completa con la cookie de refresh y "
+                "publica `PatientActivated` después del commit. Para el personal no "
+                "hay consentimiento ni correo nuevo y responde "
+                "`MFA_ENROLLMENT_REQUIRED` con el token de enrolamiento."
             ),
             responses=error_responses(
                 HTTPStatus.FORBIDDEN,
@@ -683,10 +684,14 @@ class AuthRouter:
                 activation_token=body.activation_token,
                 new_password=body.new_password,
                 email=body.email,
-                consent=ConsentInput(
-                    privacy_notice_version_id=body.consent.privacy_notice_version_id,
-                    accepted=body.consent.accepted,
-                    ai_external_processing=body.consent.ai_external_processing,
+                consent=(
+                    None
+                    if body.consent is None
+                    else ConsentInput(
+                        privacy_notice_version_id=body.consent.privacy_notice_version_id,
+                        accepted=body.consent.accepted,
+                        ai_external_processing=body.consent.ai_external_processing,
+                    )
                 ),
                 client_ip=client_ip(request),
             )

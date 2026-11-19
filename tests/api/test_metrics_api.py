@@ -84,6 +84,10 @@ def test_patient_reads_the_metrics_of_the_last_14_days(api: IdentityApi) -> None
     assert body["is_sufficient"] is True
     assert body["confidence"] == "NORMAL"
     assert body["target_profile"]["code"] == TEST_PROFILE.code
+    profile = body["target_profile"]
+    assert profile["very_low_mg_dl"] == float(TEST_PROFILE.very_low_mg_dl)
+    assert profile["tir_min_pct"] == float(TEST_PROFILE.tir_min_pct)
+    assert profile["night_start"] == TEST_PROFILE.night_start.strftime("%H:%M")
     assert body["metrics"]["tir_pct"] == 100
     assert body["previous"] is not None
 
