@@ -122,6 +122,7 @@ class CredentialInvitationOrm(Base):
     used_at: Mapped[datetime | None] = _timestamp(nullable=True)
     revoked_at: Mapped[datetime | None] = _timestamp(nullable=True)
     revoked_by: Mapped[UUID | None] = mapped_column(Uuid)
+    replaced_by_id: Mapped[UUID | None] = mapped_column(Uuid)
     delivery_status: Mapped[str] = mapped_column(String(14))
 
 
@@ -240,6 +241,9 @@ class PatientOrm(Base):
     birth_date: Mapped[date] = mapped_column(Date)
     diabetes_type: Mapped[str] = mapped_column(String(5))
     contact_email: Mapped[str | None] = mapped_column(String(254))
+    mrn: Mapped[str] = mapped_column(String(40))
+    document_last4: Mapped[str] = mapped_column(String(4))
+    import_batch_id: Mapped[UUID | None] = mapped_column(Uuid)
 
 
 class PrivacyNoticeVersionOrm(Base):

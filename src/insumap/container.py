@@ -11,9 +11,11 @@ from insumap.api.errors import ApiExceptionHandlers, ErrorResponseFactory
 from insumap.api.routers.auth import AuthRouter
 from insumap.api.routers.care_team import CareTeamRouter
 from insumap.api.routers.clinics import ClinicRouter
+from insumap.api.routers.credentials import CredentialRouter
 from insumap.api.routers.health import HealthRouter
 from insumap.api.routers.meta import MetaRouter
 from insumap.api.routers.metrics import MetricsRouter
+from insumap.api.routers.patients import PatientRouter
 from insumap.api.routers.records import RecordsRouter
 from insumap.api.routers.sites import SiteRouter
 from insumap.api.routers.users import UserRouter
@@ -67,6 +69,16 @@ from insumap.application.commands.transactional import (
     TransactionalCommandHandler,
 )
 from insumap.application.common.unit_of_work import UnitOfWorkPort
+from insumap.application.credentials.commands import (
+    IssueCredentialsCommand,
+    IssueCredentialsCommandHandler,
+    RevokeCredentialInvitationCommand,
+    RevokeCredentialInvitationCommandHandler,
+)
+from insumap.application.credentials.issuance import (
+    IssueCredentialsBatchUseCase,
+    IssueCredentialUseCase,
+)
 from insumap.application.events.publisher import (
     DomainEventPublisher,
     InProcessDomainEventPublisher,
@@ -130,6 +142,7 @@ from insumap.application.monitoring.glucose import (
     RecordGlucoseReadingsBatchUseCase,
     RecordGlucoseReadingUseCase,
 )
+from insumap.application.monitoring.profile import GetOwnPatientProfileUseCase
 from insumap.application.monitoring.queries import (
     ExportTimelineUseCase,
     GetTimelineUseCase,
@@ -145,6 +158,18 @@ from insumap.application.monitoring.records import (
     RecordWriter,
 )
 from insumap.application.notifications.notification import NotificationChannel
+from insumap.application.patients.commands import (
+    DeactivatePatientCommand,
+    DeactivatePatientCommandHandler,
+    ReactivatePatientCommand,
+    ReactivatePatientCommandHandler,
+    SuspendPatientCommand,
+    SuspendPatientCommandHandler,
+)
+from insumap.application.patients.queries import (
+    GetPatientUseCase,
+    ListPatientsUseCase,
+)
 from insumap.application.readiness import (
     AlwaysReadyProbe,
     CheckReadinessUseCase,
@@ -181,6 +206,10 @@ from insumap.infrastructure.clinic_admin_adapters import (
     ClinicAdminAdapters,
     build_clinic_admin_adapters,
 )
+from insumap.infrastructure.credentials_adapters import (
+    CredentialsAdapters,
+    build_credentials_adapters,
+)
 from insumap.infrastructure.identity_adapters import (
     IdentityAdapters,
     build_engine,
@@ -191,6 +220,10 @@ from insumap.infrastructure.logging import JsonLoggingConfigurator
 from insumap.infrastructure.monitoring_adapters import (
     MonitoringAdapters,
     build_monitoring_adapters,
+)
+from insumap.infrastructure.patient_adapters import (
+    PatientAdapters,
+    build_patient_adapters,
 )
 from insumap.infrastructure.persistence.transactions import (
     CurrentSession,
@@ -230,6 +263,11 @@ ALL_COMMAND_TYPES: Final[tuple[type[Command[Never]], ...]] = (
     UnlockStaffUserCommand,
     ResetStaffMfaCommand,
     CreateClinicAdminCommand,
+    SuspendPatientCommand,
+    ReactivatePatientCommand,
+    DeactivatePatientCommand,
+    IssueCredentialsCommand,
+    RevokeCredentialInvitationCommand,
 )
 """Every command of the API: a missing handler fails when the container is built."""
 
@@ -301,8 +339,10 @@ class Container:
         event_publisher: DomainEventPublisher | None = None,
         platform_adapters: PlatformAdapters | None = None,
         monitoring_adapters: MonitoringAdapters | None = None,
+        credentials_adapters: CredentialsAdapters | None = None,
         email_channel: NotificationChannel | None = None,
         clinic_admin_adapters: ClinicAdminAdapters | None = None,
+        patient_adapters: PatientAdapters | None = None,
     ) -> None:
         self.settings: Settings = settings or get_settings()
         self.clock: Clock = clock or SystemClock.instance()
@@ -338,11 +378,17 @@ class Container:
             clock=self.clock,
             transactions=SqlTransactionFactory(engine, current),
         )
+        patient_ports = patient_adapters or build_patient_adapters(
+            current=current, transactions=SqlTransactionFactory(engine, current)
+        )
         clinic_admins = clinic_admin_adapters or build_clinic_admin_adapters(
             current=current
         )
         if email_channel is not None:
             platform = replace(platform, email_channel=email_channel)
+        credentials = credentials_adapters or build_credentials_adapters(
+            current=current
+        )
         services = self._build_identity_services(adapters, platform)
         unit_of_work = CurrentUnitOfWork()
         self._command_guard = CommandGuard(
@@ -360,6 +406,8 @@ class Container:
             *self._clinic_admin_commands(
                 adapters, platform, clinic_admins, unit_of_work
             ),
+            *self._patient_commands(adapters, platform, patient_ports),
+            *self._credential_commands(adapters, platform, unit_of_work, credentials),
         ]
         self.command_bus: CommandBus = InMemoryCommandBus(
             registrations, required=ALL_COMMAND_TYPES
@@ -402,8 +450,24 @@ class Container:
             ),
             staff_actor=self.full_session_actor,
         )
+        self.credential_router = CredentialRouter(
+            commands=self.command_bus,
+            issue=IssueCredentialUseCase(
+                commands=self.command_bus,
+                issue_limit=self._credential_issue_limit(adapters),
+            ),
+            issue_batch=IssueCredentialsBatchUseCase(
+                commands=self.command_bus,
+                issue_limit=self._credential_issue_limit(adapters),
+                batch_limit=self._credential_batch_limit(adapters),
+            ),
+            staff_actor=self.full_session_actor,
+        )
         self.records_router = self._build_records_router(adapters, monitoring)
         self.metrics_router = self._build_metrics_router(adapters, monitoring)
+        self.patient_router = self._build_patient_router(
+            adapters, monitoring, patient_ports
+        )
 
     def _build_identity_services(
         self, adapters: IdentityAdapters, platform: PlatformAdapters
@@ -715,6 +779,117 @@ class Container:
                         channel=platform.email_channel,
                         messages=self.message_catalog,
                         current=current,
+                        clock=clock,
+                    )
+                ),
+            ),
+        ]
+
+    def _patient_commands(
+        self,
+        adapters: IdentityAdapters,
+        platform: PlatformAdapters,
+        ports: PatientAdapters,
+    ) -> list[Registration]:
+        """The patient account decisions (P13, P18), behind transaction and audit."""
+        guard, clock = self._command_guard, self.clock
+        directory, users = platform.patients, adapters.users
+        tokens, roster = adapters.refresh_tokens, ports.roster
+        return [
+            bind(
+                SuspendPatientCommand,
+                guard.wrap(
+                    SuspendPatientCommandHandler(
+                        patients=directory,
+                        users=users,
+                        refresh_tokens=tokens,
+                        roster=roster,
+                        clock=clock,
+                    )
+                ),
+            ),
+            bind(
+                ReactivatePatientCommand,
+                guard.wrap(
+                    ReactivatePatientCommandHandler(
+                        patients=directory, users=users, roster=roster
+                    )
+                ),
+            ),
+            bind(
+                DeactivatePatientCommand,
+                guard.wrap(
+                    DeactivatePatientCommandHandler(
+                        patients=directory,
+                        users=users,
+                        refresh_tokens=tokens,
+                        invitations=ports.invitations,
+                        roster=roster,
+                        clock=clock,
+                    )
+                ),
+            ),
+        ]
+
+    def _credential_issue_limit(self, adapters: IdentityAdapters) -> RateLimitCheck:
+        """300 code issues per clinic and hour (API.md section 5)."""
+        return RateLimitCheck(
+            adapters.rate_limiter,
+            RateLimitRule(
+                family="credential_issue_clinic",
+                limit=self.settings.rate_limit_credential_issue_per_clinic_per_hour,
+                window=timedelta(hours=1),
+            ),
+        )
+
+    def _credential_batch_limit(self, adapters: IdentityAdapters) -> RateLimitCheck:
+        """10 credential batches per clinic and hour (API.md section 5)."""
+        return RateLimitCheck(
+            adapters.rate_limiter,
+            RateLimitRule(
+                family="credential_batch_clinic",
+                limit=self.settings.rate_limit_credential_batch_per_clinic_per_hour,
+                window=timedelta(hours=1),
+            ),
+        )
+
+    def _credential_commands(
+        self,
+        adapters: IdentityAdapters,
+        platform: PlatformAdapters,
+        current: CurrentUnitOfWork,
+        credentials: CredentialsAdapters,
+    ) -> list[Registration]:
+        """The patient credential decisions (P13), with transaction and audit (P09)."""
+        guard, clock = self._command_guard, self.clock
+        return [
+            bind(
+                IssueCredentialsCommand,
+                guard.wrap(
+                    IssueCredentialsCommandHandler(
+                        contacts=credentials.patient_contacts,
+                        users=adapters.users,
+                        invitations=credentials.invitations,
+                        codes=platform.activation_codes,
+                        code_hasher=adapters.code_hasher,
+                        channel=platform.email_channel,
+                        messages=self.message_catalog,
+                        base_url=self.settings.web_app_base_url,
+                        ids=adapters.ids,
+                        clock=clock,
+                        current=current,
+                        code_ttl=timedelta(
+                            hours=self.settings.activation_code_ttl_hours
+                        ),
+                    )
+                ),
+            ),
+            bind(
+                RevokeCredentialInvitationCommand,
+                guard.wrap(
+                    RevokeCredentialInvitationCommandHandler(
+                        users=adapters.users,
+                        invitations=credentials.invitations,
                         clock=clock,
                     )
                 ),
@@ -1117,6 +1292,35 @@ class Container:
                 series=monitoring.series,
                 forecasts=monitoring.forecasts,
                 clock=clock,
+            ),
+            session_actor=self.full_session_actor,
+        )
+
+    def _build_patient_router(
+        self,
+        adapters: IdentityAdapters,
+        monitoring: MonitoringAdapters,
+        ports: PatientAdapters,
+    ) -> PatientRouter:
+        """Wire the patient administration (API.md 8.4) and the own profile (8.6).
+
+        The own profile reuses the use case of the monitoring slice: it checks the
+        permission, the consent and the patient of the token.
+        """
+        uow, clock = adapters.unit_of_work, self.clock
+        return PatientRouter(
+            commands=self.command_bus,
+            list_patients=ListPatientsUseCase(
+                uow=uow, roster=ports.roster, access_log=ports.access_log, clock=clock
+            ),
+            get_patient=GetPatientUseCase(
+                uow=uow, roster=ports.roster, access_log=ports.access_log, clock=clock
+            ),
+            own_profile=GetOwnPatientProfileUseCase(
+                uow=uow,
+                gate=OwnPatientGate(adapters.consents),
+                users=adapters.users,
+                targets=monitoring.targets,
             ),
             session_actor=self.full_session_actor,
         )

@@ -213,8 +213,10 @@ class ComputeGlycemicMetricsUseCase:
 
     def execute(self, input: MetricsInput) -> MetricsResult:
         """The metrics of the window, with the previous one if asked."""
-        with self._uow.begin(TransactionContext.for_actor(input.actor)):
-            return self._compute(input)
+        with self._uow.begin(TransactionContext.for_actor(input.actor)) as uow:
+            result = self._compute(input)
+            uow.commit()  # keeps the audit row of the read (P09)
+            return result
 
     def _compute(self, input: MetricsInput) -> MetricsResult:
         patient_id = self._scope.patient_id(input.actor, input.patient_id)
@@ -295,7 +297,7 @@ class GetAgpUseCase:
 
     def execute(self, input: AgpInput) -> AgpResult:
         """The AGP of the last whole local days; without enough data, no bins."""
-        with self._uow.begin(TransactionContext.for_actor(input.actor)):
+        with self._uow.begin(TransactionContext.for_actor(input.actor)) as uow:
             patient_id = self._scope.patient_id(input.actor, input.patient_id)
             found = _targets(self._targets, patient_id)
             profile = found.profile
@@ -309,6 +311,7 @@ class GetAgpUseCase:
                 days=days,
             )
             points = list(self._series.points(patient_id, period.start, period.end))
+            uow.commit()  # keeps the audit row of the read (P09)
         metrics = metrics_for(period, points, profile)
         usable = metrics.signal is Signal.CGM and metrics.is_sufficient
         return AgpResult(

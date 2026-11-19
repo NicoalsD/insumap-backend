@@ -158,7 +158,7 @@ class GetForecastUseCase:
     def execute(self, input: ForecastInput) -> GlucoseForecast:
         """The forecast, or the fallback with the reason; never a ``5xx``."""
         actor = input.actor
-        with self._uow.begin(TransactionContext.for_actor(actor)):
+        with self._uow.begin(TransactionContext.for_actor(actor)) as uow:
             if input.patient_id is None:
                 patient_id = self._own_gate.enter(
                     actor, PermissionCode.AI_FORECASTS_READ_OWN
@@ -178,6 +178,7 @@ class GetForecastUseCase:
             period = period_of(MetricWindow.LAST_24_HOURS, now, zone)
             points = list(self._series.points(patient_id, period.start, period.end))
             recent = metrics_for(period, points, found.profile)
+            uow.commit()  # keeps the audit row of the read (P09)
         if recent.signal is not Signal.CGM or not recent.is_sufficient:
             return self._fallback(input.mode, FallbackReason.INSUFFICIENT_DATA)
         try:
