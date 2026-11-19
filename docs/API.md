@@ -403,6 +403,7 @@ Endpoints por sección. Post-MVP son los que atienden requisitos de las fases 10
 | GET | `/patients/{patient_id}/readings` | `list_patient_glucose_readings` | `patients.read_assigned` | P | 200 |
 | POST | `/insulin-doses` | `record_insulin_dose` | `records.write_own` | P | 201 |
 | GET | `/insulin-doses` | `list_insulin_doses` | `records.read_own` | P | 200 |
+| GET | `/patients/own/injection-sites` | `get_own_injection_sites` | `records.read_own` | P | 200 |
 | POST | `/meals` | `record_meal` | `records.write_own` | P | 201 |
 | GET | `/meals` | `list_meals` | `records.read_own` | P | 200 |
 | POST | `/activities` | `record_activity` | `records.write_own` | P | 201 |
@@ -904,14 +905,20 @@ Las rutas de registro (`/readings`, `/insulin-doses`, `/meals`, `/activities`, `
 
 #### `POST /insulin-doses`
 - Operación: `record_insulin_dose` · Permiso: `records.write_own` · Ruta: P · Trazabilidad: HU-17, RF-34 · Patrón: P23 · Éxito: 201
-- Solicitud: `insulin_product_id` (producto de un catálogo, G10), `kind` (`BASAL`, `BOLUS` o `CORRECTION`), `units` (decimal dentro del límite técnico), `administered_at`. La API solo registra lo que el paciente indica: nunca calcula ni sugiere una dosis.
-- Respuesta: `id`, `insulin_product_id`, `kind`, `units`, `administered_at`, `treatment_plan_id` (el plan activo, si existe), `simulated`.
+- Solicitud: `insulin_product_id` (producto de un catálogo, G10), `kind` (`BASAL`, `BOLUS` o `CORRECTION`), `units` (decimal dentro del límite técnico), `administered_at`, `injection_site` e `injection_spot` (opcionales; códigos del catálogo de `GET /patients/own/injection-sites`). La API solo registra lo que el paciente indica: nunca calcula ni sugiere una dosis.
+- Respuesta: `id`, `insulin_product_id`, `kind`, `units`, `administered_at`, `injection_site`, `injection_spot`, `treatment_plan_id` (el plan activo, si existe), `simulated`.
 - Errores: C1, C3, C4 (unidades fuera de límites responde `422 VALIDATION_ERROR`).
 
 #### `GET /insulin-doses`
 - Operación: `list_insulin_doses` · Permiso: `records.read_own` · Ruta: P · Trazabilidad: HU-17, HU-22 · Patrón: - · Éxito: 200
 - Solicitud: `from`, `to`, `limit`, `cursor`.
 - Respuesta: dosis propias.
+- Errores: C1, C3, C4.
+
+#### `GET /patients/own/injection-sites`
+- Operación: `get_own_injection_sites` · Permiso: `records.read_own` · Ruta: P · Trazabilidad: HU-57, RF-101 · Patrón: P19 · Éxito: 200
+- Solicitud: `kind` (`BASAL`, `BOLUS`, `CORRECTION` o `MIXED`).
+- Respuesta: `kind`, `suggestion` (`site`, `spot` de 1 a 4, `reason_codes`, `needle_note`, `pinch_up`), `sites` (por cada uno de los 8 sitios: `site`, `state` `SUGGESTED`, `ALLOWED`, `RECENT` o `AVOID`, `reason_code`, `last_used_at`, `last_spot`) y `rules_version`. Sitios: `ABDOMEN_RIGHT`, `ABDOMEN_LEFT`, `THIGH_RIGHT`, `THIGH_LEFT`, `ARM_RIGHT`, `ARM_LEFT`, `BUTTOCK_RIGHT`, `BUTTOCK_LEFT` (derecha e izquierda del paciente). Es una regla determinista, no una IA: candidatos = sitios del ítem del plan (nulo = todos); se excluyen los sitios con lipohipertrofia reportada en 90 días, el centro del abdomen en embarazo y brazos y muslos para un bolo con IMC bajo (menos de 20, o menos de 22 en hombres) salvo que el plan los pida; el bolo prefiere el abdomen y la basal el muslo y luego el glúteo; se evita el último sitio, se alterna el lado y se avanza el punto. Los criterios son técnica general de inyección y los valida el equipo clínico; el médico los restringe en el plan. **Nunca contiene unidades de insulina.**
 - Errores: C1, C3, C4.
 
 #### `POST /meals`
@@ -1034,7 +1041,7 @@ Estados del plan: `DRAFT`, `ACTIVE` y `SUPERSEDED`. Un paciente tiene un solo pl
 
 #### `POST /protocol-templates`
 - Operación: `create_protocol_template` · Permiso: `protocol_templates.manage` · Ruta: P · Trazabilidad: HU-24, RF-43 · Patrón: P04 · Éxito: 201
-- Solicitud: `name` (por ejemplo "Basal-bolo adulto DM1") y `content` (estructura de insulinas, horarios y metas por defecto; su forma interna está por definir, G16).
+- Solicitud: `name` (por ejemplo "Basal-bolo adulto DM1") y `content` (estructura de insulinas, horarios y metas por defecto; cada ítem de insulina admite `injection_sites`, la lista de sitios permitidos; su forma interna está por definir, G16).
 - Respuesta: `id`, `name`, `version` (1), `status` (`ACTIVE`), `content`, `simulated`. Queda versionada y disponible para los médicos de su clínica.
 - Errores: C1, C2, C4; `409 CONFLICT` (nombre repetido).
 
@@ -1113,7 +1120,7 @@ Estados del plan: `DRAFT`, `ACTIVE` y `SUPERSEDED`. Un paciente tiene un solo pl
 #### `GET /patients/own/treatment-plan`
 - Operación: `get_own_treatment_plan` · Permiso: `treatment_plans.read_own` · Ruta: P · Trazabilidad: HU-28, RF-50 · Patrón: P11 · Éxito: 200
 - Solicitud: sin parámetros.
-- Respuesta: el plan `ACTIVE` en lenguaje claro (insulinas, horarios y metas) y sus recordatorios. Sin opciones de edición. No existe plan en `DRAFT` visible para el paciente ni recomendaciones con dosis hasta que se apliquen.
+- Respuesta: el plan `ACTIVE` en lenguaje claro (insulinas, horarios y metas) y sus recordatorios. Cada ítem de insulina lleva `insulin_kind` e `injection_sites` (lista de sitios permitidos por el médico; nula si no restringe). Sin opciones de edición. No existe plan en `DRAFT` visible para el paciente ni recomendaciones con dosis hasta que se apliquen.
 - Errores: C1, C3; `404 NOT_FOUND` (no hay plan activo).
 
 #### `POST /target-profiles`
@@ -1552,7 +1559,7 @@ La mensajería no es un canal de emergencias: toda respuesta del hilo lleva el a
 
 ## 9. Trazabilidad
 
-Todo endpoint del catálogo cita al menos una historia de usuario o un requisito. Todas las historias HU-01 a HU-55 y los requisitos RF-01 a RF-100 tienen un endpoint o aparecen en esta sección, salvo los vacíos de la sección 10.
+Todo endpoint del catálogo cita al menos una historia de usuario o un requisito. Todas las historias HU-01 a HU-55, HU-57 y los requisitos RF-01 a RF-101 tienen un endpoint o aparecen en esta sección, salvo los vacíos de la sección 10.
 
 ### 9.1 Capacidades que no tienen endpoint propio
 
