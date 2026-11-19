@@ -10,12 +10,21 @@ import pyotp
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.support.db_seed import ADMIN_EMAIL, DEMO_PASSWORD, DemoWorld
+from tests.support.db_seed import (
+    ADMIN_EMAIL,
+    DEMO_PASSWORD,
+    DOCTOR_EMAIL,
+    DemoWorld,
+)
 from tests.support.notifications import InMemoryChannel
 
 pytestmark = pytest.mark.integration
 
 BASE = "/api/v1/users"
+CURRENT_USER = "/api/v1/auth/current-user"
+REFRESH_PATH = "/api/v1/auth"
+REFRESH_COOKIE = "__Secure-insumap_rt"
+CSRF = {"X-Requested-With": "insumap-web"}
 REASON = "Salida de la clínica del personal"
 NEW_DOCTOR_EMAIL = "nueva.medica@example.test"
 LICENSE = "RM-1001"
@@ -26,11 +35,14 @@ def _bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _admin_token(api: TestClient) -> str:
-    """Sign in the demo administrator, enrolling its MFA on the first sign-in."""
+def _enroll(api: TestClient, email: str) -> str:
+    """Sign in a demo staff member, enrolling its MFA; returns its full access token.
+
+    The refresh cookie of that session stays in the client's jar.
+    """
     first = api.post(
         "/api/v1/auth/login",
-        json={"email": ADMIN_EMAIL, "password": DEMO_PASSWORD},
+        json={"email": email, "password": DEMO_PASSWORD},
     )
     assert first.json()["status"] == "MFA_ENROLLMENT_REQUIRED", first.text
     headers = _bearer(first.json()["access_token"])
@@ -43,6 +55,10 @@ def _admin_token(api: TestClient) -> str:
     )
     assert confirmed.status_code == 200, confirmed.text
     return str(confirmed.json()["access_token"])
+
+
+def _admin_token(api: TestClient) -> str:
+    return _enroll(api, ADMIN_EMAIL)
 
 
 def _new_doctor(**overrides: Any) -> dict[str, Any]:
@@ -193,3 +209,80 @@ def test_another_clinics_staff_is_the_same_404_as_a_missing_one(
 
     assert found_elsewhere.status_code == missing.status_code == 404
     assert found_elsewhere.json() == missing.json()
+
+
+def _revoked_refresh(api: TestClient, cookie: str) -> Any:
+    """Present an old refresh cookie alone, as a browser does after a session ends."""
+    api.cookies.clear()
+    api.cookies.set(REFRESH_COOKIE, cookie, path=REFRESH_PATH)
+    return api.post("/api/v1/auth/refresh", headers=CSRF)
+
+
+def test_mfa_reset_ends_the_sessions_and_forces_enrollment(
+    api: TestClient, demo_world: DemoWorld, migrated_url: str
+) -> None:
+    doctor_token = _enroll(api, DOCTOR_EMAIL)
+    doctor_refresh = api.cookies.get(REFRESH_COOKIE, path=REFRESH_PATH)
+    assert doctor_refresh
+    assert api.get(CURRENT_USER, headers=_bearer(doctor_token)).status_code == 200
+    admin_headers = _bearer(_admin_token(api))
+
+    reset = api.post(
+        f"{BASE}/{demo_world.doctor_user_id}/mfa-reset",
+        headers=admin_headers,
+        json={"reason": REASON},
+    )
+
+    assert reset.status_code == 204, reset.text
+    stale = api.get(CURRENT_USER, headers=_bearer(doctor_token))
+    assert stale.status_code == 401, stale.text
+    assert stale.json()["error"]["code"] == "SESSION_REVOKED"
+    old_refresh = _revoked_refresh(api, doctor_refresh)
+    assert old_refresh.status_code == 401, old_refresh.text
+    api.cookies.clear()
+    login = api.post(
+        "/api/v1/auth/login",
+        json={"email": DOCTOR_EMAIL, "password": DEMO_PASSWORD},
+    )
+    assert login.json()["status"] == "MFA_ENROLLMENT_REQUIRED", login.text
+    doctor = str(demo_world.doctor_user_id)
+    assert _one(
+        migrated_url,
+        "SELECT revoked_at IS NOT NULL FROM iam.mfa_factors"
+        " WHERE user_id = %s AND factor_type = 'TOTP'",
+        (doctor,),
+    ) == (True,)
+    assert _one(
+        migrated_url,
+        "SELECT count(*) FROM iam.refresh_tokens WHERE user_id = %s"
+        " AND revoked_at IS NULL",
+        (doctor,),
+    ) == (0,)
+
+
+def test_deactivation_ends_the_sessions_and_blocks_sign_in(
+    api: TestClient, demo_world: DemoWorld
+) -> None:
+    doctor_token = _enroll(api, DOCTOR_EMAIL)
+    doctor_refresh = api.cookies.get(REFRESH_COOKIE, path=REFRESH_PATH)
+    assert doctor_refresh
+    admin_headers = _bearer(_admin_token(api))
+
+    closed = api.post(
+        f"{BASE}/{demo_world.doctor_user_id}/deactivate",
+        headers=admin_headers,
+        json={"reason": REASON},
+    )
+
+    assert closed.status_code == 200, closed.text
+    stale = api.get(CURRENT_USER, headers=_bearer(doctor_token))
+    assert stale.status_code == 401, stale.text
+    assert stale.json()["error"]["code"] == "SESSION_REVOKED"
+    assert _revoked_refresh(api, doctor_refresh).status_code == 401
+    api.cookies.clear()
+    login = api.post(
+        "/api/v1/auth/login",
+        json={"email": DOCTOR_EMAIL, "password": DEMO_PASSWORD},
+    )
+    assert login.status_code == 403, login.text
+    assert login.json()["error"]["code"] == "ACCOUNT_NOT_ACTIVE"
