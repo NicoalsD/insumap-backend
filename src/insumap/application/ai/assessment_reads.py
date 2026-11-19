@@ -102,7 +102,7 @@ class ListAiEvaluationsUseCase:
     ) -> Page[AiEvaluationView]:
         """Aggregated metrics only; never series of patients."""
         actor.require(PermissionCode.AI_EVALUATIONS_READ)
-        if actor.clinic_id is None:
+        if actor.clinic_id is None or actor.role is Role.PLATFORM_ADMIN:
             raise PermissionDeniedError
         with self._uow.begin(TransactionContext.for_actor(actor)):
             return self._evaluations.list(filters, page)
