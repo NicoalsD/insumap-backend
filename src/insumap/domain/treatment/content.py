@@ -15,6 +15,8 @@ from enum import StrEnum
 from typing import final
 from uuid import UUID
 
+from insumap.domain.monitoring.injection_sites import SiteCode
+
 
 class ItemType(StrEnum):
     """Kind of a plan item (``care.treatment_plan_items.item_type``)."""
@@ -38,6 +40,8 @@ class ItemSpec:
     """One item of a plan or of a template, before it has an identifier.
 
     ``days_of_week`` uses 1 (Monday) to 7 (Sunday); ``None`` means every day.
+    ``injection_sites`` are the sites the doctor allows for an insulin item;
+    ``None`` means every site.
     """
 
     item_type: ItemType
@@ -48,6 +52,7 @@ class ItemSpec:
     days_of_week: tuple[int, ...] | None = None
     instructions: str | None = None
     sort_order: int = 0
+    injection_sites: tuple[SiteCode, ...] | None = None
 
 
 @final

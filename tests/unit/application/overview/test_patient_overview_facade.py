@@ -1,6 +1,7 @@
 """``PatientOverviewFacade`` (P10): the start page of an assigned or own patient."""
 
 from dataclasses import replace
+from decimal import Decimal
 from uuid import UUID
 
 import pytest
@@ -43,6 +44,7 @@ def build(
         alerts=FakeAlerts(),
         open_alerts=FakeOpenAlerts(open_alerts or {}),
         reminders=FakeReminders(),
+        body_profiles=world.body_profiles,
         strategies=GlycemicTargetStrategyRegistry(),
         clock=world.clock,
     )
@@ -149,3 +151,11 @@ def test_a_missing_profile_is_a_setup_error(world: RecordsWorld) -> None:
         )
 
     assert error.value.code is ErrorCode.INTERNAL_ERROR
+
+
+def test_the_overview_carries_sex_bmi_and_pregnancy_status(world: RecordsWorld) -> None:
+    overview = build(world).for_own(patient_actor(), MetricWindow.LAST_14_DAYS)
+
+    assert overview.body.sex.value == "FEMALE"
+    assert overview.body.bmi == Decimal("23.4")
+    assert overview.body.pregnancy_status.value == "NONE"

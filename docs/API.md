@@ -947,8 +947,8 @@ Las rutas de registro (`/readings`, `/insulin-doses`, `/meals`, `/activities`, `
 
 #### `POST /symptoms`
 - Operación: `record_symptoms` · Permiso: `records.write_own` · Ruta: P · Trazabilidad: HU-19, RF-37 · Patrón: P17 · Éxito: 201
-- Solicitud: `symptoms` (códigos de una lista, por ejemplo sed, mareo, sudoración, visión borrosa; G10), `occurred_at`, `note` (texto libre acotado por `FieldLimits`).
-- Respuesta: `id`, `symptoms`, `occurred_at`, `alarm_detected` (propuesto: `true` si algún síntoma es de alarma; la app muestra "contacta a tu equipo o a urgencias" y se crea una alerta para el equipo), `simulated`.
+- Solicitud: `symptoms` (códigos de una lista, por ejemplo sed, mareo, sudoración, visión borrosa; G10), `occurred_at`, `note` (texto libre acotado por `FieldLimits`) e `injection_site` (código del catálogo de sitios; **obligatorio** con el síntoma `LIPOHYPERTROPHY`, que responde `422 VALIDATION_ERROR` si falta: la regla de `GET /patients/own/injection-sites` evita ese sitio 90 días).
+- Respuesta: `id`, `symptoms`, `occurred_at`, `injection_site`, `alarm_detected` (propuesto: `true` si algún síntoma es de alarma; la app muestra "contacta a tu equipo o a urgencias" y se crea una alerta para el equipo), `simulated`.
 - Errores: C1, C3, C4 (nota más larga que el límite responde `422`).
 
 #### `GET /symptoms`
@@ -1026,13 +1026,13 @@ Las rutas de registro (`/readings`, `/insulin-doses`, `/meals`, `/activities`, `
 #### `GET /patients/own/overview`
 - Operación: `get_own_overview` · Permiso: `patients.read_own` · Ruta: P · Trazabilidad: HU-22, HU-29, RF-42 · Patrón: P10, P11 · Éxito: 200
 - Solicitud: `window` (`24h`, `7d`, `14d` o `30d`, por defecto `14d`).
-- Respuesta: el inicio del paciente: lecturas recientes con su rango objetivo, métricas propias de la ventana en lenguaje simple, plan activo y alertas abiertas propias. No llama a la IA.
+- Respuesta: el inicio del paciente: lecturas recientes con su rango objetivo, métricas propias de la ventana en lenguaje simple, plan activo y alertas abiertas propias, más `sex`, `bmi` (nulo si no se conoce) y `pregnancy_status` (`NONE`, `PREGNANT` o `UNKNOWN`). No llama a la IA.
 - Errores: C1, C3, C4.
 
 #### `GET /patients/{patient_id}/overview`
 - Operación: `get_patient_overview` · Permiso: `patients.read_assigned` · Ruta: F · Trazabilidad: HU-46, HU-14, RF-80, RF-30, RNF-07 · Patrón: P10, P11, P09 · Éxito: 200
 - Solicitud: `window` (`24h`, `7d`, `14d` o `30d`, por defecto `14d`).
-- Respuesta: `PatientOverviewResponse`: últimas lecturas, métricas de la ventana, plan activo, alertas abiertas, recomendaciones pendientes y el último pronóstico guardado. **Leer el expediente no llama a la IA.** Las glucosas salen en mg/dL. Incluye `simulated` y, en una clínica demo, `data_source: "SIMULATED"` (G6). `PatientOverviewFacade` abre una unidad de trabajo, usa el puerto envuelto por el decorador de auditoría y el proxy de asignación; la fila de auditoría se escribe en la misma transacción.
+- Respuesta: `PatientOverviewResponse`: últimas lecturas, métricas de la ventana, plan activo, alertas abiertas, recomendaciones pendientes y el último pronóstico guardado. **Leer el expediente no llama a la IA.** Las glucosas salen en mg/dL. Incluye `sex`, `bmi` y `pregnancy_status` del paciente, `simulated` y, en una clínica demo, `data_source: "SIMULATED"` (G6). `PatientOverviewFacade` abre una unidad de trabajo, usa el puerto envuelto por el decorador de auditoría y el proxy de asignación; la fila de auditoría se escribe en la misma transacción.
 - Errores: C1, C2, C4, C5 (el `CLINIC_ADMIN` recibe `403 FORBIDDEN`: no tiene el permiso).
 
 ### 8.7 Plan de tratamiento, metas y recordatorios (M6)

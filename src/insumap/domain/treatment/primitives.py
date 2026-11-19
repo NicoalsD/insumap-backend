@@ -14,6 +14,7 @@ from decimal import Decimal
 from typing import Any, Final, cast
 from uuid import UUID
 
+from insumap.domain.monitoring.injection_sites import SiteCode
 from insumap.domain.treatment.content import (
     InsulinKind,
     ItemSpec,
@@ -49,6 +50,9 @@ def item_to_primitive(item: ItemSpec) -> Primitive:
         "days_of_week": None if item.days_of_week is None else list(item.days_of_week),
         "instructions": item.instructions,
         "sort_order": item.sort_order,
+        "injection_sites": None
+        if item.injection_sites is None
+        else [site.value for site in item.injection_sites],
     }
 
 
@@ -58,6 +62,8 @@ def item_spec_from_primitive(data: Mapping[str, Any]) -> ItemSpec:
     dose = data["dose_units"]
     at = data["time_of_day"]
     days = data["days_of_week"]
+    # Snapshots and templates saved before the injection sites have no such key.
+    sites = data.get("injection_sites")
     return ItemSpec(
         item_type=ItemType(data["item_type"]),
         name=str(data["name"]),
@@ -67,6 +73,9 @@ def item_spec_from_primitive(data: Mapping[str, Any]) -> ItemSpec:
         days_of_week=None if days is None else tuple(int(day) for day in days),
         instructions=cast("str | None", data["instructions"]),
         sort_order=int(data["sort_order"]),
+        injection_sites=None
+        if sites is None
+        else tuple(SiteCode(site) for site in sites),
     )
 
 

@@ -9,6 +9,7 @@ import pytest
 from insumap.domain.identity.consent import ConsentAction, ConsentRecord, ConsentScope
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
+from insumap.domain.monitoring.injection_sites import SiteCode
 from insumap.domain.treatment.plan import PlanStatus
 from tests.api.identity_support import IdentityApi
 from tests.support.identity_world import (
@@ -416,3 +417,51 @@ def test_a_plan_has_no_ai_dose_suggestion_for_the_patient(api: IdentityApi) -> N
 
     assert "recommendation" not in response.text
     assert "suggest" not in response.text
+
+
+def test_the_injection_sites_of_an_item_are_stored_sorted_and_without_repeats(
+    api: IdentityApi,
+) -> None:
+    item = {**ITEM, "injection_sites": ["THIGH_RIGHT", "ABDOMEN_LEFT", "THIGH_RIGHT"]}
+
+    response = create_plan(api, doctor(api), content={"items": [item]})
+
+    assert response.status_code == 201, response.text
+    assert response.json()["items"][0]["injection_sites"] == [
+        "ABDOMEN_LEFT",
+        "THIGH_RIGHT",
+    ]
+
+
+def test_an_item_without_injection_sites_answers_null(api: IdentityApi) -> None:
+    response = create_plan(api, doctor(api))
+
+    assert response.json()["items"][0]["injection_sites"] is None
+
+
+@pytest.mark.parametrize("sites", [[], ["CHEST_LEFT"]])
+def test_an_empty_or_unknown_site_list_is_422(
+    api: IdentityApi, sites: list[str]
+) -> None:
+    item = {**ITEM, "injection_sites": sites}
+
+    response = create_plan(api, doctor(api), content={"items": [item]})
+
+    assert response.status_code == 422, response.text
+
+
+def test_the_patient_sees_the_sites_the_doctor_allows(api: IdentityApi) -> None:
+    plan_id = UUID(int=6010)
+    allowed = replace(insulin(), injection_sites=(SiteCode.BUTTOCK_LEFT,))
+    api.plans.rows[plan_id] = active(
+        replace(
+            draft(*plan_items(allowed)),
+            plan_id=plan_id,
+            patient_id=PATIENT_ID,
+            clinic_id=CLINIC.clinic_id,
+        )
+    )
+
+    response = api.client.get(OWN_PLAN, headers=patient(api))
+
+    assert response.json()["items"][0]["injection_sites"] == ["BUTTOCK_LEFT"]

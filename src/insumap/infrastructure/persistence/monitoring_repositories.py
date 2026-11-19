@@ -34,6 +34,7 @@ from insumap.domain.monitoring.glucose import (
     ReadingSource,
     ReadingStatus,
 )
+from insumap.domain.monitoring.injection_sites import SiteCode
 from insumap.domain.monitoring.record import (
     ClinicalRecord,
     EntryType,
@@ -154,6 +155,10 @@ def _dose_to_orm(record: ClinicalRecord) -> InsulinDoseOrm:
         units=dose.units,
         plan_id=dose.plan_id,
         note=dose.note,
+        injection_site=None
+        if dose.injection_site is None
+        else dose.injection_site.value,
+        injection_spot=dose.injection_spot,
     )
 
 
@@ -169,6 +174,10 @@ def _dose_to_domain(
         units=row.units,
         plan_id=row.plan_id,
         note=row.note,
+        injection_site=None
+        if row.injection_site is None
+        else SiteCode(row.injection_site),
+        injection_spot=row.injection_spot,
     )
 
 
@@ -232,6 +241,9 @@ def _symptom_to_orm(record: ClinicalRecord) -> SymptomOrm:
         occurred_at=symptom.symptom_at,
         symptom_id=symptom.symptom.symptom_id,
         note=symptom.note,
+        injection_site=None
+        if symptom.injection_site is None
+        else symptom.injection_site.value,
     )
 
 
@@ -244,6 +256,9 @@ def _symptom_to_domain(
         symptom_at=row.occurred_at,
         symptom=catalog[row.symptom_id],
         note=row.note,
+        injection_site=None
+        if row.injection_site is None
+        else SiteCode(row.injection_site),
     )
 
 

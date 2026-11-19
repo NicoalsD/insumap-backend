@@ -374,6 +374,7 @@ def test_the_overview_reads_the_assigned_patient(
         alerts=wiring.alerts.alerts,
         open_alerts=wiring.dashboard.open_alerts,
         reminders=wiring.targets.reminders,
+        body_profiles=wiring.monitoring.body_profiles,
         strategies=GlycemicTargetStrategyRegistry(),
         clock=wiring.clock,
     ).for_assigned(
