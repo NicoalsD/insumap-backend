@@ -9,6 +9,7 @@ from insumap.application.care_team.ports import CareTeamRepositoryPort, StaffLoo
 from insumap.application.clinics.ports import ClinicRepositoryPort
 from insumap.application.commands.auditing import AuditLogPort
 from insumap.application.notifications.notification import NotificationChannel
+from insumap.application.sites.ports import SiteRepositoryPort, StaffSitesRepositoryPort
 from insumap.infrastructure.audit.sql_audit_log import SqlAuditLog
 from insumap.infrastructure.notifications.logging_channel import LoggingEmailChannel
 from insumap.infrastructure.persistence.care_team_repository import (
@@ -17,6 +18,7 @@ from insumap.infrastructure.persistence.care_team_repository import (
     StaffLookupRepository,
 )
 from insumap.infrastructure.persistence.clinic_repository import ClinicRepository
+from insumap.infrastructure.persistence.site_repository import SiteRepository
 from insumap.infrastructure.persistence.transactions import CurrentSession
 
 
@@ -33,6 +35,8 @@ class PlatformAdapters:
     patients: PatientDirectoryPort
     staff: StaffLookupPort
     clinics: ClinicRepositoryPort
+    sites: SiteRepositoryPort
+    staff_sites: StaffSitesRepositoryPort
 
 
 def build_platform_adapters(*, current: CurrentSession) -> PlatformAdapters:
@@ -44,4 +48,6 @@ def build_platform_adapters(*, current: CurrentSession) -> PlatformAdapters:
         patients=PatientDirectoryRepository(current),
         staff=StaffLookupRepository(current),
         clinics=ClinicRepository(current),
+        sites=SiteRepository(current),
+        staff_sites=SiteRepository(current),
     )

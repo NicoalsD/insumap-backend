@@ -17,9 +17,16 @@ from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
 from tests.support.clinic_fakes import FakeClinics
 from tests.support.commands import InMemoryAuditLog
 from tests.support.identity_fakes import VALID_TOTP
-from tests.support.identity_world import NOW, PASSWORD, IdentityWorld, make_account
+from tests.support.identity_world import (
+    CLINIC,
+    NOW,
+    PASSWORD,
+    IdentityWorld,
+    make_account,
+)
 from tests.support.notifications import InMemoryChannel
 from tests.support.settings import make_settings
+from tests.support.sites_fakes import FakeSites
 
 ORIGIN = "https://app.example.test"
 CSRF_HEADERS = {"X-Requested-With": "insumap-web"}
@@ -37,6 +44,7 @@ class IdentityApi:
         self.patients = FakeDirectory()
         self.staff = FakeStaff()
         self.clinics = FakeClinics()
+        self.sites = FakeSites(clinic_id=CLINIC.clinic_id)
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -49,6 +57,8 @@ class IdentityApi:
                 patients=self.patients,
                 staff=self.staff,
                 clinics=self.clinics,
+                sites=self.sites,
+                staff_sites=self.sites,
             ),
         )
         self.app = create_app(container)
