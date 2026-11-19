@@ -455,6 +455,85 @@ class AlertStatusHistoryOrm(Base):
     occurred_at: Mapped[datetime] = _timestamp()
 
 
+AI = {"schema": "ai"}
+
+
+class GlucoseForecastOrm(Base):
+    """``ai.glucose_forecasts``: append only (IA1 output)."""
+
+    __tablename__ = "glucose_forecasts"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    mode: Mapped[str] = mapped_column(String(10))
+    based_on_reading_id: Mapped[UUID | None] = mapped_column(Uuid)
+    points: Mapped[list[Any]] = mapped_column(JSONB)
+    hypo_probability: Mapped[list[Any]] = mapped_column(JSONB)
+    hyper_probability: Mapped[list[Any]] = mapped_column(JSONB)
+    target_profile_id: Mapped[UUID] = mapped_column(Uuid)
+    model_name: Mapped[str] = mapped_column(String(80))
+    model_version: Mapped[str] = mapped_column(String(80))
+    input_hash: Mapped[str] = mapped_column(CHAR(64))
+    explanation: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    is_fallback: Mapped[bool] = mapped_column(Boolean)
+    fallback_reason: Mapped[str | None] = mapped_column(String(17))
+    is_shadow: Mapped[bool] = mapped_column(Boolean)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RecommendationOrm(Base):
+    """``ai.recommendations``: mutable, its status moves; decisions are appended."""
+
+    __tablename__ = "recommendations"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    patient_id: Mapped[UUID] = mapped_column(Uuid)
+    plan_id: Mapped[UUID] = mapped_column(Uuid)
+    applied_plan_id: Mapped[UUID | None] = mapped_column(Uuid)
+    status: Mapped[str] = mapped_column(String(21))
+    action: Mapped[str] = mapped_column(String(8))
+    suggestion: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    requires_doctor_approval: Mapped[bool] = mapped_column(Boolean)
+    target_profile_id: Mapped[UUID] = mapped_column(Uuid)
+    proposed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    model_name: Mapped[str] = mapped_column(String(80))
+    model_version: Mapped[str] = mapped_column(String(80))
+    input_hash: Mapped[str] = mapped_column(CHAR(64))
+    explanation: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    is_fallback: Mapped[bool] = mapped_column(Boolean)
+    fallback_reason: Mapped[str | None] = mapped_column(String(17))
+    is_shadow: Mapped[bool] = mapped_column(Boolean)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    lock_version: Mapped[int] = mapped_column(Integer)
+
+
+class RecommendationDecisionOrm(Base):
+    """``ai.recommendation_decisions``: append only, one row per transition."""
+
+    __tablename__ = "recommendation_decisions"
+    __table_args__ = AI
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    clinic_id: Mapped[UUID] = mapped_column(Uuid)
+    recommendation_id: Mapped[UUID] = mapped_column(Uuid)
+    decision: Mapped[str] = mapped_column(String(21))
+    decided_by: Mapped[UUID | None] = mapped_column(Uuid)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str | None] = mapped_column(String(500))
+    reason_code: Mapped[str | None] = mapped_column(String(40))
+    original_suggestion: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    modified_suggestion: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    model_version: Mapped[str] = mapped_column(String(80))
+    applied_plan_id: Mapped[UUID | None] = mapped_column(Uuid)
+
+
 class PrivacyRequestOrm(Base):
     """``clinic.privacy_requests``: requests of a patient, with status and deadline."""
 

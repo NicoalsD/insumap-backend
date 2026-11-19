@@ -317,6 +317,22 @@ class FieldLimits:
     PUSH_KEY_PATTERN: ClassVar[str] = r"^[A-Za-z0-9_-]+$"
     """Subscription keys are base64url without padding (use fullmatch)."""
 
+    # AI service (docs/Contrato-IA.md, 3.3 and 8).
+
+    AI_MAX_FORECAST_POINTS: ClassVar[int] = 2048
+    """Most glucose points sent to IA1 (``MAX_FORECAST_POINTS`` of the service)."""
+
+    AI_SUMMARY_MAX_LENGTH: ClassVar[int] = 500
+    """Longest ``explanation.summary`` the backend accepts from the service."""
+
+    AI_HASH_LENGTH: ClassVar[int] = 64
+    """SHA-256 in hexadecimal (``ai.*.input_hash`` is ``char(64)``)."""
+
+    # Recommendations (ai.recommendations.suggestion, a doctor's modified proposal).
+
+    INSULIN_UNITS_MAX: ClassVar[int] = 500
+    """Largest dose a doctor may write in a modified proposal, in units (technical)."""
+
     # clinic.privacy_requests.description (varchar(500))
     PRIVACY_REQUEST_DESCRIPTION_MAX_LENGTH: ClassVar[int] = 500
 

@@ -11,13 +11,13 @@ from insumap.application.metrics.forecast import (
     FallbackReason,
     ForecastMode,
     GlucoseForecast,
-    Trend,
 )
 from insumap.application.metrics.metrics import (
     AgpResult,
     MetricsResult,
     MetricWindow,
 )
+from insumap.domain.ai.linear_fallback import Trend
 from insumap.domain.metrics.glycemic_metrics import Confidence, GlycemicMetrics
 from insumap.domain.metrics.target_profile import TargetProfile
 

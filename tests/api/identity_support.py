@@ -10,6 +10,10 @@ from insumap.application.identity.second_factor import totp_secret_binding
 from insumap.container import Container
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
+from insumap.infrastructure.ai.unconfigured_forecast import (
+    UnconfiguredGlucoseForecastAdapter,
+)
+from insumap.infrastructure.ai_adapters import AiAdapters
 from insumap.infrastructure.clinic_admin_adapters import ClinicAdminAdapters
 from insumap.infrastructure.credentials_adapters import CredentialsAdapters
 from insumap.infrastructure.patient_adapters import PatientAdapters
@@ -51,6 +55,7 @@ from tests.support.notification_fakes import (
 from tests.support.notifications import InMemoryChannel
 from tests.support.onboarding_fakes import OnboardingWorld
 from tests.support.patient_fakes import FakePatientRoster, FakePendingInvitations
+from tests.support.recommendation_fakes import FakeDrafts, InMemoryRecommendations
 from tests.support.settings import make_settings
 from tests.support.sites_fakes import FakeSites
 from tests.support.targets_fakes import (
@@ -100,6 +105,7 @@ class IdentityApi:
         self.staff_directory = FakeStaffDirectory(self.world.users, self.world.factors)
         self.staff_invitations = FakeStaffInvitations()
         self.alerts = AlertsWorld()
+        self.recommendations = InMemoryRecommendations()
         self.login_lockouts = FakeLoginLockouts()
         self.onboarding = OnboardingWorld()
         self.templates = FakeTemplates()
@@ -150,6 +156,11 @@ class IdentityApi:
             messaging_adapters=self.messaging.adapters(),
             onboarding_adapters=self.onboarding.adapters(),
             alert_adapters=self.alerts.adapters(),
+            ai_adapters=AiAdapters(
+                forecasts=UnconfiguredGlucoseForecastAdapter(),
+                recommendations=self.recommendations,
+                drafts=FakeDrafts(),
+            ),
             treatment_adapters=TreatmentAdapters(
                 templates=self.templates,
                 plans=self.plans,
