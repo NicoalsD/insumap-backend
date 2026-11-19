@@ -107,5 +107,9 @@
   "report.table.dose": "Dosis (U)",
   "report.table.range": "Rango",
   "report.kpi.status_title": "Pacientes por estado de cuenta",
-  "report.plan.item_count": "{count} elementos en el plan."
+  "report.plan.item_count": "{count} elementos en el plan.",
+  "triage.flag.no_recent_readings": "No hay lecturas de glucosa en el periodo.",
+  "triage.flag.insufficient_data": "Hay pocas lecturas para juzgar el periodo.",
+  "triage.flag.below_target": "El tiempo en rango está por debajo de la meta.",
+  "triage.flag.open_alerts": "Tiene alertas abiertas sin resolver."
 }

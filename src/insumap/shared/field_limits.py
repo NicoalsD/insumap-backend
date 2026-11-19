@@ -181,6 +181,14 @@ class FieldLimits:
     """Longest pagination cursor accepted (the records cursor carries a time and
     an id); a longer one is invalid."""
 
+    # Clinical notes (care.clinical_notes.body, API.md 8.11).
+
+    CLINICAL_NOTE_BODY_MIN_LENGTH: ClassVar[int] = 1
+    """Shortest note; the column also rejects an empty body."""
+
+    CLINICAL_NOTE_BODY_MAX_LENGTH: ClassVar[int] = 2000
+    """Longest note: ``care.clinical_notes.body`` is ``varchar(2000)``."""
+
     # Patient import (clinic.patients, clinic.import_rows and API.md 8.4).
 
     MRN_MAX_LENGTH: ClassVar[int] = 40

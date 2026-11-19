@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 
+from insumap.application.dashboard.ports import AssignedPatientRow
 from insumap.application.identity.ports import TotpFactor
 from insumap.application.identity.second_factor import totp_secret_binding
 from insumap.container import Container
@@ -16,6 +17,7 @@ from insumap.infrastructure.ai.unconfigured_forecast import (
 from insumap.infrastructure.ai_adapters import AiAdapters
 from insumap.infrastructure.clinic_admin_adapters import ClinicAdminAdapters
 from insumap.infrastructure.credentials_adapters import CredentialsAdapters
+from insumap.infrastructure.dashboard_adapters import DashboardAdapters
 from insumap.infrastructure.patient_adapters import PatientAdapters
 from insumap.infrastructure.platform_adapters import PlatformAdapters
 from insumap.infrastructure.targets_adapters import TargetsAdapters
@@ -33,6 +35,14 @@ from tests.support.credentials_fakes import (
     DistinctActivationCodes,
     FakeCredentialInvitations,
     FakePatientContacts,
+)
+from tests.support.dashboard_fakes import (
+    FakeAudit,
+    FakeKpis,
+    FakeNotes,
+    FakeOpenAlerts,
+    FakeReviews,
+    FakeRoster,
 )
 from tests.support.identity_fakes import VALID_TOTP
 from tests.support.identity_world import (
@@ -79,6 +89,8 @@ ORIGIN = "https://app.example.test"
 CSRF_HEADERS = {"X-Requested-With": "insumap-web"}
 FACTOR_ID_OFFSET: Final = 1000
 TREATMENT_TARGET: Final = UUID(int=4040)
+DASHBOARD_DOCTOR_ID: Final = UUID(int=0xD0)
+DASHBOARD_PATIENT_ID: Final = UUID(int=0xA1)
 
 
 class IdentityApi:
@@ -127,6 +139,20 @@ class IdentityApi:
         self.patient_log = InMemoryDataAccessLog()
         self.credential_contacts = FakePatientContacts()
         self.credential_invitations = FakeCredentialInvitations()
+        self.dashboard_audit = FakeAudit()
+        self.dashboard_notes = FakeNotes()
+        self.dashboard_reviews = FakeReviews()
+        self.dashboard_alerts = FakeOpenAlerts()
+        self.dashboard_kpis = FakeKpis({"ACTIVE": 3, "INVITED": 1})
+        self.dashboard_roster = FakeRoster(
+            {
+                DASHBOARD_DOCTOR_ID: [
+                    AssignedPatientRow(
+                        patient_id=DASHBOARD_PATIENT_ID, full_name="Paciente"
+                    )
+                ]
+            }
+        )
         self.consents = ConsentsWorld(
             records=self.world.consents.records,
             notices=self.world.consents.notices,
@@ -183,6 +209,14 @@ class IdentityApi:
                 roster=self.patient_roster,
                 invitations=self.patient_invitations,
                 access_log=self.patient_log,
+            ),
+            dashboard_adapters=DashboardAdapters(
+                roster=self.dashboard_roster,
+                open_alerts=self.dashboard_alerts,
+                reviews=self.dashboard_reviews,
+                notes=self.dashboard_notes,
+                kpis=self.dashboard_kpis,
+                audit=self.dashboard_audit,
             ),
             credentials_adapters=CredentialsAdapters(
                 patient_contacts=self.credential_contacts,
