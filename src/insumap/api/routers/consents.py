@@ -1,7 +1,5 @@
 """Consent and privacy endpoints (API.md 8.13)."""
 
-from __future__ import annotations
-
 from http import HTTPStatus
 from typing import Annotated, Any, Final, final
 from uuid import UUID
