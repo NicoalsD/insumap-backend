@@ -4,7 +4,12 @@ import pytest
 from pydantic import ValidationError
 
 from insumap.shared.config import Settings, SettingsHolder, get_settings
-from tests.support.settings import TEST_DATABASE_URL, make_settings
+from tests.support.settings import (
+    TEST_DATABASE_URL,
+    TEST_JWT_SECRET,
+    TEST_JWT_SECRET_PREVIOUS,
+    make_settings,
+)
 
 ENV_VARS = ("APP_ENV", "LOG_LEVEL", "DATABASE_URL", "CORS_ORIGINS", "API_DOCS_ENABLED")
 URL_WITH_CREDENTIALS = (
@@ -142,3 +147,48 @@ def test_get_settings_loads_once_until_reset(
     assert first is second
     assert first.app_env == "test"
     assert third.app_env == "production"
+
+
+@pytest.mark.parametrize("name", ["JWT_SECRET", "MFA_ENCRYPTION_KEY", "CODE_HMAC_KEY"])
+def test_missing_key_stops_the_startup(
+    clean_env: pytest.MonkeyPatch, name: str
+) -> None:
+    clean_env.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    clean_env.delenv(name)
+
+    with pytest.raises(ValidationError) as caught:
+        Settings(_env_file=None)
+
+    assert name.lower() in str(caught.value)
+
+
+@pytest.mark.parametrize("value", ["cambia-esto-jwt-secret", "c2hvcnQ="])
+def test_keys_must_be_32_bytes_of_base64_and_are_never_echoed(value: str) -> None:
+    with pytest.raises(ValidationError) as caught:
+        make_settings(jwt_secret=value)
+
+    assert value not in str(caught.value)
+
+
+def test_previous_keys_are_optional_and_validated() -> None:
+    assert make_settings().jwt_secret_previous is None
+    assert make_settings(jwt_secret_previous=TEST_JWT_SECRET_PREVIOUS)
+    with pytest.raises(ValidationError):
+        make_settings(code_hmac_key_previous="nope")
+
+
+def test_secrets_are_hidden_in_repr() -> None:
+    assert TEST_JWT_SECRET not in repr(make_settings())
+
+
+def test_security_defaults_follow_the_policy() -> None:
+    settings = make_settings()
+
+    assert settings.jwt_access_minutes == 15
+    assert settings.refresh_token_days == 30
+    assert settings.refresh_family_max_days == 90
+    assert settings.refresh_token_staff_hours == 12
+    assert settings.mfa_recovery_code_count == 10
+    assert settings.mfa_challenge_ttl_seconds == 300
+    assert settings.activation_session_ttl_minutes == 15
+    assert Settings.model_fields["argon2_memory_kib"].default == 19456

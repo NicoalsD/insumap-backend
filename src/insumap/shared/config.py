@@ -7,6 +7,8 @@ from typing import Annotated, ClassVar, Literal, final
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from insumap.shared.key_material import decode_key
+
 type AppEnv = Literal["local", "test", "production"]
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
@@ -42,6 +44,43 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     api_docs_enabled: bool = True
 
+    # Keys (32 bytes in base64). No defaults: without them the API does not start.
+    jwt_secret: SecretStr
+    jwt_secret_previous: SecretStr | None = None
+    mfa_encryption_key: SecretStr
+    mfa_encryption_key_previous: SecretStr | None = None
+    code_hmac_key: SecretStr
+    code_hmac_key_previous: SecretStr | None = None
+
+    # Access tokens and refresh sessions (docs/Seguridad.md, section 2).
+    jwt_issuer: str = Field(default="insumap-api", min_length=1)
+    jwt_audience: str = Field(default="insumap-web", min_length=1)
+    jwt_access_minutes: int = Field(default=15, ge=1)
+    jwt_leeway_seconds: int = Field(default=30, ge=0)
+    refresh_token_days: int = Field(default=30, ge=1)
+    refresh_family_max_days: int = Field(default=90, ge=1)
+    refresh_token_staff_hours: int = Field(default=12, ge=1)
+
+    # Password hashing and history.
+    argon2_memory_kib: int = Field(default=19456, ge=8)
+    argon2_time_cost: int = Field(default=2, ge=1)
+    argon2_parallelism: int = Field(default=1, ge=1)
+    password_hash_max_concurrency: int = Field(default=4, ge=1)
+    password_history_size: int = Field(default=5, ge=0)
+
+    # Activation, second factor and rate limits.
+    activation_max_attempts: int = Field(default=5, ge=1)
+    activation_session_ttl_minutes: int = Field(default=15, ge=1)
+    mfa_totp_valid_window: int = Field(default=1, ge=0)
+    mfa_challenge_ttl_seconds: int = Field(default=300, ge=1)
+    mfa_challenge_max_attempts: int = Field(default=5, ge=1)
+    mfa_recovery_code_count: int = Field(default=10, ge=1)
+    rate_limit_login_per_ip_per_minute: int = Field(default=20, ge=1)
+    rate_limit_mfa_per_ip_per_minute: int = Field(default=20, ge=1)
+    rate_limit_activation_per_ip_per_minute: int = Field(default=10, ge=1)
+    rate_limit_activation_per_ip_per_hour: int = Field(default=50, ge=1)
+    rate_limit_refresh_per_user_per_minute: int = Field(default=30, ge=1)
+
     @field_validator("log_level", mode="before")
     @classmethod
     def normalize_log_level(cls, value: object) -> object:
@@ -56,6 +95,21 @@ class Settings(BaseSettings):
         if not separator or not rest or scheme.lower() not in ACCEPTED_DATABASE_SCHEMES:
             raise ValueError("DATABASE_URL must be a postgresql:// URL")
         return SecretStr(f"{PSYCOPG_SCHEME}{SCHEME_SEPARATOR}{rest}")
+
+    @field_validator(
+        "jwt_secret",
+        "jwt_secret_previous",
+        "mfa_encryption_key",
+        "mfa_encryption_key_previous",
+        "code_hmac_key",
+        "code_hmac_key_previous",
+    )
+    @classmethod
+    def require_a_32_byte_key(cls, value: SecretStr | None) -> SecretStr | None:
+        """Keys are 32 bytes in base64; the error never repeats the value."""
+        if value is not None:
+            decode_key(value.get_secret_value())
+        return value
 
     @field_validator("cors_origins", mode="before")
     @classmethod
