@@ -1,8 +1,10 @@
 """The jsonb form of the treatment content round-trips without losing a value."""
 
+from dataclasses import replace
 from datetime import time
 from decimal import Decimal
 
+from insumap.domain.monitoring.injection_sites import SiteCode
 from insumap.domain.treatment.content import (
     InsulinKind,
     ItemSpec,
@@ -12,6 +14,8 @@ from insumap.domain.treatment.content import (
     TitrationRules,
 )
 from insumap.domain.treatment.primitives import (
+    item_spec_from_primitive,
+    item_to_primitive,
     limits_from_primitive,
     limits_to_primitive,
     rules_from_primitive,
@@ -85,3 +89,30 @@ def test_an_item_keeps_its_insulin_kind_and_time() -> None:
     )
 
     assert restored.items == (spec,)
+
+
+def test_the_injection_sites_of_an_item_round_trip() -> None:
+    spec = replace(
+        insulin("Basal"),
+        injection_sites=(SiteCode.ABDOMEN_LEFT, SiteCode.THIGH_RIGHT),
+    )
+
+    restored = item_spec_from_primitive(item_to_primitive(spec))
+
+    assert restored.injection_sites == (SiteCode.ABDOMEN_LEFT, SiteCode.THIGH_RIGHT)
+    assert item_to_primitive(spec)["injection_sites"] == [
+        "ABDOMEN_LEFT",
+        "THIGH_RIGHT",
+    ]
+    assert (
+        item_spec_from_primitive(item_to_primitive(insulin())).injection_sites is None
+    )
+
+
+def test_a_snapshot_saved_before_the_injection_sites_still_reads() -> None:
+    legacy = item_to_primitive(insulin("Basal"))
+    del legacy["injection_sites"]
+
+    assert item_spec_from_primitive(legacy).injection_sites is None
+    content = template_content_from_primitive({"items": [legacy]})
+    assert content.items[0].injection_sites is None

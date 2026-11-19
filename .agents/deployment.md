@@ -170,6 +170,8 @@ services:
       # Configuración del equipo, pegada en el panel
       - key: CORS_ORIGINS
         sync: false
+      - key: ALLOWED_HOSTS
+        sync: false  # obligatoria en production; incluye el host que usa el health check de Render (por verificar)
       - key: REFRESH_TOKEN_DAYS
         sync: false
       - key: AI_SERVICE_URL
@@ -216,7 +218,7 @@ Reglas:
 
 | Grupo | Variables | Origen del valor |
 |---|---|---|
-| Aplicación | `APP_ENV`, `LOG_LEVEL`, `JWT_ACCESS_MINUTES`, `REFRESH_TOKEN_DAYS` | Valores fijos del blueprint o del panel |
+| Aplicación | `APP_ENV`, `LOG_LEVEL`, `ALLOWED_HOSTS`, `JWT_ACCESS_MINUTES`, `REFRESH_TOKEN_DAYS` | Valores fijos del blueprint o del panel |
 | Base de datos | `DATABASE_URL`, `DATABASE_URL_UNPOOLED` | Neon, rama `main`, rol `insumap_app`. La URL directa también usa `insumap_app` |
 | Seguridad | `JWT_SECRET`, `FIELD_ENCRYPTION_KEY`, `LOOKUP_HMAC_KEY` | Generados fuera de Render con `openssl`, según su formato |
 | IA | `AI_SERVICE_URL`, `AI_SERVICE_TOKEN`, `AI_TIMEOUT_SECONDS` | Servicio de `insumap-ai`; el token se genera aparte |

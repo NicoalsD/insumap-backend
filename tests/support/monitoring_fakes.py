@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+from typing import override
 from uuid import UUID
 
 from insumap.application.access.ports import (
@@ -20,6 +21,11 @@ from insumap.application.identity.ports import ConsentRepositoryPort, PrivacyNot
 from insumap.application.metrics.ports import GlucoseSeriesPort, TargetProfilePort
 from insumap.application.monitoring.gate import AssignedPatientGate, OwnPatientGate
 from insumap.application.monitoring.glucose import GlucoseReadingRecorder
+from insumap.application.monitoring.injection import (
+    InjectionHistoryPort,
+    PatientBodyProfile,
+    PatientBodyProfilePort,
+)
 from insumap.application.monitoring.paging import PageQuery
 from insumap.application.monitoring.ports import (
     ActivePlanPort,
@@ -40,6 +46,11 @@ from insumap.domain.metrics.target_profile import PatientTargets, TargetProfile
 from insumap.domain.metrics.window import GlucosePoint
 from insumap.domain.monitoring.clinical_event import ClinicalEvent
 from insumap.domain.monitoring.glucose import GlucoseReading
+from insumap.domain.monitoring.injection_rule import (
+    InjectionHistoryEntry,
+    LipohypertrophyReport,
+)
+from insumap.domain.monitoring.injection_sites import PregnancyStatus
 from insumap.domain.monitoring.record import (
     ClinicalRecord,
     EntryType,
@@ -61,6 +72,7 @@ from insumap.domain.monitoring.validation import (
     ValidationParams,
     build_validation_chain,
 )
+from insumap.domain.onboarding.vocabulary import Sex
 from insumap.infrastructure.ai.unconfigured_forecast import (
     UnconfiguredGlucoseForecastAdapter,
 )
@@ -433,6 +445,9 @@ class FakeCatalog(SymptomCatalogPort):
     def __init__(self) -> None:
         self.entries = {
             "THIRST": SymptomEntry(symptom_id=uid(500), code="THIRST", is_alarm=False),
+            "LIPOHYPERTROPHY": SymptomEntry(
+                symptom_id=uid(502), code="LIPOHYPERTROPHY", is_alarm=False
+            ),
             "CONFUSION": SymptomEntry(
                 symptom_id=uid(501), code="CONFUSION", is_alarm=True
             ),
@@ -448,6 +463,40 @@ class FakePlans(ActivePlanPort):
 
     def active_plan_id(self, patient_id: UUID) -> UUID | None:
         return self.plan_id
+
+
+class FakeBodyProfiles(PatientBodyProfilePort):
+    """The body profile of every patient: a woman with a normal BMI by default."""
+
+    def __init__(self) -> None:
+        self.profile: PatientBodyProfile | None = PatientBodyProfile(
+            sex=Sex.FEMALE,
+            birth_date=date(1992, 3, 18),
+            bmi=Decimal("23.4"),
+            pregnancy_status=PregnancyStatus.NONE,
+        )
+
+    @override
+    def for_patient(self, patient_id: UUID) -> PatientBodyProfile | None:
+        return self.profile
+
+
+class FakeInjectionHistory(InjectionHistoryPort):
+    """The latest doses by site and the lipohypertrophy reports the test declares."""
+
+    def __init__(self) -> None:
+        self.doses: list[InjectionHistoryEntry] = []
+        self.reports: list[LipohypertrophyReport] = []
+
+    @override
+    def latest_by_site(self, patient_id: UUID) -> Sequence[InjectionHistoryEntry]:
+        return tuple(self.doses)
+
+    @override
+    def lipohypertrophy_since(
+        self, patient_id: UUID, since: datetime
+    ) -> Sequence[LipohypertrophyReport]:
+        return tuple(r for r in self.reports if r.reported_at >= since)
 
 
 def records_adapters(world: RecordsWorld) -> MonitoringAdapters:
@@ -469,6 +518,8 @@ def records_adapters(world: RecordsWorld) -> MonitoringAdapters:
             ExportFormat.CSV: CsvTimelineExporter(),
             ExportFormat.FHIR: FhirTimelineExporter(),
         },
+        body_profiles=world.body_profiles,
+        injection_history=world.injection_history,
     )
 
 
@@ -489,6 +540,10 @@ class RecordsWorld:
     catalog: FakeCatalog = field(default_factory=FakeCatalog)
     plans: FakePlans = field(default_factory=FakePlans)
     series: FakeSeries = field(default_factory=FakeSeries)
+    body_profiles: FakeBodyProfiles = field(default_factory=FakeBodyProfiles)
+    injection_history: FakeInjectionHistory = field(
+        default_factory=FakeInjectionHistory
+    )
 
     @property
     def own_gate(self) -> OwnPatientGate:

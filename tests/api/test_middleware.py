@@ -18,6 +18,10 @@ from tests.support.settings import make_settings
 
 SPANISH = MessageCatalog.load_spanish()
 TEST_LIMIT_BYTES = 16
+REQ_404 = "6b1d2c0e-0000-4000-8000-000000000404"
+REQ_422 = "6b1d2c0e-0000-4000-8000-000000000422"
+REQ_500 = "6b1d2c0e-0000-4000-8000-000000000500"
+REQ_413 = "6b1d2c0e-0000-4000-8000-000000000413"
 
 
 class Note(BaseModel):
@@ -67,10 +71,12 @@ def chunks(*parts: bytes) -> Iterator[bytes]:
 
 
 def test_accepts_a_safe_incoming_request_id(client: TestClient) -> None:
-    response = client.get("/request-id", headers={"X-Request-ID": "front-42.a_b"})
+    incoming = str(uuid.uuid4())
 
-    assert response.headers["X-Request-ID"] == "front-42.a_b"
-    assert response.json() == {"request_id": "front-42.a_b"}
+    response = client.get("/request-id", headers={"X-Request-ID": incoming})
+
+    assert response.headers["X-Request-ID"] == incoming
+    assert response.json() == {"request_id": incoming}
 
 
 def test_generates_a_uuid4_when_the_header_is_missing(client: TestClient) -> None:
@@ -85,6 +91,12 @@ def test_generates_a_uuid4_when_the_header_is_missing(client: TestClient) -> Non
     "unsafe",
     [
         "a" * (FieldLimits.REQUEST_ID_MAX_LENGTH + 1),
+        "front-42.a_b",
+        "req-404",
+        "0123456789abcdef0123456789abcdef",
+        "3f2b8c1e-1234-4a5b-8c9d-0123456789a",
+        "3f2b8c1e-1234-4a5b-8c9d-0123456789ag",
+        f"{uuid.uuid4()}\n",
         "id with spaces",
         "<script>alert(1)</script>",
         "id;rm -rf",
@@ -98,30 +110,28 @@ def test_replaces_unsafe_request_ids(client: TestClient, unsafe: str) -> None:
     assert is_uuid4(response.headers["X-Request-ID"])
 
 
-def test_accepts_a_request_id_of_the_maximum_length() -> None:
-    longest = "a" * FieldLimits.REQUEST_ID_MAX_LENGTH
-
-    assert RequestIdMiddleware.accept_or_generate(longest) == longest
+def test_a_uuid_fits_the_maximum_length() -> None:
+    assert len(str(uuid.uuid4())) == FieldLimits.REQUEST_ID_MAX_LENGTH
 
 
 def test_error_responses_carry_the_request_id(client: TestClient) -> None:
-    not_found = client.get("/missing", headers={"X-Request-ID": "req-404"})
-    invalid = client.post("/notes", json={}, headers={"X-Request-ID": "req-422"})
+    not_found = client.get("/missing", headers={"X-Request-ID": REQ_404})
+    invalid = client.post("/notes", json={}, headers={"X-Request-ID": REQ_422})
 
-    assert not_found.headers["X-Request-ID"] == "req-404"
-    assert invalid.headers["X-Request-ID"] == "req-422"
+    assert not_found.headers["X-Request-ID"] == REQ_404
+    assert invalid.headers["X-Request-ID"] == REQ_422
 
 
 def test_unexpected_errors_carry_and_log_the_request_id(
     client: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.ERROR, logger="insumap.api.errors"):
-        response = client.get("/boom", headers={"X-Request-ID": "req-500"})
+        response = client.get("/boom", headers={"X-Request-ID": REQ_500})
 
     assert response.status_code == 500
-    assert response.headers["X-Request-ID"] == "req-500"
+    assert response.headers["X-Request-ID"] == REQ_500
     [record] = [r for r in caplog.records if r.name == "insumap.api.errors"]
-    assert getattr(record, "request_id", None) == "req-500"
+    assert getattr(record, "request_id", None) == REQ_500
 
 
 def test_small_bodies_pass(client: TestClient) -> None:
@@ -137,11 +147,11 @@ def test_declared_oversized_body_answers_413_with_request_id(
     response = client.post(
         "/raw",
         content=b"x" * (TEST_LIMIT_BYTES + 1),
-        headers={"X-Request-ID": "req-413"},
+        headers={"X-Request-ID": REQ_413},
     )
 
     assert response.status_code == 413
-    assert response.headers["X-Request-ID"] == "req-413"
+    assert response.headers["X-Request-ID"] == REQ_413
     assert response.json() == {
         "error": {
             "code": "PAYLOAD_TOO_LARGE",

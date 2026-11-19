@@ -90,6 +90,7 @@ class TreatmentPlanItemOrm(Base):
     days_of_week: Mapped[list[int] | None] = mapped_column(ARRAY(SmallInteger))
     instructions: Mapped[str | None] = mapped_column(String(500))
     sort_order: Mapped[int] = mapped_column(SmallInteger)
+    injection_sites: Mapped[list[str] | None] = mapped_column(ARRAY(String(14)))
 
 
 class TreatmentPlanSnapshotOrm(Base):

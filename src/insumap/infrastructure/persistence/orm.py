@@ -257,6 +257,8 @@ class PatientOrm(Base):
     created_at: Mapped[datetime] = _timestamp()
     updated_at: Mapped[datetime] = _timestamp()
     lock_version: Mapped[int] = mapped_column(Integer)
+    bmi: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))
+    pregnancy_status: Mapped[str] = mapped_column(String(8), server_default="UNKNOWN")
 
 
 class ImportBatchOrm(Base):

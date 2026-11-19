@@ -16,13 +16,13 @@ class FieldLimits:
 
     # Correlation id.
 
-    REQUEST_ID_MAX_LENGTH: ClassVar[int] = 64
-    """Maximum length of a client supplied ``X-Request-ID``."""
+    REQUEST_ID_MAX_LENGTH: ClassVar[int] = 36
+    """Maximum length of a client supplied ``X-Request-ID`` (a UUID in text form)."""
 
     REQUEST_ID_PATTERN: ClassVar[str] = (
-        rf"^[A-Za-z0-9._-]{{1,{REQUEST_ID_MAX_LENGTH}}}$"
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     )
-    """Characters accepted in a client supplied ``X-Request-ID`` (use fullmatch)."""
+    """Shape of a client supplied ``X-Request-ID``: a UUID (use fullmatch)."""
 
     # Accounts.
 
@@ -108,8 +108,8 @@ class FieldLimits:
 
     # Requests and pagination.
 
-    MAX_REQUEST_BODY_BYTES: ClassVar[int] = 1024 * 1024
-    """Maximum size of a request body, in bytes (1 MiB)."""
+    MAX_REQUEST_BODY_BYTES: ClassVar[int] = 64 * 1024
+    """General maximum size of a request body, in bytes (64 KiB; Seguridad 13.3)."""
 
     PAGE_SIZE_DEFAULT: ClassVar[int] = 20
     """Page size used when the client does not ask for one."""
@@ -143,6 +143,12 @@ class FieldLimits:
 
     INSULIN_UNITS_INPUT_MAX: ClassVar[int] = 1000
     """Largest number of insulin units accepted in one record."""
+
+    INJECTION_SPOT_MIN: ClassVar[int] = 1
+    """First spot of an injection site (``insulin_doses.injection_spot``)."""
+
+    INJECTION_SPOT_MAX: ClassVar[int] = 4
+    """Last spot of an injection site: four points per site."""
 
     CARBS_G_INPUT_MAX: ClassVar[int] = 1000
     """Largest carbohydrate estimate, in grams, accepted in one meal."""

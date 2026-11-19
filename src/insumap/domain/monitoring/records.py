@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, final, override
 from uuid import UUID
 
 from insumap.domain.common.rounding import round_half_up
+from insumap.domain.monitoring.injection_sites import SPOT_MAX, SPOT_MIN, SiteCode
 from insumap.domain.monitoring.record import ClinicalRecord, TimelineRecord
 from insumap.shared.units import NGSP_PERCENT_INTERCEPT, NGSP_PERCENT_PER_IFCC
 
@@ -70,6 +71,16 @@ class InsulinDose(TimelineRecord):
     units: Decimal
     plan_id: UUID | None = None
     note: str | None = None
+    injection_site: SiteCode | None = None
+    injection_spot: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.injection_spot is None:
+            return
+        if self.injection_site is None:
+            raise ValueError("an injection spot needs an injection site")
+        if not SPOT_MIN <= self.injection_spot <= SPOT_MAX:
+            raise ValueError("the injection spot is outside the catalog")
 
     @property
     @override
@@ -140,6 +151,7 @@ class Symptom(TimelineRecord):
     symptom_at: datetime
     symptom: SymptomEntry
     note: str | None = None
+    injection_site: SiteCode | None = None
 
     @property
     @override
