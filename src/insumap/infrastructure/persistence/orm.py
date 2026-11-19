@@ -82,6 +82,7 @@ class UserOrm(Base):
     password_changed_at: Mapped[datetime | None] = _timestamp(nullable=True)
     token_version: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16))
+    status_reason: Mapped[str | None] = mapped_column(String(500))
     status_changed_at: Mapped[datetime] = _timestamp()
     updated_at: Mapped[datetime] = _timestamp()
 
@@ -95,6 +96,9 @@ class MembershipOrm(Base):
     clinic_id: Mapped[UUID | None] = mapped_column(Uuid)
     role_id: Mapped[UUID] = mapped_column(Uuid)
     is_active: Mapped[bool] = mapped_column(Boolean)
+    ended_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    ended_reason: Mapped[str | None] = mapped_column(String(500))
+    updated_at: Mapped[datetime] = _timestamp()
 
 
 class CredentialInvitationOrm(Base):
@@ -301,3 +305,17 @@ class CareAssignmentOrm(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=NOW
     )
+
+
+class LoginLockoutOrm(Base):
+    __tablename__ = "login_lockouts"
+    __table_args__ = IAM
+
+    id: Mapped[UUID] = _id()
+    scope: Mapped[str] = mapped_column(String(7))
+    key_hmac: Mapped[str] = mapped_column(CHAR(64))
+    level: Mapped[int] = mapped_column(SmallInteger)
+    locked_until: Mapped[datetime | None] = _timestamp(nullable=True)
+    last_failure_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    reset_at: Mapped[datetime | None] = _timestamp(nullable=True)
+    updated_at: Mapped[datetime] = _timestamp()
