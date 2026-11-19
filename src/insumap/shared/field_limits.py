@@ -316,3 +316,8 @@ class FieldLimits:
 
     PUSH_KEY_PATTERN: ClassVar[str] = r"^[A-Za-z0-9_-]+$"
     """Subscription keys are base64url without padding (use fullmatch)."""
+
+    # Messaging (M11).
+
+    MESSAGE_BODY_MAX_LENGTH: ClassVar[int] = 1000
+    """Longest message of a thread (``messaging.messages.body``)."""
