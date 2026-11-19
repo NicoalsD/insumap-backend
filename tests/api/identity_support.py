@@ -23,6 +23,7 @@ from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
 from tests.support.clinic_admin_fakes import FakeClinicAdminProvisioning
 from tests.support.clinic_fakes import FakeClinics
 from tests.support.commands import InMemoryAuditLog
+from tests.support.consents_fakes import ConsentsWorld
 from tests.support.credentials_fakes import (
     DistinctActivationCodes,
     FakeCredentialInvitations,
@@ -111,6 +112,11 @@ class IdentityApi:
         self.patient_log = InMemoryDataAccessLog()
         self.credential_contacts = FakePatientContacts()
         self.credential_invitations = FakeCredentialInvitations()
+        self.consents = ConsentsWorld(
+            records=self.world.consents.records,
+            notices=self.world.consents.notices,
+            patient_ids=[PATIENT_ID],
+        )
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -159,6 +165,7 @@ class IdentityApi:
                 patient_contacts=self.credential_contacts,
                 invitations=self.credential_invitations,
             ),
+            consents_adapters=self.consents.adapters(),
         )
         self.app = create_app(container)
         self.client = TestClient(
