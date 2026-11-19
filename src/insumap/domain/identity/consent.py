@@ -34,3 +34,30 @@ class ConsentRecord:
     action: ConsentAction
     occurred_at: datetime
     recorded_by: UUID
+
+
+class ConsentStanding(StrEnum):
+    """Where a patient stands on the sensitive-data consent of the notice in force."""
+
+    GRANTED = "GRANTED"
+    """Accepted on the notice version in force and not withdrawn since."""
+    PENDING = "PENDING"
+    """Never accepted, or accepted on a version that is no longer in force."""
+    WITHDRAWN = "WITHDRAWN"
+    """The latest act is a withdrawal."""
+
+
+def standing_of(
+    latest: ConsentRecord | None, current_version_id: UUID | None
+) -> ConsentStanding:
+    """The standing given the latest act of the scope and the notice in force.
+
+    The database holds only acts: this reads the latest one (API.md 8.13).
+    """
+    if latest is None:
+        return ConsentStanding.PENDING
+    if latest.action is ConsentAction.WITHDRAWN:
+        return ConsentStanding.WITHDRAWN
+    if latest.privacy_notice_version_id == current_version_id:
+        return ConsentStanding.GRANTED
+    return ConsentStanding.PENDING

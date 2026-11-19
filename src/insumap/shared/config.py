@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated, ClassVar, Literal, final
+from typing import Annotated, ClassVar, Literal, Self, final
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from insumap.shared.key_material import decode_key
@@ -17,6 +17,7 @@ ACCEPTED_DATABASE_SCHEMES = frozenset({"postgres", "postgresql", PSYCOPG_SCHEME}
 SCHEME_SEPARATOR = "://"
 LIST_SEPARATOR = ","
 WILDCARD_ORIGIN = "*"
+MIN_TOKEN_BYTES = 32
 ALLOWED_ORIGIN_PREFIXES = ("http://", "https://")
 TRAILING_SLASH = "/"
 DEFAULT_PUSH_ENDPOINT_HOSTS = (
@@ -89,10 +90,17 @@ class Settings(BaseSettings):
     rate_limit_activation_per_ip_per_minute: int = Field(default=10, ge=1)
     rate_limit_activation_per_ip_per_hour: int = Field(default=50, ge=1)
     rate_limit_refresh_per_user_per_minute: int = Field(default=30, ge=1)
+    privacy_request_due_days: int = Field(
+        default=10,
+        ge=1,
+        description="Days to answer a privacy request (provisional, see docs).",
+    )
 
     # Patient records and exports (docs/API.md, section 5).
     rate_limit_records_per_user_per_minute: int = Field(default=120, ge=1)
     rate_limit_exports_per_user_per_hour: int = Field(default=20, ge=1)
+    # Reports: smaller counts are not shown, so no patient is singled out (API.md 8.11).
+    report_small_count_threshold: int = Field(default=5, ge=1)
     # Password reset, email verification and staff invitations (Seguridad.md 3.6).
     password_reset_ttl_minutes: int = Field(default=30, ge=1)
     email_verification_ttl_hours: int = Field(default=24, ge=1)
@@ -105,6 +113,18 @@ class Settings(BaseSettings):
     activation_code_ttl_hours: int = Field(default=168, ge=1)
     rate_limit_credential_issue_per_clinic_per_hour: int = Field(default=300, ge=1)
     rate_limit_credential_batch_per_clinic_per_hour: int = Field(default=10, ge=1)
+
+    # AI service (docs/Contrato-IA.md, sections 3.2 and 10.1). Optional: without
+    # a URL the forecast answers only with the rule-based fallback.
+    ai_enabled: bool = True
+    ai_service_url: str | None = None
+    ai_service_token: SecretStr | None = None
+    """Service token (``AI_SERVICE_TOKEN``), at least 32 bytes when set."""
+    ai_timeout_connect_seconds: float = Field(default=2.0, gt=0)
+    ai_timeout_forecast_seconds: float = Field(default=3.0, gt=0)
+    """API.md 8.8 says 3 s and Contrato-IA.md 3.2 says 5 s; the lower one is used."""
+    ai_circuit_failure_threshold: int = Field(default=5, ge=1)
+    ai_circuit_open_seconds: float = Field(default=30.0, gt=0)
 
     # Web Push endpoints the browser may register (Seguridad.md 13.4). Hosts
     # only, no scheme; ``*.`` matches any subdomain. Not a secret.
@@ -142,6 +162,26 @@ class Settings(BaseSettings):
         if value is not None:
             decode_key(value.get_secret_value())
         return value
+
+    @field_validator("ai_service_token")
+    @classmethod
+    def require_a_long_service_token(cls, value: SecretStr | None) -> SecretStr | None:
+        """The service token has at least 32 bytes; the error never repeats it."""
+        if (
+            value is not None
+            and len(value.get_secret_value().encode()) < MIN_TOKEN_BYTES
+        ):
+            raise ValueError("AI_SERVICE_TOKEN must have at least 32 bytes")
+        return value
+
+    @model_validator(mode="after")
+    def require_https_ai_service_in_production(self) -> Self:
+        """Production sends the service token only over TLS (Seguridad 18.4)."""
+        url = self.ai_service_url
+        insecure = url is not None and not url.startswith("https://")
+        if self.app_env == "production" and insecure:
+            raise ValueError("AI_SERVICE_URL must use https in production")
+        return self
 
     @field_validator("push_endpoint_allowed_hosts", mode="before")
     @classmethod

@@ -11,6 +11,10 @@ from insumap.application.identity.second_factor import totp_secret_binding
 from insumap.container import Container
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
+from insumap.infrastructure.ai.unconfigured_forecast import (
+    UnconfiguredGlucoseForecastAdapter,
+)
+from insumap.infrastructure.ai_adapters import AiAdapters
 from insumap.infrastructure.clinic_admin_adapters import ClinicAdminAdapters
 from insumap.infrastructure.credentials_adapters import CredentialsAdapters
 from insumap.infrastructure.dashboard_adapters import DashboardAdapters
@@ -21,10 +25,12 @@ from insumap.infrastructure.treatment_adapters import TreatmentAdapters
 from insumap.main import create_app
 from tests.support.access_fakes import FakeDirectory, InMemoryDataAccessLog
 from tests.support.alerts_fakes import AlertsWorld
+from tests.support.audit_fakes import AuditFakes
 from tests.support.care_team_fakes import FakeCareTeams, FakeStaff
 from tests.support.clinic_admin_fakes import FakeClinicAdminProvisioning
 from tests.support.clinic_fakes import FakeClinics
 from tests.support.commands import InMemoryAuditLog
+from tests.support.consents_fakes import ConsentsWorld
 from tests.support.credentials_fakes import (
     DistinctActivationCodes,
     FakeCredentialInvitations,
@@ -48,6 +54,7 @@ from tests.support.identity_world import (
     IdentityWorld,
     make_account,
 )
+from tests.support.messaging_fakes import MessagingWorld
 from tests.support.monitoring_fakes import RecordsWorld, records_adapters
 from tests.support.notification_fakes import (
     InMemoryNotificationStore,
@@ -58,6 +65,7 @@ from tests.support.notification_fakes import (
 from tests.support.notifications import InMemoryChannel
 from tests.support.onboarding_fakes import OnboardingWorld
 from tests.support.patient_fakes import FakePatientRoster, FakePendingInvitations
+from tests.support.recommendation_fakes import FakeDrafts, InMemoryRecommendations
 from tests.support.settings import make_settings
 from tests.support.sites_fakes import FakeSites
 from tests.support.targets_fakes import (
@@ -93,6 +101,12 @@ class IdentityApi:
         self.audit_log = InMemoryAuditLog()
         self.mail = InMemoryChannel()
         self.care_teams = FakeCareTeams()
+        self.messaging = MessagingWorld(
+            care_teams=self.care_teams,
+            patient_id=PATIENT_ID,
+            patient_user=PATIENT_USER,
+            clinic_id=CLINIC.clinic_id,
+        )
         self.patients = FakeDirectory()
         self.staff = FakeStaff()
         self.clinics = FakeClinics()
@@ -103,6 +117,7 @@ class IdentityApi:
         self.staff_directory = FakeStaffDirectory(self.world.users, self.world.factors)
         self.staff_invitations = FakeStaffInvitations()
         self.alerts = AlertsWorld()
+        self.recommendations = InMemoryRecommendations()
         self.login_lockouts = FakeLoginLockouts()
         self.onboarding = OnboardingWorld()
         self.templates = FakeTemplates()
@@ -113,6 +128,7 @@ class IdentityApi:
         self.target_assignments = FakeTargetAssignments()
         self.reminders = FakeReminders()
         self.notification_store = InMemoryNotificationStore()
+        self.in_app = InMemoryChannel(external=False)
         self.preferences = InMemoryPreferences()
         self.push_subscriptions = InMemoryPushSubscriptions()
         self.clinic_admins = FakeClinicAdminProvisioning()
@@ -137,6 +153,12 @@ class IdentityApi:
                 ]
             }
         )
+        self.consents = ConsentsWorld(
+            records=self.world.consents.records,
+            notices=self.world.consents.notices,
+            patient_ids=[PATIENT_ID],
+        )
+        self.audit = AuditFakes()
         settings = make_settings(cors_origins=[ORIGIN])
         container = Container(
             settings,
@@ -157,8 +179,14 @@ class IdentityApi:
                 activation_codes=DistinctActivationCodes(),
             ),
             monitoring_adapters=records_adapters(self.records),
+            messaging_adapters=self.messaging.adapters(),
             onboarding_adapters=self.onboarding.adapters(),
             alert_adapters=self.alerts.adapters(),
+            ai_adapters=AiAdapters(
+                forecasts=UnconfiguredGlucoseForecastAdapter(),
+                recommendations=self.recommendations,
+                drafts=FakeDrafts(),
+            ),
             treatment_adapters=TreatmentAdapters(
                 templates=self.templates,
                 plans=self.plans,
@@ -174,6 +202,7 @@ class IdentityApi:
                 store=self.notification_store,
                 preferences=self.preferences,
                 subscriptions=self.push_subscriptions,
+                in_app=self.in_app,
             ),
             clinic_admin_adapters=ClinicAdminAdapters(provisioning=self.clinic_admins),
             patient_adapters=PatientAdapters(
@@ -193,6 +222,8 @@ class IdentityApi:
                 patient_contacts=self.credential_contacts,
                 invitations=self.credential_invitations,
             ),
+            consents_adapters=self.consents.adapters(),
+            audit_adapters=self.audit.adapters(),
         )
         self.app = create_app(container)
         self.client = TestClient(

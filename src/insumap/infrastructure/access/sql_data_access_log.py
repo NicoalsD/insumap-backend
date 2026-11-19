@@ -15,7 +15,6 @@ from insumap.application.common.unit_of_work import (
 from insumap.infrastructure.persistence.transactions import CurrentSession
 
 ACTOR_TYPE_USER = "USER"
-ACTION_READ = "READ"
 INSERT_ROW = text(
     "INSERT INTO audit.data_access_log (clinic_id, patient_id, actor_user_id,"
     " actor_role, actor_type, resource_type, action, outcome, purpose, request_id)"
@@ -74,7 +73,7 @@ class SqlDataAccessLog(DataAccessLogPort):
             "actor_role": record.actor_role.value,
             "actor_type": ACTOR_TYPE_USER,
             "resource_type": record.resource.value,
-            "action": ACTION_READ,
+            "action": record.action.value,
             "outcome": record.outcome.value,
             "purpose": record.purpose.value,
             "request_id": record.request_id,

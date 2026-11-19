@@ -1,8 +1,9 @@
-"""Decisions about the clinic administrators: the first one of a clinic (P13).
+"""Decisions about the clinic administrators (P13): the first one, and its access reset.
 
-The command runs as a platform administrator, which has no clinic of its own,
-so its audit row names the target clinic (``audit_subject``). The activation
+The commands run as a platform administrator, which has no clinic of its own,
+so their audit rows name the target clinic (``audit_subject``). The activation
 code leaves only by email, after the commit, as in ``CreateStaffUserCommand``.
+The reset also sends the MFA notice of ``ResetStaffMfaCommand``.
 
 Pattern: P13 Command
 """
@@ -15,6 +16,7 @@ from typing import ClassVar, Final, final, override
 from uuid import UUID
 
 from insumap.application.clinic_admins.ports import (
+    ClinicAdminAccessReset,
     ClinicAdminProvisioningPort,
     NewClinicAdmin,
 )
@@ -23,6 +25,7 @@ from insumap.application.commands.base import AuditSubject, Command, CommandHand
 from insumap.application.commands.transactional import CurrentUnitOfWork
 from insumap.application.identity.ports import CodeHasherPort, CodePurpose
 from insumap.application.notifications.account_notifications import (
+    MfaResetNotification,
     StaffActivationNotification,
 )
 from insumap.application.notifications.notification import (
@@ -33,15 +36,22 @@ from insumap.application.notifications.notification import (
 from insumap.application.users.ports import ActivationCodeGeneratorPort
 from insumap.domain.clinic.clinic import MACHINE_NAME
 from insumap.domain.common.errors import ResourceNotFoundError
+from insumap.domain.common.reason import Reason
 from insumap.domain.identity.email import EmailAddress
-from insumap.domain.identity.errors import InvalidStateTransitionError
+from insumap.domain.identity.errors import (
+    InvalidStateTransitionError,
+    PermissionDeniedError,
+)
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
 from insumap.shared.i18n import MessageCatalog
 from insumap.shared.time import Clock
 
 ADMIN_ENTITY: Final = "USER"
+ADMIN_MACHINE: Final = "clinic_admin"
+"""The state machine named in ``409 INVALID_STATE_TRANSITION`` of an admin reset."""
 CREATE_ACTION: Final = "create_clinic_admin"
+RESET_ACTION: Final = "reset_clinic_admin_access"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -152,3 +162,110 @@ class CreateClinicAdminCommandHandler(
             role=Role.CLINIC_ADMIN,
             invitation_expires_at=expires_at,
         )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ResetClinicAdminAccessCommand(Command[None]):
+    """The platform administrator resets the access of a clinic administrator.
+
+    The reason is kept in the audit row; the answer has no body.
+    """
+
+    audit_action: ClassVar[str] = "CLINIC_ADMIN_ACCESS_RESET"
+    audit_entity_type: ClassVar[str] = ADMIN_ENTITY
+
+    clinic_id: UUID
+    user_id: UUID
+    reason: str | None
+
+    @override
+    def audit_subject(self, result: None) -> AuditSubject:
+        del result
+        return AuditSubject(
+            clinic_id=self.clinic_id,
+            entity_id=self.user_id,
+            reason=Reason.parse(self.reason).text,
+            changed_fields=("status", "mfa_factors", "token_version"),
+        )
+
+
+@final
+class ResetClinicAdminAccessCommandHandler(
+    CommandHandler[ResetClinicAdminAccessCommand, None]
+):
+    """Ends the sessions of an administrator and sends a new activation code.
+
+    The order of the checks: the permission (``403``), the caller is not the
+    holder (``403``), the reason (``422``), the clinic (``404``). The database
+    then revokes the sessions and the MFA factors, bumps ``token_version``,
+    sets the account back to ``INVITED`` and issues a new invitation; the
+    contact is read in the same transaction. Both notices leave only after the
+    commit. The code is stored only as its keyed hash and never returned.
+
+    Pattern: P13 Command
+    """
+
+    def __init__(
+        self,
+        *,
+        clinics: ClinicRepositoryPort,
+        provisioning: ClinicAdminProvisioningPort,
+        codes: ActivationCodeGeneratorPort,
+        code_hasher: CodeHasherPort,
+        channel: NotificationChannel,
+        messages: MessageCatalog,
+        clock: Clock,
+        current: CurrentUnitOfWork,
+        invitation_ttl: timedelta,
+    ) -> None:
+        self._clinics = clinics
+        self._provisioning = provisioning
+        self._codes = codes
+        self._code_hasher = code_hasher
+        self._channel = channel
+        self._messages = messages
+        self._clock = clock
+        self._current = current
+        self._ttl = invitation_ttl
+
+    @override
+    def handle(self, command: ResetClinicAdminAccessCommand) -> None:
+        actor = command.actor
+        actor.require(PermissionCode.CLINIC_ADMINS_MANAGE)
+        if command.user_id == actor.user_id:
+            raise PermissionDeniedError
+        Reason.parse(command.reason)
+        clinic = self._clinics.get(command.clinic_id)
+        if clinic is None:
+            raise ResourceNotFoundError
+        code = self._codes.generate()
+        keyed = self._code_hasher.hash_for_storage(CodePurpose.ACTIVATION, code.value)
+        expires_at = self._clock.now() + self._ttl
+        self._provisioning.reset_access(
+            ClinicAdminAccessReset(
+                clinic_id=clinic.clinic_id,
+                user_id=command.user_id,
+                code_hash=keyed.value,
+                code_key_id=keyed.key_id,
+                expires_at=expires_at,
+            )
+        )
+        contact = self._provisioning.contact(clinic.clinic_id, command.user_id)
+        recipient = Recipient(user_id=command.user_id, address=contact.email)
+        activation = PendingNotification(
+            notification=StaffActivationNotification(
+                self._channel,
+                self._messages,
+                code=code.formatted(),
+                days=self._ttl.days,
+            ),
+            recipient=recipient,
+            is_demo=clinic.is_demo,
+        )
+        mfa_notice = PendingNotification(
+            notification=MfaResetNotification(self._channel, self._messages),
+            recipient=recipient,
+            is_demo=clinic.is_demo,
+        )
+        self._current.after_commit(activation.send)
+        self._current.after_commit(mfa_notice.send)

@@ -43,6 +43,9 @@ from insumap.domain.identity.errors import PermissionDeniedError
 from insumap.domain.identity.permissions import PermissionCode
 from insumap.domain.identity.roles import Role
 from insumap.domain.metrics.target_strategy import GlycemicTargetStrategyRegistry
+from insumap.infrastructure.ai.unconfigured_forecast import (
+    UnconfiguredGlucoseForecastAdapter,
+)
 from insumap.infrastructure.alerts_adapters import build_alerts_adapters
 from insumap.infrastructure.dashboard_adapters import build_dashboard_adapters
 from insumap.infrastructure.identity_adapters import build_engine
@@ -83,7 +86,10 @@ class Wiring:
         self.clock = SystemClock.instance()
         self.ids = Uuid7Generator(self.clock)
         self.monitoring = build_monitoring_adapters(
-            current=self.current, clock=self.clock, transactions=transactions
+            current=self.current,
+            clock=self.clock,
+            transactions=transactions,
+            forecasts=UnconfiguredGlucoseForecastAdapter(),
         )
         self.dashboard = build_dashboard_adapters(
             current=self.current, transactions=transactions

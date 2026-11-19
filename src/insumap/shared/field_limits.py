@@ -324,3 +324,39 @@ class FieldLimits:
 
     PUSH_KEY_PATTERN: ClassVar[str] = r"^[A-Za-z0-9_-]+$"
     """Subscription keys are base64url without padding (use fullmatch)."""
+
+    # Reportes (API.md 8.11).
+    REPORT_EVENTS_MAX: ClassVar[int] = 200
+    """Most timeline events a report lists; later events of the period are left out."""
+
+    # AI service (docs/Contrato-IA.md, 3.3 and 8).
+
+    AI_MAX_FORECAST_POINTS: ClassVar[int] = 2048
+    """Most glucose points sent to IA1 (``MAX_FORECAST_POINTS`` of the service)."""
+
+    AI_SUMMARY_MAX_LENGTH: ClassVar[int] = 500
+    """Longest ``explanation.summary`` the backend accepts from the service."""
+
+    AI_HASH_LENGTH: ClassVar[int] = 64
+    """SHA-256 in hexadecimal (``ai.*.input_hash`` is ``char(64)``)."""
+
+    # Recommendations (ai.recommendations.suggestion, a doctor's modified proposal).
+
+    INSULIN_UNITS_MAX: ClassVar[int] = 500
+    """Largest dose a doctor may write in a modified proposal, in units (technical)."""
+
+    # clinic.privacy_requests.description (varchar(500))
+    PRIVACY_REQUEST_DESCRIPTION_MAX_LENGTH: ClassVar[int] = 500
+
+    # Audit (audit.audit_log and audit.data_access_log, API.md 8.13).
+
+    AUDIT_ACTION_MAX_LENGTH: ClassVar[int] = 60
+    """Longest action name of ``audit.audit_log.action`` (``varchar(60)``)."""
+
+    AUDIT_ACTION_PATTERN: ClassVar[str] = r"^[A-Z][A-Z0-9_]*$"
+    """Action names are UPPER_SNAKE_CASE (``ck_audit_log_action``; use fullmatch)."""
+
+    # Messaging (M11).
+
+    MESSAGE_BODY_MAX_LENGTH: ClassVar[int] = 1000
+    """Longest message of a thread (``messaging.messages.body``)."""
