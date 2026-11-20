@@ -70,7 +70,7 @@ El entorno local no cambia: `~/Projects/insumap/dev/up.sh` (fuera de los repos) 
 | `AWS::IAM::Role` (host) | | SSM, lectura del secreto `insumap/app`, del parámetro `/insumap/web-origin` y de la imagen en ECR |
 | `AWS::ECR::Repository` | `insumap-api` | Imágenes de la API; conserva las 5 últimas |
 | `AWS::S3::Bucket` | `insumap-web-<cuenta>` | Build de la PWA; privado, solo CloudFront lo lee (OAC) |
-| `AWS::CloudFront::Distribution` | | `/*` a S3 con caché; `/api/*` y `/health` al host sin caché (`CachingDisabled`, `AllViewerExceptHostHeader`) |
+| `AWS::CloudFront::Distribution` | | `/*` a S3 con caché; `/api/*`, `/health`, `/docs` y `/openapi.json` al host sin caché (`CachingDisabled`, `AllViewerExceptHostHeader`) |
 | `AWS::CloudFront::Function` | `insumap-spa-rewrite` | Rutas sin extensión a `/index.html`, solo en el comportamiento de S3. Las respuestas de error personalizadas no sirven: afectan a toda la distribución y convertirían los 404 de la API en HTML |
 | `AWS::KMS::Key` + `AWS::SecretsManager::Secret` | `alias/insumap-secrets`, `insumap/app` | Secretos de la API (sección 5) |
 | `AWS::SSM::Parameter` | `/insumap/web-origin` | `https://<distribución>.cloudfront.net`, para `CORS_ORIGINS`, `ALLOWED_HOSTS` y los enlaces de correo |
@@ -86,7 +86,7 @@ El entorno local no cambia: `~/Projects/insumap/dev/up.sh` (fuera de los repos) 
 | `DATABASE_URL` | `postgresql://insumap_app:<secreto>@db:5432/insumap` |
 | `CORS_ORIGINS`, `WEB_APP_BASE_URL` | Valor de `/insumap/web-origin` |
 | `ALLOWED_HOSTS` | Host de CloudFront, `*.compute-1.amazonaws.com` (el Host que reenvía CloudFront), `localhost` y `127.0.0.1` |
-| `API_DOCS_ENABLED` | `false` |
+| `API_DOCS_ENABLED` | `true`: Swagger en `https://<distribución>/docs` para la demo (CloudFront enruta `/docs` y `/openapi.json` al host) |
 | `JWT_SECRET`, `MFA_ENCRYPTION_KEY`, `CODE_HMAC_KEY`, `APP_HMAC_KEY` | Del secreto `insumap/app` |
 | `FORWARDED_ALLOW_IPS` | `*`, en `infra/aws/host/compose.yaml` |
 
