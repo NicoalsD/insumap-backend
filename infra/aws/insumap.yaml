@@ -21,6 +21,14 @@ Parameters:
     Type: String
     Default: pl-3b927c52
     Description: Managed prefix list com.amazonaws.global.cloudfront.origin-facing (us-east-1)
+  BackendSubjectPrefix:
+    Type: String
+    Default: repo:NicoalsD@72249363/insumap-backend@1459370743
+    Description: OIDC sub prefix of the backend repo (GitHub immutable subject, owner@id/repo@id)
+  FrontendSubjectPrefix:
+    Type: String
+    Default: repo:NicoalsD@72249363/insumap-frontend@1459370877
+    Description: OIDC sub prefix of the frontend repo (GitHub immutable subject, owner@id/repo@id)
   CreateGitHubOidcProvider:
     Type: String
     Default: "true"
@@ -354,7 +362,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/insumap-backend:ref:refs/heads/${DeployBranch}"
+                token.actions.githubusercontent.com:sub: !Sub "${BackendSubjectPrefix}:ref:refs/heads/${DeployBranch}"
       Policies:
         - PolicyName: deploy-api
           PolicyDocument:
@@ -397,7 +405,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOwner}/insumap-frontend:ref:refs/heads/${DeployBranch}"
+                token.actions.githubusercontent.com:sub: !Sub "${FrontendSubjectPrefix}:ref:refs/heads/${DeployBranch}"
       Policies:
         - PolicyName: deploy-web
           PolicyDocument:
