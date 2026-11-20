@@ -33,11 +33,11 @@ La clínica demo (`clinic.clinics.is_demo = true`) se marca **"Datos simulados"*
 
 | Contenedor | Tecnología | Plataforma | Responsabilidad |
 |---|---|---|---|
-| PWA (`insumap-frontend`) | React 19, Vite, TypeScript, TanStack Query, Zod, Recharts | Vercel | PWA del paciente, dashboard del médico y consola del admin. |
-| API (`insumap-backend`) | Python 3.13, FastAPI, Pydantic v2, SQLAlchemy 2, psycopg 3 | Render (Docker) | Reglas de negocio, seguridad, auditoría, importación, alertas y orquestación de la IA. |
-| Scheduler (`insumap-backend`, proceso `scheduler`) | Python 3.13, APScheduler | Render: misma imagen con otro comando (worker o cron según la capa vigente; se decide en la Fase 12) | Recordatorios, evaluación y escalamiento de alertas, triage nocturno y vencimientos (sección 11). |
-| Base de datos (`insumap-database`) | PostgreSQL 18, Alembic standalone con SQL escrito a mano | Neon (en local, Docker Compose del repo de BD) | Fuente de verdad: 8 esquemas, RLS por clínica, triggers append-only y auditoría con cadena de hashes. |
-| Servicio de IA (`insumap-ai`) | Python 3.13, FastAPI, scikit-learn, Chronos-Bolt (CPU), SDK compatible con OpenAI | Render (Docker) | IA1 a IA7. Sin estado, sin acceso a la BD y protegido con token de servicio. |
+| PWA (`insumap-frontend`) | React 19, Vite, TypeScript, TanStack Query, Zod, Recharts | CloudFront + S3 | PWA del paciente, dashboard del médico y consola del admin. |
+| API (`insumap-backend`) | Python 3.13, FastAPI, Pydantic v2, SQLAlchemy 2, psycopg 3 | EC2 con Docker Compose | Reglas de negocio, seguridad, auditoría, importación, alertas y orquestación de la IA. |
+| Scheduler (`insumap-backend`, proceso `scheduler`) | Python 3.13, APScheduler | Mismo host EC2: misma imagen con otro comando, como servicio de Compose | Recordatorios, evaluación y escalamiento de alertas, triage nocturno y vencimientos (sección 11). |
+| Base de datos (`insumap-database`) | PostgreSQL 18, Alembic standalone con SQL escrito a mano | Contenedor en el host EC2 (en local, Docker Compose del repo de BD) | Fuente de verdad: 8 esquemas, RLS por clínica, triggers append-only y auditoría con cadena de hashes. |
+| Servicio de IA (`insumap-ai`) | Python 3.13, FastAPI, scikit-learn, Chronos-Bolt (CPU), SDK compatible con OpenAI | Por definir (otro servicio del host EC2 si cabe en memoria) | IA1 a IA7. Sin estado, sin acceso a la BD y protegido con token de servicio. |
 | Proveedor del LLM | API compatible con OpenAI (DeepSeek, Qwen vía OpenRouter o Gemini en capa gratuita; se elige en la Fase 10) | Externo | Texto generativo para IA5 e IA6. |
 | Correo y Web Push | SMTP y Web Push con VAPID | Externos | Canales de notificación (P07). |
 | Simulador (`insumap-simulator`) | Python 3.13, simglucose, Faker `es_CO` | Local | Clínica demo, modos `backfill` y `live`, datasets de entrenamiento para la IA. |
@@ -534,7 +534,7 @@ Un manejador global convierte `RequestValidationError` de FastAPI al formato can
 - **Logs JSON** a la salida estándar, con `logging` de la biblioteca estándar, `JsonLogFormatter` y `PhiRedactionFilter`. Campos: `timestamp`, `level`, `logger`, `message`, `request_id`, `user_id`, `clinic_id`, ruta (plantilla, no la URL con valores), `status`, `duration_ms` y, en el scheduler, `job`.
 - El `request_id` viaja en una `ContextVar` desde el middleware hasta los suscriptores de eventos, y se devuelve en `X-Request-Id`.
 - **Redacción de PHI.** `PhiRedactionFilter` reemplaza por `[REDACTED]` las claves de una lista de denegación (`password`, `token`, `authorization`, `cookie`, `activation_code`, `email`, `phone`, `document`, `name`, `mrn`, `note`, `message`, `value`) y los patrones de correo, documento y JWT en el texto. Nunca se registran cuerpos de petición, glucosas, notas, mensajes ni nombres. Solo identificadores (UUID).
-- **Salud.** `GET /health`, fuera de `/api/v1`, con un cuerpo mínimo y sin consultar la BD, para que la suspensión de Neon no marque el servicio como caído ([`.agents/deployment.md`](../.agents/deployment.md), sección 4.3). Un chequeo de dependencias (BD e IA) para RNF-18 queda por definir.
+- **Salud.** `GET /health`, fuera de `/api/v1`, con un cuerpo mínimo y sin consultar la BD, para que una base lenta no marque el servicio como caído ([`.agents/deployment.md`](../.agents/deployment.md), sección 4.3). Un chequeo de dependencias (BD e IA) para RNF-18 queda por definir.
 - **Auditoría** (no son logs): `audit.audit_log` (append-only con cadena de hashes) para comandos, cambios de seguridad y administración; `audit.data_access_log` para cada lectura de datos clínicos.
 - Métricas y trazas distribuidas (OpenTelemetry): por definir, fuera del MVP.
 
@@ -554,16 +554,19 @@ Un manejador global convierte `RequestValidationError` de FastAPI al formato can
 
 ## 17. Despliegue
 
-![Despliegue de Insumap](images/despliegue.png)
+Todo corre en AWS (us-east-1), en una sola stack de CloudFormation (`infra/aws/insumap.yaml`).
 
 | Componente | Plataforma | Notas |
 |---|---|---|
-| PWA | Vercel | Producción desde `main` y vistas previas por PR. |
-| API | Render (servicio web con Docker) | Health check en `/health`. |
-| Scheduler | Render (misma imagen, otro comando) | Disparador único (`SCHEDULER_ENABLED=true`). Worker, API de instancia única o cron según la capa vigente (verificar). |
-| PostgreSQL 18 | Neon (proyecto nuevo) | TLS `verify-full`. Rama de producción y rama de desarrollo. |
-| Servicio de IA | Render (Docker, CPU) | Modo offline determinista para la CI y la demo local. |
+| PWA | S3 privado detrás de CloudFront | Mismo origen que la API; una CloudFront Function sirve `index.html` en los enlaces profundos. Se publica desde `develop` con GitHub Actions. |
+| API | EC2 `t3.small` con Docker Compose, imagen en ECR | CloudFront envía `/api/*` y `/health` al puerto 80, abierto solo a CloudFront. Despliegue por SSM Run Command. |
+| Scheduler | Mismo host, otro servicio de Compose (cuando exista) | Disparador único (`SCHEDULER_ENABLED=true`). |
+| PostgreSQL 18 | Contenedor en el mismo host, volumen en EBS cifrado | Sin puerto publicado. Migraciones de `insumap-database` en cada despliegue. |
+| Secretos | Secrets Manager con llave KMS propia | Solo el rol del host los lee. |
+| Servicio de IA | No se despliega todavía | Sin `AI_SERVICE_URL`, la API usa el respaldo por reglas. |
 | Simulador | Local | No se despliega. |
+
+El diagrama `images/despliegue.png` todavía muestra el plan anterior (Render, Vercel y Neon) y queda por actualizar.
 
 Configuración y pasos en [`.agents/deployment.md`](../.agents/deployment.md). Tecnologías y versiones en [Stack tecnológico](Stack-tecnologico.md).
 

@@ -71,3 +71,58 @@ jobs:
 
       - name: Pruebas unitarias, de API y de integración con cobertura
         run: uv run pytest
+
+  # Despliegue en AWS (.agents/deployment.md): solo tras un push a develop con la
+  # calidad en verde. La imagen va a ECR y el host la aplica por SSM Run Command.
+  deploy:
+    name: despliegue en AWS
+    needs: quality
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: deploy-aws
+      cancel-in-progress: false
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      IMAGE: ${{ vars.ECR_REPOSITORY_URI }}:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Credenciales temporales de AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Construye y publica la imagen en ECR
+        run: |
+          aws ecr get-login-password | docker login --username AWS --password-stdin "${IMAGE%%/*}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Aplica la imagen en el host (SSM)
+        env:
+          INSTANCE_ID: ${{ vars.AWS_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          SCRIPT="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/infra/aws/host/deploy.sh"
+          PARAMS=$(jq -cn --arg s "$SCRIPT" --arg i "$IMAGE" --arg c "$GITHUB_SHA" \
+            '{commands: ["set -euo pipefail", "curl -fsSL \($s) -o /tmp/insumap-deploy.sh", "bash /tmp/insumap-deploy.sh \($i) \($c)"], executionTimeout: ["1200"]}')
+          CMD=$(aws ssm send-command --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript --comment "insumap ${GITHUB_SHA::7}" \
+            --parameters "$PARAMS" --query Command.CommandId --output text)
+          echo "Comando SSM $CMD"
+          for _ in $(seq 1 120); do
+            sleep 10
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Pending|InProgress|Delayed) continue ;; esac
+            break
+          done
+          aws ssm get-command-invocation --command-id "$CMD" --instance-id "$INSTANCE_ID" \
+            --query '[StandardOutputContent, StandardErrorContent]' --output text | tail -n 60
+          test "$STATUS" = Success

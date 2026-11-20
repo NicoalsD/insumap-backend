@@ -109,7 +109,7 @@ El MVP son las fases 1 a 9 del plan más el modo `backfill` del simulador (ver [
 
 - IA generativa con guardrails: resumen previo a la consulta (IA5) y asistente educativo del paciente (IA6), con evaluación de la IA.
 - Mensajería paciente-equipo y controles programados (M11), consola de auditoría, derechos del titular y modo `live` del simulador.
-- Endurecimiento, despliegue (Render, Vercel, Neon) y versión `v1.0.0`.
+- Endurecimiento, despliegue (AWS: CloudFront, S3 y EC2) y versión `v1.0.0`.
 
 ### 6.3 Fuera de alcance
 

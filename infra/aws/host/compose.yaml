@@ -1,0 +1,34 @@
+# Insumap en el host EC2 (ver .agents/deployment.md). Lo usa deploy.sh; los
+# archivos .env los escribe deploy.sh desde Secrets Manager y nunca se versionan.
+name: insumap
+
+services:
+  db:
+    image: postgres:18-alpine
+    env_file: /opt/insumap/env/db.env
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d insumap"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    shm_size: 128mb
+
+  api:
+    image: ${API_IMAGE:?API_IMAGE es obligatoria}
+    env_file: /opt/insumap/env/api.env
+    environment:
+      # CloudFront es el único origen que llega al puerto 80 (grupo de seguridad);
+      # así uvicorn toma la IP real del usuario de X-Forwarded-For.
+      FORWARDED_ALLOW_IPS: "*"
+    ports:
+      - "80:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:
