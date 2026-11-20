@@ -37,14 +37,14 @@ jobs:
       INSUMAP_TEST_DATABASE_URL: postgresql://insumap:insumap@localhost:5432/insumap
       INSUMAP_DATABASE_REPO_PATH: ${{ github.workspace }}/.insumap-database
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Lee la etiqueta del esquema fijada en db-schema.lock
         id: schema
         run: echo "tag=$(tr -d '[:space:]' < db-schema.lock)" >> "$GITHUB_OUTPUT"
 
       - name: Descarga insumap-database en la etiqueta fijada
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: NicoalsD/insumap-database
           ref: ${{ steps.schema.outputs.tag }}
@@ -90,7 +90,7 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       IMAGE: ${{ vars.ECR_REPOSITORY_URI }}:${{ github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Credenciales temporales de AWS (OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
